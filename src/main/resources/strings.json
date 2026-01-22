@@ -1,0 +1,227 @@
+{
+  "state": {
+    "class": {
+      "value": "Value",
+      "internal_temp": "Internal Temperature",
+      "flow": "Flow",
+      "gas_pressure": "Gas Pressure",
+      "gas_temperature": "Gas Temperature",
+      "chamber_temperature": "Chamber Temperature",
+      "bench_temperature": "Bench Temperature",
+      "sample_pressure": "Sample Pressure",
+      "oven_temperature": "Oven Temperature",
+      "pump_pressure": "Pump Pressure",
+      "box_temperature": "Box Temperature",
+      "system_state": "System State",
+      "load": "Load",
+      "voltage": "Voltage",
+      "line_voltage": "Line Voltage",
+      "current": "Current",
+      "power": "Power",
+      "reactive_power": "Reactive Power",
+      "apparent_power": "Apparent Power",
+      "power_factor": "Power Factor",
+      "frequency": "Frequency",
+      "temperature": "Temperature",
+      "humidity": "Humidity",
+      "pressure": "Pressure",
+      "wind_speed": "Wind Speed",
+      "wind_direction": "Wind Direction",
+      "rainfall": "Rainfall",
+      "illuminance": "Illuminance",
+      "solar": "Solar",
+      "direction": "Direction",
+      "vibration": "Vibration",
+      "percentage": "Percentage",
+      "address": "Address",
+      "time": "Time",
+      "weight": "Weight",
+      "text": "Text",
+      "command": "Command",
+      "other_gas_concentration": "Other Gas Concentration",
+      "so2_std_gas_concentration": "SO2 Standard Gas Concentration",
+      "no_std_gas_concentration": "NO Standard Gas Concentration",
+      "co_std_gas_concentration": "CO Standard Gas Concentration",
+      "calibrator_gas_select": "Calibrator Gas Selection",
+      "o3_gas_concentration": "O3 Gas Concentration",
+      "general_alarm": "General Alarm",
+      "maintenance": "Maintenance",
+      "warm_up": "Warm Up",
+      "leak_status": "Leak Status",
+      "sampling_status": "Sampling Status",
+      "status": "Status",
+      "power_status": "Power Status",
+      "alarm_status": "Alarm Status",
+      "commands": "Commands",
+      "control": "Control",
+      "dispatch_command": "Dispatch Command",
+      "mode": "Mode",
+      "alarm_limit": "Alarm Limit",
+      "distance": "Distance",
+      "choose": "Choose",
+      "unknown": "Unknown",
+      "pm": "PM",
+      "no": "NO",
+      "nox": "NOX",
+      "co": "CO",
+      "o3": "O3",
+      "o2": "O2"
+    },
+    "status": {
+      "normal": "Normal",
+      "alarm": "Alarm",
+      "insufficient": "Insufficient",
+      "maintenance": "Maintenance",
+      "malfunction": "Malfunction",
+      "waiting": "Waiting",
+      "calibration": "Calibration",
+      "abnormal_change": "Abnormal Change",
+      "no_change": "No Change",
+      "over_upper_limit": "Over Upper Limit",
+      "under_lower_limit": "Under Lower Limit",
+      "zero_check": "Zero Check",
+      "span_check": "Span Check",
+      "accuracy_check": "Accuracy Check",
+      "zero_calibration": "Zero Calibration",
+      "span_calibration": "Span Calibration",
+      "flow_check": "Flow Check",
+      "quality_check": "Quality Check",
+      "zero_drift": "Zero Drift",
+      "span_drift": "Span Drift",
+      "span_reproducibility": "Span Reproducibility",
+      "multi_point_span": "Multi Point Span",
+      "precision_check": "Precision Check",
+      "other": "Other",
+      "empty": "Not Set"
+    },
+    "unit": {
+      "temperature": {
+        "celsius": "°C"
+      },
+      "current": {
+        "milliampere": "mA",
+        "ampere": "A"
+      },
+      "speed": {
+        "millimeter_per_second": "mm/s",
+        "meter_per_second": "m/s",
+        "kilometer_per_hour": "km/h",
+        "knot": "knot",
+        "mile_per_hour": "mph",
+        "foot_per_second": "ft/s"
+      },
+      "pressure": {
+        "pa": "Pa",
+        "hpa": "hPa",
+        "kpa": "kPa",
+        "mpa": "MPa",
+        "atm": "Atm"
+      },
+      "airmass": {
+        "ugm3": "ug/m3",
+        "mgm3": "mg/m3"
+      },
+      "airvolume": {
+        "ppb": "ppb",
+        "ppm": "ppm",
+        "umol_per_mol": "μmol/mol",
+        "nmol_per_mol": "nmol/mol"
+      },
+      "weight": {
+        "ug": "μg",
+        "mg": "mg",
+        "g": "g",
+        "kg": "kg",
+        "t": "t"
+      },
+      "distance": {
+        "mm": "mm",
+        "cm": "cm",
+        "m": "m",
+        "km": "km"
+      },
+      "voltage": {
+        "millivolt": "mV",
+        "volt": "V",
+        "hertz": "Hz"
+      },
+      "power": {
+        "milliwatt": "mW",
+        "watt": "W",
+        "kilowatt": "kW",
+        "megawatt": "MW",
+        "gigawatt": "GW",
+        "volt_ampere": "VA"
+      },
+      "frequency": {
+        "hertz": "Hz",
+        "kilohertz": "kHz",
+        "megahertz": "MHz",
+        "gigahertz": "GHz"
+      },
+      "literflow": {
+        "l_per_second": "L/s",
+        "ml_per_minute": "ml/min",
+        "l_per_minute": "L/min",
+        "l_per_hour": "L/h"
+      },
+      "ratio": {
+        "percent": "%",
+        "per_mille": "‰"
+      },
+      "rotation_speed": {
+        "rpm": "rpm",
+        "krpm": "krpm"
+      },
+      "time_delta": {
+        "millisecond": "ms",
+        "second": "s",
+        "minute": "min",
+        "hour": "h"
+      }
+    }
+  },
+  "error": {
+    "invalid_unit_conversion": "Invalid unit conversion",
+    "not_implemented": "Not implemented",
+    "integration_cannot_be_null": "Integration cannot be null",
+    "task_cannot_be_null": "Task cannot be null",
+    "combine_attribute_value_not_changeable": "Combine attribute value is not changeable",
+    "failed_to_update_state": "Failed to update state"
+  },
+  "device": {
+    "type": {
+      "air.monitor.pm": "PM Monitor",
+      "air.monitor.pm.qc": "PM Quality Control",
+      "air.monitor.so2": "SO2 Monitor",
+      "air.monitor.no2": "NO2 Monitor",
+      "air.monitor.co": "CO Monitor",
+      "air.monitor.o3": "O3 Monitor",
+      "air.monitor.calibrator": "Air Monitor Calibrator",
+      "air.monitor.qc": "Quality Control Monitor",
+      "air.conditioner": "Air Conditioner",
+      "weather.sensor": "Weather Sensor",
+      "power.supply.stabilizer": "Power Supply Stabilizer",
+      "power.sensor": "Power Sensor",
+      "power.ups": "UPS",
+      "sample.tube": "Sample Tube",
+      "io.dam": "IO DAM",
+      "air.quality.detector": "Air Quality Detector",
+      "default.sensor": "Default Sensor"
+    },
+    "status": {
+      "standby": "Standby",
+      "normal": "Normal",
+      "zero_calibration": "Zero Calibration",
+      "zero": "Zero Gas",
+      "span_calibration": "Span Calibration",
+      "span": "Span Gas",
+      "measure": "Measure",
+      "calibration": "Calibration",
+      "diagnostic": "Diagnostic",
+      "recovery": "Recovery",
+      "warm_up": "Warm Up",
+      "unknown": "Unknown"
+    }
+  }
+}

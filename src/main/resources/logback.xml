@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- 注册自定义转换器，跳过 Log.java 包装器显示真实调用位置 -->
+    <conversionRule conversionWord="callerEx" converterClass="com.ecat.core.Utils.CallerDataConverter" />
+
+    <!-- 日志输出格式 -->
+    <property name="log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%callerEx] - %msg%n" />
+
+    <!-- 日志存放路径 项目根目录/logs -->
+    <property name="log.path" value="logs" />
+
+    <!-- 单个日志文件最大大小 -->
+    <property name="max.file.size" value="50MB" />
+    <!-- 总日志体积上限 -->
+    <property name="total.size.cap" value="5GB" />
+
+    <!-- 控制台输出 -->
+    <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${log.pattern}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 文件输出 - 所有日志 -->
+    <appender name="file_all" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${log.path}/ecat-all.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${log.path}/ecat-all.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>${max.file.size}</maxFileSize>
+            <totalSizeCap>${total.size.cap}</totalSizeCap>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${log.pattern}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 文件输出 - DEBUG日志 -->
+    <appender name="file_debug" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${log.path}/ecat-debug.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${log.path}/ecat-debug.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>${max.file.size}</maxFileSize>
+            <totalSizeCap>${total.size.cap}</totalSizeCap>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${log.pattern}</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>DEBUG</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+    </appender>
+
+    <!-- 文件输出 - ERROR日志 -->
+    <appender name="file_error" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${log.path}/ecat-error.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${log.path}/ecat-error.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>${max.file.size}</maxFileSize>
+            <totalSizeCap>${total.size.cap}</totalSizeCap>
+            <maxHistory>60</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${log.pattern}</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>ERROR</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+    </appender>
+
+    <!-- 日志级别控制 -->
+    <!-- 启用 ecat 核心和集成的 debug 日志 -->
+    <logger name="com.ecat" level="debug" additivity="false">
+        <appender-ref ref="console" />
+        <appender-ref ref="file_all" />
+        <appender-ref ref="file_debug" />
+        <appender-ref ref="file_error" />
+    </logger>
+
+    <!-- ruoyi 框架日志级别 -->
+    <logger name="com.ruoyi" level="info" />
+    <logger name="org.springframework" level="warn" />
+
+    <!-- 根日志级别 -->
+    <root level="info">
+        <appender-ref ref="console" />
+        <appender-ref ref="file_all" />
+        <appender-ref ref="file_error" />
+    </root>
+</configuration>

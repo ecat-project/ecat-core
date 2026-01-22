@@ -1,0 +1,8 @@
+integrations: {} # core核心需要默认加载的基础集成信息，暂时没有
+    # EcatRuoyiIntegration:
+    #     enabled: false
+    #     className: com.ecat.integration.EcatRuoyiIntegration.EcatRuoyiIntegration
+    #     groupId: com.ecat
+    #     artifactId: integration-ecat-ruoyi
+    #     version: 1.0.0
+

@@ -1,0 +1,319 @@
+package com.ecat.core.Integration;
+
+import com.ecat.core.EcatCore;
+import com.ecat.core.State.AttributeStatus;
+import com.ecat.core.State.StateManager;
+import com.ecat.core.Utils.Log;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.Yaml;
+
+import java.io.*;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * IntegrationManagerTest is a unit test class for testing the IntegrationManager functionality.
+ * 
+ * @author coffee
+ */
+public class IntegrationManagerTest {
+
+    @Mock
+    private EcatCore core;
+    @Mock
+    private IntegrationRegistry integrationRegistry;
+    @Mock
+    private StateManager stateManager;
+    @Mock
+    private Log log;
+    @Mock
+    private URLClassLoader restartClassLoader;
+    
+    @InjectMocks
+    private IntegrationManager integrationManager;
+    
+    private AutoCloseable mockitoCloseable;
+    private File testConfigDir;
+    private String testIntegrationName = "unitTest";
+    private String testConfigPath;
+    
+    @Before
+    public void setUp() throws Exception {
+        // 初始化Mockito
+        mockitoCloseable = MockitoAnnotations.openMocks(this);
+        
+        // 创建测试目录和文件
+        testConfigDir = new File("target",".ecat-test");
+        testConfigPath = testConfigDir.getAbsolutePath() + "/integrations/" + testIntegrationName + ".yml";
+        new File(testConfigDir + "/integrations").mkdirs();
+        
+        // 设置类加载器模拟
+        when(restartClassLoader.getURLs()).thenReturn(new URL[0]);
+        
+        // 初始化IntegrationManager
+        integrationManager = new IntegrationManager(core, integrationRegistry, stateManager);
+        setPrivateField(integrationManager, "INTEGRATION_ITEM_PATH", testConfigDir + "/integrations/%s.yml");
+    }
+    
+    @After
+    public void tearDown() throws Exception {
+        // 清理模拟
+        mockitoCloseable.close();
+        
+        // 清理测试文件
+        deleteRecursively(testConfigDir);
+    }
+
+    // 反射辅助方法
+    private void setPrivateField(Object target, String fieldName, Object value) throws Exception {
+        Field field = findField(target.getClass(), fieldName);
+        field.setAccessible(true);
+
+        // // 获取字段的修饰符
+        // Field modifiersField = Field.class.getDeclaredField("modifiers");
+        // modifiersField.setAccessible(true);
+        // // 移除final修饰符
+        // modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+
+        field.set(target, value);
+    }
+    
+    private Object getPrivateField(Object target, String fieldName) throws Exception {
+        Field field = findField(target.getClass(), fieldName);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+    
+    private Field findField(Class<?> clazz, String fieldName) throws NoSuchFieldException {
+        try {
+            return clazz.getDeclaredField(fieldName);
+        } catch (NoSuchFieldException e) {
+            Class<?> superClass = clazz.getSuperclass();
+            if (superClass == null) {
+                throw e;
+            }
+            return findField(superClass, fieldName);
+        }
+    }
+    
+    private Object invokePrivateMethod(Object target, String methodName, Object... args) throws Exception {
+        Class<?>[] parameterTypes = new Class[args.length];
+        for (int i = 0; i < args.length; i++) {
+            if (args[i] instanceof Short) {
+                parameterTypes[i] = short.class;
+            } else if (args[i] instanceof Integer) {
+                parameterTypes[i] = int.class;
+            } else if (args[i] instanceof AttributeStatus) {
+                parameterTypes[i] = AttributeStatus.class;
+            } else {
+                parameterTypes[i] = args[i].getClass();
+            }
+        }
+        
+        Method method = findMethod(target.getClass(), methodName, parameterTypes);
+        method.setAccessible(true);
+        return method.invoke(target, args);
+    }
+    
+    private Method findMethod(Class<?> clazz, String methodName, Class<?>... parameterTypes) throws NoSuchMethodException {
+        try {
+            return clazz.getDeclaredMethod(methodName, parameterTypes);
+        } catch (NoSuchMethodException e) {
+            Class<?> superClass = clazz.getSuperclass();
+            if (superClass == null) {
+                throw e;
+            }
+            return findMethod(superClass, methodName, parameterTypes);
+        }
+    }
+    
+    // 递归删除目录及文件
+    private void deleteRecursively(File file) {
+        if (file.isDirectory()) {
+            for (File child : file.listFiles()) {
+                deleteRecursively(child);
+            }
+        }
+        file.delete();
+    }
+    
+    // 测试loadConfig方法
+    @Test
+    public void testLoadConfig() throws IOException {
+        // 创建测试配置文件
+        Map<String, Object> testConfig = new HashMap<>();
+        testConfig.put("key1", "value1");
+        testConfig.put("nested", new HashMap<String, Object>() {{
+            put("key2", 123);
+        }});
+        
+        writeYamlToFile(testConfigPath, testConfig);
+        
+        // 调用loadConfig
+        Map<String, Object> loadedConfig = integrationManager.loadConfig(testIntegrationName);
+        
+        // 验证加载结果
+        assertNotNull(loadedConfig);
+        assertEquals("value1", loadedConfig.get("key1"));
+        Map nestedMap = (Map) loadedConfig.get("nested");
+        assertNotNull(nestedMap);
+        assertEquals(123, nestedMap.get("key2"));
+
+    }
+    
+    // 测试loadConfig失败情况
+    @Test
+    public void testLoadConfig_Failure() {
+        // 调用不存在的配置文件
+        Map<String, Object> loadedConfig = integrationManager.loadConfig("nonExistent");
+        
+        // 验证返回空Map
+        assertNotNull(loadedConfig);
+        assertTrue(loadedConfig.isEmpty());
+        
+    }
+    
+    // 测试saveConfig方法
+    @Test
+    public void testSaveConfig() throws IOException {
+        // 准备测试数据
+        Map<String, Object> testConfig = new HashMap<>();
+        testConfig.put("key1", "value1");
+        testConfig.put("number", 42);
+        testConfig.put("keyC", "中文测试");
+        
+        // 调用saveConfig
+        integrationManager.saveConfig(testIntegrationName, testConfig);
+        
+        // 验证文件存在
+        File configFile = new File(testConfigPath);
+        assertTrue(configFile.exists());
+        
+        // 验证文件内容
+        Map<String, Object> savedConfig = readYamlFromFile(testConfigPath);
+        assertNotNull(savedConfig);
+        assertEquals("value1", savedConfig.get("key1"));
+        assertEquals(42, savedConfig.get("number"));
+        assertEquals("中文测试", savedConfig.get("keyC"));
+        
+        // 验证自动添加了update时间
+        assertNotNull(savedConfig.get("update"));
+        assertTrue(savedConfig.get("update") instanceof Date);
+    }
+    
+    // 测试setProperty方法
+    @Test
+    public void testSetProperty() {
+        // 准备测试Map
+        Map<String, Object> config = new HashMap<>();
+        config.put("existingKey", "oldValue");
+        
+        // 添加新属性
+        integrationManager.setProperty(config, "newKey", "newValue");
+        assertEquals("newValue", config.get("newKey"));
+        
+        // 修改现有属性
+        integrationManager.setProperty(config, "existingKey", "newValue");
+        assertEquals("newValue", config.get("existingKey"));
+        
+        // 测试嵌套属性
+        Map nested = new HashMap<>();
+        config.put("nested", nested);
+        integrationManager.setProperty(config, "nested.deepKey", "deepValue");
+        assertEquals("deepValue", ((Map) config.get("nested")).get("deepKey"));
+    }
+    
+    // 测试removeProperty方法 - 单级路径
+    @Test
+    public void testRemoveProperty_SingleLevel() {
+        // 准备测试Map
+        Map<String, Object> config = new HashMap<>();
+        config.put("key1", "value1");
+        config.put("key2", "value2");
+        
+        // 删除存在的键
+        boolean removed = integrationManager.removeProperty(config, "key1");
+        assertTrue(removed);
+        assertNull(config.get("key1"));
+        
+        // 删除不存在的键
+        removed = integrationManager.removeProperty(config, "key3");
+        assertTrue(removed);
+        assertNull(config.get("key3"));
+    }
+    
+    // 测试removeProperty方法 - 嵌套路径
+    @Test
+    public void testRemoveProperty_NestedPath() {
+        // 准备测试Map
+        Map<String, Object> config = new HashMap<>();
+        Map<String, Object> level1 = new HashMap<>();
+        Map<String, Object> level2 = new HashMap<>();
+        List<String> list = Arrays.asList("item1", "item2");
+        level2.put("keyToRemove", "value");
+        level1.put("level2", level2);
+        config.put("level1", level1);
+        config.put("list1", list);
+        
+        // 删除嵌套键
+        boolean removed = integrationManager.removeProperty(config, "level1.level2.keyToRemove");
+        assertTrue(removed);
+        assertNull(((Map)((Map)config.get("level1")).get("level2")).get("keyToRemove"));
+        
+        // 删除不存在的嵌套键
+        removed = integrationManager.removeProperty(config, "level1.level2.nonexistent");
+        assertTrue(removed);
+
+        // 验证删除不是map的key path
+        removed = integrationManager.removeProperty(config, "list1.level2.nonexistent");
+        assertFalse(removed);
+    }
+    
+    // 测试removeProperty方法 - 路径中节点非Map
+    @Test
+    public void testRemoveProperty_NodeNotMap() {
+        // 准备测试Map - 中间节点不是Map
+        Map<String, Object> config = new HashMap<>();
+        config.put("level1", "notAMap");
+        
+        // 尝试删除非map嵌套键
+        boolean removed = integrationManager.removeProperty(config, "level1.level2.key");
+        assertFalse(removed);
+    }
+    
+    // 辅助方法：从YAML文件读取Map
+    private Map<String, Object> readYamlFromFile(String filePath) throws IOException {
+        Yaml yaml = new Yaml();
+        try (FileInputStream fis = new FileInputStream(filePath)) {
+            return yaml.load(fis);
+        }
+    }
+
+    // 辅助方法：将Map写入YAML文件（使用标准格式）
+    private void writeYamlToFile(String filePath, Map<String, Object> data) throws IOException {
+        // 配置YAML输出格式为块格式（标准缩进）
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        options.setPrettyFlow(true);
+        
+        Yaml yaml = new Yaml(options);
+        try (FileWriter writer = new FileWriter(filePath)) {
+            yaml.dump(data, writer);
+        }
+    }
+}
