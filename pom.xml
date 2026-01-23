@@ -11,7 +11,7 @@
   <groupId>com.ecat</groupId>
   <artifactId>ecat-core</artifactId>
   <version>1.0.0</version>
-  <name>ecat-core</name>
+  <name>ECAT Core</name>
   <packaging>jar</packaging>
   <url>http://maven.apache.org</url>
   <dependencies>
@@ -64,9 +64,10 @@
       <scope>provided</scope>
     </dependency> -->
   </dependencies>
-  <modules>
 
+  <modules>
   </modules>
+
   <build>
     <plugins>
       <plugin>
@@ -110,4 +111,21 @@
       </plugin>
     </plugins>
   </build>
+
+  <!-- 项目许可证声明 -->
+  <licenses>
+      <license>
+          <name>Apache License, Version 2.0</name>
+          <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+          <distribution>repo</distribution>
+          <comments>ECAT Core is licensed under Apache 2.0</comments>
+      </license>
+  </licenses>
+
+  <!-- 项目信息（关联仓库） -->
+  <scm>
+      <url>https://github.com/ecat-project/ecat-core</url>
+      <connection>scm:git:https://github.com/ecat-project/ecat-core.git</connection>
+      <developerConnection>scm:git:git@github.com:ecat-project/ecat-core.git</developerConnection>
+  </scm>
 </project>

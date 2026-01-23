@@ -1,15 +1,20 @@
+/*
+ * Copyright (c) 2026 ECAT Team
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.ecat.core;
-
-// import java.lang.reflect.InvocationTargetException;
-// import java.lang.reflect.Method;
-
-// import org.springframework.beans.factory.support.AbstractBeanDefinition;
-// import org.springframework.beans.factory.support.BeanDefinitionBuilder;
-// import org.springframework.beans.factory.support.DefaultListableBeanFactory;
-// import org.springframework.beans.factory.annotation.Autowired;
-// import org.springframework.context.ApplicationContext;
-// import org.springframework.stereotype.Component;
-// import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import com.ecat.core.Bus.BusRegistry;
 import com.ecat.core.Device.DeviceRegistry;
@@ -22,7 +27,12 @@ import com.ecat.core.Task.TaskManager;
 
 import lombok.Getter;
 
-// @Component
+/**
+ * Class for ecat core main 
+ * 
+ * @author coffee
+ * 
+ */
 public class EcatCore {
     private static EcatCore instance;
     
@@ -33,9 +43,6 @@ public class EcatCore {
     public static void setInstance(EcatCore core) {
         instance = core;
     }
-
-    // @Autowired
-    // private RequestMappingHandlerMapping requestMappingHandlerMapping;
     
     private IntegrationRegistry integrationRegistry;
     private BusRegistry busRegistry;
@@ -102,78 +109,6 @@ public class EcatCore {
         deviceRegistry = new DeviceRegistry();
         i18nRegistry = I18nRegistry.getInstance();
     }
-
-    // public ApplicationContext getApplicationContext() {
-    //     return applicationContext;
-    // }
-
-    // public <T> T getSpringBean(String name, Class<T> requiredType) {
-    //     return applicationContext.getBean(name, requiredType);
-    // }
-    // public <T> T getSpringBean(Class<T> requiredType) {
-    //     return applicationContext.getBean(requiredType);
-    // }
-
-    // public boolean checkSpringBean(String beanName) {
-    //     return applicationContext.containsBean(beanName);
-    // }
-
-    // public void registeRestController(String beanName, Object restController) {
-    //     if(checkSpringBean(beanName)) {
-    //         throw new RuntimeException("Bean name already exists: " + beanName);
-    //     }
-    //     DefaultListableBeanFactory beanFactory = (DefaultListableBeanFactory) applicationContext.getAutowireCapableBeanFactory();
-    //     // 2.2交给spring管理
-    //     BeanDefinitionBuilder builder = BeanDefinitionBuilder.genericBeanDefinition(beanName);
-    //     AbstractBeanDefinition beanDefinition = builder.getBeanDefinition();
-    //     // 2.3注册到spring的beanFactory中
-    //     beanFactory.registerBeanDefinition(beanName, beanDefinition);
-    //     // 2.4允许注入和反向注入
-    //     beanFactory.autowireBean(restController);
-    //     beanFactory.initializeBean(restController, beanName);
-    //     // 2.5手动构建实例，并注入base service 防止卸载之后不再生成
-    //     // Object obj = clazz.newInstance();
-    //     beanFactory.registerSingleton(beanName, restController);
-
-    //     _registeRestController("Controller", beanName);
-
-    //     // applicationContext.getAutowireCapableBeanFactory().autowireBean(restController);
-    //     // applicationContext.getAutowireCapableBeanFactory().initializeBean(restController, beanName);
-
-    //     // // 手动注册 RequestMapping
-    //     // requestMappingHandlerMapping = applicationContext.getBean(RequestMappingHandlerMapping.class);
-    //     // requestMappingHandlerMapping.detectHandlerMethods(restController);
-    // }
-
-    // /**
-    //  * 处理类
-    //  * @param type 类型标识
-    //  * @param name bean名称
-    //  */
-    // private  void _registeRestController(String type ,String name){
-    //     //这里只做了contrller类型标识的处理
-    //     if(type.equals("Controller")){
-    //         // RequestMappingHandlerMapping handlerMapping = getSpringBean(RequestMappingHandlerMapping.class);
-    //         RequestMappingHandlerMapping handlerMapping = applicationContext.getBean(RequestMappingHandlerMapping.class);
-    //         // 注册Controller
-    //         Method method = null;
-    //         try {
-    //             method = handlerMapping.getClass().getSuperclass().getSuperclass().
-    //                     getDeclaredMethod("detectHandlerMethods", Object.class);
-    //         } catch (NoSuchMethodException e) {
-    //             e.printStackTrace();
-    //         }
-    //         // 将private改为可使用
-    //         assert method != null;
-    //         method.setAccessible(true);
-    //         try {
-    //             method.invoke(handlerMapping, name);
-    //         } catch (IllegalAccessException | InvocationTargetException e) {
-    //             e.printStackTrace();
-    //         }
-    //     }
-
-    // }
 
     public static void main(String[] args) {
         // 这里可以添加一些初始化逻辑
