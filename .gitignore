@@ -54,7 +54,7 @@ package-lock.json
 **/.env.*
 .ecat-data/
 ruoyi-ui-test/
-ruoyi-ui-v3/
+
 node_modules/
 .claude/
 .playwright-mcp/
