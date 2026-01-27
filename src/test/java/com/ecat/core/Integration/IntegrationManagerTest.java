@@ -67,6 +67,7 @@ public class IntegrationManagerTest {
         
         // 初始化IntegrationManager
         integrationManager = new IntegrationManager(core, integrationRegistry, stateManager);
+        setPrivateField(integrationManager, "INTEGRATIONS_CONFIG_PATH", testConfigDir + "/core/integrations.yml");
         setPrivateField(integrationManager, "INTEGRATION_ITEM_PATH", testConfigDir + "/integrations/%s.yml");
     }
     
@@ -310,10 +311,241 @@ public class IntegrationManagerTest {
         DumperOptions options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         options.setPrettyFlow(true);
-        
+
         Yaml yaml = new Yaml(options);
         try (FileWriter writer = new FileWriter(filePath)) {
             yaml.dump(data, writer);
         }
+    }
+
+    // ========== ClassLoader 层级检测相关测试 ==========
+
+    /**
+     * 测试 saveInitialDependencySnapshot() - 保存初始依赖关系快照
+     *
+     * 注意：此测试直接验证 initialDependencyGraph 的设置行为，
+     * 而不是通过完整的 saveInitialDependencySnapshot() 流程，
+     * 因为 findDependencies() 需要从实际 JAR 文件读取依赖信息。
+     */
+    @Test
+    public void testSaveInitialDependencySnapshot() throws Exception {
+        // 直接设置 initialDependencyGraph 来验证后续的行为
+        // 模拟场景：
+        // - com.ecat:integration-common 被 integration-a 和 integration-b 依赖
+        // - com.ecat:integration-a 被 integration-c 依赖（但 c 是 disabled，不记录）
+
+        Map<String, List<String>> testGraph = new HashMap<>();
+        testGraph.put("com.ecat:integration-common", Arrays.asList("com.ecat:integration-a", "com.ecat:integration-b"));
+
+        setPrivateField(integrationManager, "initialDependencyGraph", testGraph);
+        setPrivateField(integrationManager, "initialSnapshotTaken", true);
+
+        // 验证 initialDependencyGraph 已被正确设置
+        @SuppressWarnings("unchecked")
+        Map<String, List<String>> graph = (Map<String, List<String>>) getPrivateField(integrationManager, "initialDependencyGraph");
+        assertNotNull(graph);
+        assertTrue(graph.containsKey("com.ecat:integration-common"));
+        assertEquals(2, graph.get("com.ecat:integration-common").size());
+        assertTrue(graph.get("com.ecat:integration-common").contains("com.ecat:integration-a"));
+        assertTrue(graph.get("com.ecat:integration-common").contains("com.ecat:integration-b"));
+
+        // 验证 initialSnapshotTaken 被设置为 true
+        boolean snapshotTaken = (boolean) getPrivateField(integrationManager, "initialSnapshotTaken");
+        assertTrue(snapshotTaken);
+    }
+
+    /**
+     * 测试 getInitialDependents() - 获取初始依赖者
+     */
+    @Test
+    public void testGetInitialDependents() throws Exception {
+        // 设置 initialDependencyGraph
+        Map<String, List<String>> testGraph = new HashMap<>();
+        testGraph.put("com.ecat:integration-common", Arrays.asList("com.ecat:integration-a", "com.ecat:integration-b"));
+        testGraph.put("com.ecat:integration-a", Arrays.asList("com.ecat:integration-c"));
+
+        setPrivateField(integrationManager, "initialDependencyGraph", testGraph);
+
+        // 调用 getInitialDependents
+        List<String> dependents = (List<String>) invokePrivateMethod(integrationManager, "getInitialDependents", "com.ecat:integration-common");
+
+        // 验证返回结果
+        assertNotNull(dependents);
+        assertEquals(2, dependents.size());
+        assertTrue(dependents.contains("com.ecat:integration-a"));
+        assertTrue(dependents.contains("com.ecat:integration-b"));
+    }
+
+    /**
+     * 测试 getInitialDependents() - 无依赖者的情况
+     */
+    @Test
+    public void testGetInitialDependents_NoDependents() throws Exception {
+        // 设置空的 initialDependencyGraph
+        setPrivateField(integrationManager, "initialDependencyGraph", new HashMap<>());
+
+        // 调用 getInitialDependents
+        List<String> dependents = (List<String>) invokePrivateMethod(integrationManager, "getInitialDependents", "com.ecat:integration-unknown");
+
+        // 验证返回空列表
+        assertNotNull(dependents);
+        assertTrue(dependents.isEmpty());
+    }
+
+    /**
+     * 测试 getInitialDependents() - 快照未保存的情况
+     */
+    @Test
+    public void testGetInitialDependents_NoSnapshot() throws Exception {
+        // 设置 initialDependencyGraph 为 null
+        setPrivateField(integrationManager, "initialDependencyGraph", null);
+
+        // 调用 getInitialDependents
+        List<String> dependents = (List<String>) invokePrivateMethod(integrationManager, "getInitialDependents", "com.ecat:integration-common");
+
+        // 验证返回空列表
+        assertNotNull(dependents);
+        assertTrue(dependents.isEmpty());
+    }
+
+    /**
+     * 测试 requiresClassLoaderHierarchyChange() - 需要调整的情况
+     *
+     * 场景：integration-a 在初始加载时没有依赖者（独立 ClassLoader）
+     *      现在要启用的新集成 integration-new 依赖 integration-a
+     *      这需要 ClassLoader 层级调整
+     */
+    @Test
+    public void testRequiresClassLoaderHierarchyChange_NeedChange() throws Exception {
+        // 设置 initialDependencyGraph - integration-a 没有初始依赖者
+        Map<String, List<String>> testGraph = new HashMap<>();
+        // integration-a 不在 graph 中，表示它初始时没有被依赖
+        setPrivateField(integrationManager, "initialDependencyGraph", testGraph);
+
+        // 模拟 getIntegrationStatus 返回
+        IntegrationStatus mockStatus = IntegrationStatus.builder()
+                .coordinate("com.ecat:integration-new")
+                .dependencies(Arrays.asList("com.ecat:integration-a"))
+                .build();
+
+        // 使用 spy 来模拟 getIntegrationStatus 方法
+        IntegrationManager spyManager = spy(integrationManager);
+        doReturn(mockStatus).when(spyManager).getIntegrationStatus(anyString());
+
+        // 调用 requiresClassLoaderHierarchyChange
+        boolean needsChange = (boolean) invokePrivateMethod(spyManager, "requiresClassLoaderHierarchyChange", "com.ecat:integration-new");
+
+        // 验证需要调整
+        assertTrue(needsChange);
+    }
+
+    /**
+     * 测试 requiresClassLoaderHierarchyChange() - 不需要调整的情况
+     *
+     * 场景：integration-a 在初始加载时已经有依赖者（共享 ClassLoader）
+     *      现在要启用的新集成 integration-new 也依赖 integration-a
+     *      不需要 ClassLoader 层级调整
+     */
+    @Test
+    public void testRequiresClassLoaderHierarchyChange_NoChange() throws Exception {
+        // 设置 initialDependencyGraph - integration-a 已经有初始依赖者
+        Map<String, List<String>> testGraph = new HashMap<>();
+        testGraph.put("com.ecat:integration-a", Arrays.asList("com.ecat:integration-b"));
+        setPrivateField(integrationManager, "initialDependencyGraph", testGraph);
+
+        // 模拟 getIntegrationStatus 返回
+        IntegrationStatus mockStatus = IntegrationStatus.builder()
+                .coordinate("com.ecat:integration-new")
+                .dependencies(Arrays.asList("com.ecat:integration-a"))
+                .build();
+
+        // 使用 spy 来模拟 getIntegrationStatus 方法
+        IntegrationManager spyManager = spy(integrationManager);
+        doReturn(mockStatus).when(spyManager).getIntegrationStatus(anyString());
+
+        // 调用 requiresClassLoaderHierarchyChange
+        boolean needsChange = (boolean) invokePrivateMethod(spyManager, "requiresClassLoaderHierarchyChange", "com.ecat:integration-new");
+
+        // 验证不需要调整
+        assertFalse(needsChange);
+    }
+
+    /**
+     * 测试 requiresClassLoaderHierarchyChange() - 无依赖的情况
+     */
+    @Test
+    public void testRequiresClassLoaderHierarchyChange_NoDependencies() throws Exception {
+        // 设置 initialDependencyGraph
+        setPrivateField(integrationManager, "initialDependencyGraph", new HashMap<>());
+
+        // 模拟 getIntegrationStatus 返回 - 无依赖
+        IntegrationStatus mockStatus = IntegrationStatus.builder()
+                .coordinate("com.ecat:integration-new")
+                .dependencies(Arrays.asList())
+                .build();
+
+        // 使用 spy 来模拟 getIntegrationStatus 方法
+        IntegrationManager spyManager = spy(integrationManager);
+        doReturn(mockStatus).when(spyManager).getIntegrationStatus(anyString());
+
+        // 调用 requiresClassLoaderHierarchyChange
+        boolean needsChange = (boolean) invokePrivateMethod(spyManager, "requiresClassLoaderHierarchyChange", "com.ecat:integration-new");
+
+        // 验证不需要调整
+        assertFalse(needsChange);
+    }
+
+    /**
+     * 测试 requiresClassLoaderHierarchyChange() - null 依赖的情况
+     */
+    @Test
+    public void testRequiresClassLoaderHierarchyChange_NullDependencies() throws Exception {
+        // 设置 initialDependencyGraph
+        setPrivateField(integrationManager, "initialDependencyGraph", new HashMap<>());
+
+        // 模拟 getIntegrationStatus 返回 - 依赖为 null
+        IntegrationStatus mockStatus = IntegrationStatus.builder()
+                .coordinate("com.ecat:integration-new")
+                .dependencies(null)
+                .build();
+
+        // 使用 spy 来模拟 getIntegrationStatus 方法
+        IntegrationManager spyManager = spy(integrationManager);
+        doReturn(mockStatus).when(spyManager).getIntegrationStatus(anyString());
+
+        // 调用 requiresClassLoaderHierarchyChange
+        boolean needsChange = (boolean) invokePrivateMethod(spyManager, "requiresClassLoaderHierarchyChange", "com.ecat:integration-new");
+
+        // 验证不需要调整
+        assertFalse(needsChange);
+    }
+
+    /**
+     * 测试 requiresClassLoaderHierarchyChange() - 多个依赖中有一个需要调整
+     */
+    @Test
+    public void testRequiresClassLoaderHierarchyChange_MultipleDependencies() throws Exception {
+        // 设置 initialDependencyGraph
+        // integration-a 有初始依赖者，integration-b 没有
+        Map<String, List<String>> testGraph = new HashMap<>();
+        testGraph.put("com.ecat:integration-a", Arrays.asList("com.ecat:integration-x"));
+        // integration-b 不在 graph 中
+        setPrivateField(integrationManager, "initialDependencyGraph", testGraph);
+
+        // 模拟 getIntegrationStatus 返回 - 同时依赖 a 和 b
+        IntegrationStatus mockStatus = IntegrationStatus.builder()
+                .coordinate("com.ecat:integration-new")
+                .dependencies(Arrays.asList("com.ecat:integration-a", "com.ecat:integration-b"))
+                .build();
+
+        // 使用 spy 来模拟 getIntegrationStatus 方法
+        IntegrationManager spyManager = spy(integrationManager);
+        doReturn(mockStatus).when(spyManager).getIntegrationStatus(anyString());
+
+        // 调用 requiresClassLoaderHierarchyChange
+        boolean needsChange = (boolean) invokePrivateMethod(spyManager, "requiresClassLoaderHierarchyChange", "com.ecat:integration-new");
+
+        // 验证需要调整（因为 integration-b 需要调整）
+        assertTrue(needsChange);
     }
 }

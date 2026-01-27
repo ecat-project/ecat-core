@@ -260,7 +260,8 @@ public class JarDependencyLoader {
             URL url = new URL("jar:file:" + jarFile.getAbsolutePath() + "!/");
             URL[] urls = new URL[] { url };
 
-            try (URLClassLoader classLoader = new URLClassLoader(urls)) {
+            // 使用系统类加载器作为父类加载器，以便能够加载 IntegrationBase 等核心类
+            try (URLClassLoader classLoader = new URLClassLoader(urls, ClassLoader.getSystemClassLoader())) {
                 // 获取 JAR 中所有条目
                 jarFileObj = new JarFile(jarFile);
                 Enumeration<JarEntry> entries = jarFileObj.entries();

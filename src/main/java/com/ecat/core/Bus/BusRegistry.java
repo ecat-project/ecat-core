@@ -24,11 +24,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
-// 订阅句柄接口，包含取消订阅方法
-interface Subscription {
-    void unsubscribe();
-}
-
 /**
  * BusRegistry 类实现了一个事件总线注册表，用于管理事件的订阅和发布
  * 支持通配符模式匹配主题，并使用线程池异步处理事件
