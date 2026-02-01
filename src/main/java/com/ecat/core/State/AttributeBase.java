@@ -497,6 +497,19 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     protected abstract T convertFromUnitImp(T value, UnitInfo fromUnit);
 
     /**
+     * 将指定单位的值转换为目标单位的对应新值
+     * 用于数据库存储值与用户展示值之间的单位转换
+     *
+     * @param value 要转换的数值
+     * @param fromUnit value 当前所在的单位（输入单位）
+     * @param toUnit 目标单位（输出单位）
+     * @return 转换后的值
+     * @throws IllegalArgumentException 如果单位转换不支持
+     * @throws NullPointerException 如果 fromUnit 或 toUnit 为 null
+     */
+    public abstract Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit);
+
+    /**
      * 字符串到目标类型的转换逻辑（支持常见类型）
      * @param source 输入字符串
      * @return 转换后的目标类型值

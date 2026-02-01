@@ -123,6 +123,19 @@ public class NumericAttribute extends AttributeBase<Double> {
     }
 
     @Override
+    public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+        if (value == null) {
+            return null;
+        }
+        if (fromUnit == null || toUnit == null) {
+            throw new NullPointerException("fromUnit and toUnit cannot be null");
+        }
+
+        // 复用现有的 SameUnitClassConverter 进行同单位类转换
+        return new UnitConverter().convertSameUnitClass(value, fromUnit, toUnit);
+    }
+
+    @Override
     public ConfigDefinition getValueDefinition() {
         // Numeric attributes typically don't need validation by default
         // Subclasses can override this to add specific validation rules

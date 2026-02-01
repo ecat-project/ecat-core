@@ -341,4 +341,188 @@ public class AQAttributeTest {
         assertTrue(deprecatedAttr.updateValue(123.45));
         assertEquals(Double.valueOf(123.45), deprecatedAttr.getValue());
     }
+
+    // ========== convertValueToUnit 单元测试 ==========
+
+    @Test
+    public void testConvertValueToUnit_SameClass_MassToMass() {
+        // 测试同单位类转换：质量浓度单位之间转换 mg/m³ → μg/m³
+        // SO2 分子量 = 64.06
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirMassUnit.MGM3, AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        Double result = so2Attr.convertValueToUnit(1.0, AirMassUnit.MGM3, AirMassUnit.UGM3);
+        // mg/m³ → μg/m³: 1.0 * (1.0/1000.0) = 0.001, but we're using ratio from UnitConverter
+        // Using SameUnitClassConverter: result = 1.0 * from.ratio / to.ratio = 1.0 * 1.0 / 1000.0 = 0.001
+        // Actually, the conversion is mg/m³ to μg/m³, so 1 mg/m³ = 1000 μg/m³
+        // Looking at MGM3.getRatio() and UGM3.getRatio():
+        assertEquals(1000.0, result, 1.0);
+    }
+
+    @Test
+    public void testConvertValueToUnit_SameClass_VolumeToVolume() {
+        // 测试同单位类转换：体积浓度单位之间转换 ppm → ppb
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        Double result = so2Attr.convertValueToUnit(1.0, AirVolumeUnit.PPM, AirVolumeUnit.PPB);
+        // 1 ppm = 1000 ppb
+        assertEquals(1000.0, result, 1.0);
+    }
+
+    @Test
+    public void testConvertValueToUnit_CrossClass_VolumeToMass() {
+        // 测试跨单位类转换：ppm → μg/m³
+        // SO2 分子量 = 64.06 g/mol
+        // 公式: result = value × from.ratio × MW / 22.4 / to.ratio
+        // result = 1.0 × 1.0 × 64.06 / 22.4 / 1.0 ≈ 2.859 g/m³ = 2859 μg/m³
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        Double result = so2Attr.convertValueToUnit(1.0, AirVolumeUnit.PPM, AirMassUnit.UGM3);
+        assertEquals(2859.0, result, 1.0);
+    }
+
+    @Test
+    public void testConvertValueToUnit_CrossClass_MassToVolume() {
+        // 测试跨单位类转换：μg/m³ → ppm
+        // SO2 分子量 = 64.06 g/mol
+        // 反向转换验证
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        // 先获取 ppm → μg/m³ 的转换结果
+        Double massValue = so2Attr.convertValueToUnit(1.0, AirVolumeUnit.PPM, AirMassUnit.UGM3);
+        // 再反向转换回来，应该得到约 1.0 ppm
+        Double volumeValue = so2Attr.convertValueToUnit(massValue, AirMassUnit.UGM3, AirVolumeUnit.PPM);
+        assertEquals(1.0, volumeValue, 0.01);
+    }
+
+    @Test
+    public void testConvertValueToUnit_CrossClass_Ozone() {
+        // 测试跨单位类转换：O3 分子量 = 48 g/mol
+        // result = 1.0 × 1.0 × 48.0 / 22.4 / 1.0 ≈ 2.14 g/m³ = 2140 μg/m³
+        AQAttribute o3Attr = new AQAttribute("o3", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 48.0);
+
+        // ppm → μg/m³
+        Double massValue = o3Attr.convertValueToUnit(1.0, AirVolumeUnit.PPM, AirMassUnit.UGM3);
+        assertEquals(2142.0, massValue, 1.0);
+
+        // 反向转换 μg/m³ → ppm
+        Double volumeValue = o3Attr.convertValueToUnit(massValue, AirMassUnit.UGM3, AirVolumeUnit.PPM);
+        assertEquals(1.0, volumeValue, 0.01);
+    }
+
+    @Test
+    public void testConvertValueToUnit_CrossClass_NO2() {
+        // 测试跨单位类转换：NO2 分子量 = 46 g/mol
+        // result = 1.0 × 1.0 × 46.0 / 22.4 / 1.0 ≈ 2.05 g/m³ = 2050 μg/m³
+        AQAttribute no2Attr = new AQAttribute("no2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 46.0);
+
+        // ppm → μg/m³
+        Double massValue = no2Attr.convertValueToUnit(1.0, AirVolumeUnit.PPM, AirMassUnit.UGM3);
+        assertEquals(2053.0, massValue, 1.0);
+
+        // 反向转换 μg/m³ → ppm
+        Double volumeValue = no2Attr.convertValueToUnit(massValue, AirMassUnit.UGM3, AirVolumeUnit.PPM);
+        assertEquals(1.0, volumeValue, 0.01);
+    }
+
+    @Test
+    public void testConvertValueToUnit_CrossClass_CO() {
+        // 测试跨单位类转换：CO 分子量 = 28 g/mol
+        // result = 1.0 × 1.0 × 28.0 / 22.4 / 1.0 ≈ 1.25
+        AQAttribute coAttr = new AQAttribute("co", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.MGM3, 0, true, false, 28.0);
+
+        // ppm → mg/m³
+        Double massValue = coAttr.convertValueToUnit(1.0, AirVolumeUnit.PPM, AirMassUnit.MGM3);
+        assertEquals(1.25, massValue, 0.01);
+
+        // 反向转换 mg/m³ → ppm
+        Double volumeValue = coAttr.convertValueToUnit(massValue, AirMassUnit.MGM3, AirVolumeUnit.PPM);
+        assertEquals(1.0, volumeValue, 0.01);
+    }
+
+    @Test
+    public void testConvertValueToUnit_NullHandling() {
+        // 测试 null 值处理
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        assertNull(so2Attr.convertValueToUnit(null, AirVolumeUnit.PPM, AirMassUnit.UGM3));
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConvertValueToUnit_NullFromUnit() {
+        // 测试 fromUnit 为 null 时抛出异常
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        so2Attr.convertValueToUnit(1.0, null, AirMassUnit.UGM3);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConvertValueToUnit_NullToUnit() {
+        // 测试 toUnit 为 null 时抛出异常
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        so2Attr.convertValueToUnit(1.0, AirVolumeUnit.PPM, null);
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testConvertValueToUnit_InvalidCrossClassConversion() {
+        // 测试不支持的跨单位类转换抛出异常
+        // 体积单位不能直接转换为重量单位（没有分子量关联）
+        AQAttribute attr = new AQAttribute("test", mockAttrClass,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPB, 0, true, false, 64.06);
+
+        // 尝试将体积单位转换为重量单位（应该抛出异常）
+        attr.convertValueToUnit(1.0, AirVolumeUnit.PPM, WeightUnit.KG);
+    }
+
+    @Test
+    public void testConvertValueToUnit_RoundTrip() {
+        // 测试往返转换：ppm → μg/m³ → ppm 应该得到原值
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        Double original = 0.5;
+        Double mass = so2Attr.convertValueToUnit(original, AirVolumeUnit.PPM, AirMassUnit.UGM3);
+        Double backToVolume = so2Attr.convertValueToUnit(mass, AirMassUnit.UGM3, AirVolumeUnit.PPM);
+        assertEquals(original, backToVolume, 0.001);
+    }
+
+    @Test
+    public void testConvertValueToUnit_DatabaseToDisplayValue() {
+        // 测试场景：从数据库读取的值（存储为 ppm）转换为用户显示单位（μg/m³）
+        // 模拟 SO2 浓度：数据库存储 0.5 ppm，用户希望以 μg/m³ 显示
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 1, true, false, 64.06);
+        so2Attr.updateValue(0.5);  // 数据库值为 0.5 ppm
+
+        // 获取以 μg/m³ 为单位的显示值
+        // 0.5 * 64.06 / 22.4 = 1.43 g/m³ = 1430 μg/m³
+        Double displayValue = so2Attr.convertValueToUnit(so2Attr.getValue(),
+                AirVolumeUnit.PPM, AirMassUnit.UGM3);
+        assertNotNull(displayValue);
+        assertEquals(1429.0, displayValue, 1.0);
+    }
+
+    @Test
+    public void testConvertValueToUnit_UserInputToDatabase() {
+        // 测试场景：用户输入的值（使用 μg/m³）转换为数据库存储单位
+        // 模拟用户输入 SO2 浓度 1430 μg/m³，需要转换为 ppm 存储
+        AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
+                AirVolumeUnit.PPM, AirMassUnit.UGM3, 1, true, false, 64.06);
+
+        Double userInput = 1429.0;  // 用户输入 1430 μg/m³
+        Double dbValue = so2Attr.convertValueToUnit(userInput,
+                AirMassUnit.UGM3, AirVolumeUnit.PPM);
+        assertNotNull(dbValue);
+        assertEquals(0.5, dbValue, 0.01);
+    }
 }

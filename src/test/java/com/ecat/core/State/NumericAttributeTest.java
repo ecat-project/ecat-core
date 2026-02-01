@@ -12,6 +12,8 @@ import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import com.ecat.core.State.Unit.PressureUnit;
+
 /**
  * 测试 NumericAttribute 类的功能
  * 
@@ -194,5 +196,111 @@ public class NumericAttributeTest {
 
         // 验证displayName仍然可访问（已弃用）
         assertEquals("电压", deprecatedAttr.getDisplayName());
+    }
+
+    // ========== convertValueToUnit 单元测试 ==========
+
+    @Test
+    public void testConvertValueToUnit_SameClass_Basic() {
+        // 测试同单位类基本转换：1V → 2V（ratio=2.0）
+        Double result = attr.convertValueToUnit(1.0, nativeUnit, displayUnit);
+        // 1.0 * (1.0/2.0) = 0.5 (注意：SameUnitClassConverter使用 source/target 比例)
+        assertEquals(Double.valueOf(0.5), result, 0.001);
+    }
+
+    @Test
+    public void testConvertValueToUnit_SameClass_Reverse() {
+        // 测试同单位类反向转换：2V → 1V（ratio=1.0）
+        Double result = attr.convertValueToUnit(2.0, displayUnit, nativeUnit);
+        // 2.0 * (2.0/1.0) = 4.0
+        assertEquals(Double.valueOf(4.0), result, 0.001);
+    }
+
+    @Test
+    public void testConvertValueToUnit_NullHandling() {
+        // 测试 null 值返回 null
+        Double result = attr.convertValueToUnit(null, nativeUnit, displayUnit);
+        assertNull(result);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConvertValueToUnit_NullFromUnit() {
+        // 测试 fromUnit 为 null 时抛出异常
+        attr.convertValueToUnit(1.0, null, displayUnit);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConvertValueToUnit_NullToUnit() {
+        // 测试 toUnit 为 null 时抛出异常
+        attr.convertValueToUnit(1.0, nativeUnit, null);
+    }
+
+    @Test
+    public void testConvertValueToUnit_RoundTrip() {
+        // 测试往返转换应该得到原值
+        Double original = 10.0;
+        Double converted = attr.convertValueToUnit(original, nativeUnit, displayUnit);
+        Double back = attr.convertValueToUnit(converted, displayUnit, nativeUnit);
+        assertEquals(original, back, 0.001);
+    }
+
+    @Test
+    public void testConvertValueToUnit_ZeroValue() {
+        // 测试零值转换
+        Double result = attr.convertValueToUnit(0.0, nativeUnit, displayUnit);
+        assertEquals(Double.valueOf(0.0), result, 0.001);
+    }
+
+    @Test
+    public void testConvertValueToUnit_LargeValue() {
+        // 测试大值转换
+        Double result = attr.convertValueToUnit(1000000.0, nativeUnit, displayUnit);
+        // 1000000.0 * (1.0/2.0) = 500000.0
+        assertEquals(Double.valueOf(500000.0), result, 0.001);
+    }
+
+    @Test
+    public void testConvertValueToUnit_NegativeValue() {
+        // 测试负值转换
+        Double result = attr.convertValueToUnit(-10.0, nativeUnit, displayUnit);
+        // -10.0 * (1.0/2.0) = -5.0
+        assertEquals(Double.valueOf(-5.0), result, 0.001);
+    }
+
+    @Test
+    public void testConvertValueToUnit_SameUnit() {
+        // 测试相同单位转换（ratio相同）
+        TestUnit sameUnit = new TestUnit("V", 1.0);
+        Double result = attr.convertValueToUnit(5.0, nativeUnit, sameUnit);
+        // 5.0 * (1.0/1.0) = 5.0
+        assertEquals(Double.valueOf(5.0), result, 0.001);
+    }
+
+    // ========== 使用真实压力单位测试 ==========
+
+    @Test
+    public void testConvertValueToUnit_Pressure_PaToKPa() {
+        // 测试压力单位转换：Pa → kPa
+        NumericAttribute pressureAttr = new NumericAttribute(
+                "pressure", mockAttrClass,
+                PressureUnit.PA,
+                PressureUnit.KPA,
+                1, true, true, null);
+
+        Double result = pressureAttr.convertValueToUnit(5000.0, PressureUnit.PA, PressureUnit.KPA);
+        assertEquals(5.0, result, 0.001);
+    }
+
+    @Test
+    public void testConvertValueToUnit_Pressure_KPaToPa() {
+        // 测试压力单位转换：kPa → Pa
+        NumericAttribute pressureAttr = new NumericAttribute(
+                "pressure", mockAttrClass,
+                PressureUnit.PA,
+                PressureUnit.KPA,
+                1, true, true, null);
+
+        Double result = pressureAttr.convertValueToUnit(5.0, PressureUnit.KPA, PressureUnit.PA);
+        assertEquals(5000.0, result, 0.001);
     }
 }

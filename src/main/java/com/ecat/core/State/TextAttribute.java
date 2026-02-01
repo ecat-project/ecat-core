@@ -101,6 +101,11 @@ public class TextAttribute extends AttributeBase<String> {
     }
 
     @Override
+    public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+        throw new UnsupportedOperationException("TextAttribute does not support unit conversion");
+    }
+
+    @Override
     public ConfigDefinition getValueDefinition() {
         // Text attributes typically don't need validation by default
         // Subclasses can override this to add specific validation rules

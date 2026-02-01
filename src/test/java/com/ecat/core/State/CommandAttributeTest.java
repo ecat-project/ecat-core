@@ -107,6 +107,11 @@ public class CommandAttributeTest {
         public AttributeType getAttributeType() {
             return AttributeType.STRING_COMMAND;
         }
+
+        @Override
+        public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+            throw new UnsupportedOperationException("TestCommandAttribute does not support unit conversion");
+        }
     }
 
     @Before

@@ -82,6 +82,11 @@ public class AttributeBaseTest {
         public AttributeType getAttributeType() {
             return AttributeType.UNKNOWN;
         }
+
+        @Override
+        public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+            throw new UnsupportedOperationException("MinimalAttribute does not support unit conversion");
+        }
     }
 
     @Mock

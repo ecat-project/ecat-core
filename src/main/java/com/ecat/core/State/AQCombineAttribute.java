@@ -29,14 +29,31 @@ import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
  * 组合属性一般要求是多个子属性值的求和，并且要符合统一的单位
  * 组合属性原始单位一定一致
  * 更改组合属性展示单位时会连带更改子属性的单位，确保displayValue是符合展示单位的数据
- * 
+ *
  * @implNote displayName i18n supported, path: state.aq_combine_attr.{attributeID}
- * 
+ *
  * @author coffee
  */
-public class AQCombineAttribute extends AttributeBase<Double> {
+public class AQCombineAttribute extends AQAttribute {
 
     public List<AQAttribute> speAttrs; //组合式属性的子属性
+
+    /**
+     * 辅助方法：从子属性获取分子量（取第一个子属性的分子量）
+     * @param speAttrs 子属性列表
+     * @return 第一个子属性的分子量
+     * @throws IllegalArgumentException 如果子属性列表为空或第一个子属性的分子量为null
+     */
+    private static Double calculateMolecularWeight(List<AQAttribute> speAttrs) {
+        if (speAttrs.isEmpty()) {
+            throw new IllegalArgumentException("speAttrs cannot be empty for AQCombineAttribute");
+        }
+        Double weight = speAttrs.get(0).molecularWeight;
+        if (weight == null) {
+            throw new IllegalArgumentException("molecularWeight cannot be null for AQCombineAttribute sub-attributes");
+        }
+        return weight;
+    }
 
     /**
      * 支持I18n的构造函数
@@ -53,7 +70,7 @@ public class AQCombineAttribute extends AttributeBase<Double> {
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             List<AQAttribute> speAttrs) {
         super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision,
-                unitChangeable, false);
+                unitChangeable, false, calculateMolecularWeight(speAttrs));
         this.speAttrs = speAttrs;
     }
 
@@ -73,7 +90,7 @@ public class AQCombineAttribute extends AttributeBase<Double> {
             UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             List<AQAttribute> speAttrs) {
         super(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision,
-                unitChangeable, false);
+                unitChangeable, false, calculateMolecularWeight(speAttrs));
         this.speAttrs = speAttrs;
     }
 
@@ -83,7 +100,7 @@ public class AQCombineAttribute extends AttributeBase<Double> {
 	}
 
     @Override
-    protected boolean updateValue(Double value) {
+    public boolean updateValue(Double value) {
         throw new RuntimeException(I18nHelper.t("error.combine_attribute_value_not_changeable"));
     }
 

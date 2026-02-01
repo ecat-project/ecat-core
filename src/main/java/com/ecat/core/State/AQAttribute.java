@@ -25,14 +25,14 @@ import com.ecat.core.I18n.I18nHelper;
 import com.ecat.core.I18n.I18nKeyPath;
 import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 
-/** 
+/**
  * 适用于PM、SO2、O3等单参数支持ppm/mg/m3等单位转换的属性
- * 
+ *
  * @apiNote displayName i18n supported, path: state.aq_attr.{attributeID}
- * 
+ *
  * @author coffee
- */ 
-public class AQAttribute extends AttributeBase<Double> {
+ */
+public class AQAttribute extends NumericAttribute {
 
     public Double molecularWeight; //分子质量，不需要ppm/mg/m3转换的不需要设置
 
@@ -156,8 +156,39 @@ public class AQAttribute extends AttributeBase<Double> {
                 throw new RuntimeException(I18nHelper.t("error.invalid_unit_conversion"));
             }
         }
-        
+
         return displayValue;
+    }
+
+    @Override
+    public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+        if (value == null) {
+            return null;
+        }
+        if (fromUnit == null || toUnit == null) {
+            throw new NullPointerException("fromUnit and toUnit cannot be null");
+        }
+
+        // 同class转换：委托给父类 NumericAttribute 的实现
+        if (fromUnit.getClass().equals(toUnit.getClass())) {
+            return super.convertValueToUnit(value, fromUnit, toUnit);
+        }
+
+        // 跨class转换：体积浓度 <-> 质量浓度
+        UnitConverter converter = new UnitConverter();
+        if (fromUnit.getClass().equals(AirVolumeUnit.class) && toUnit.getClass().equals(AirMassUnit.class)) {
+            AirVolumeToAirMass conversion = new AirVolumeToAirMass(
+                (AirVolumeUnit) fromUnit, (AirMassUnit) toUnit, molecularWeight);
+            return converter.convertValue(value, conversion);
+        }
+        else if (fromUnit.getClass().equals(AirMassUnit.class) && toUnit.getClass().equals(AirVolumeUnit.class)) {
+            AirMassToAirVolume conversion = new AirMassToAirVolume(
+                (AirMassUnit) fromUnit, (AirVolumeUnit) toUnit, molecularWeight);
+            return converter.convertValue(value, conversion);
+        }
+        else {
+            throw new RuntimeException(I18nHelper.t("error.invalid_unit_conversion"));
+        }
     }
 
     // public void setMolecularWeight(Double molecularWeight) {

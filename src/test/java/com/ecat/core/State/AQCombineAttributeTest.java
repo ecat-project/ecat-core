@@ -40,6 +40,9 @@ public class AQCombineAttributeTest {
 
         attr1 = mock(AQAttribute.class);
         attr2 = mock(AQAttribute.class);
+        // Set molecularWeight directly since it's a public field
+        attr1.molecularWeight = 64.06;  // SO2 molecular weight
+        attr2.molecularWeight = 64.06;
 
         List<AQAttribute> speAttrs = Arrays.asList(attr1, attr2);
 
@@ -62,12 +65,11 @@ public class AQCombineAttributeTest {
         assertEquals(Double.valueOf(3.5), combineAttr.getValue(), 0.0001);
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testGetValueEmpty() {
-        // 测试 getValue 子属性为空时返回0
-        AQCombineAttribute emptyCombine = new AQCombineAttribute(
+        // 测试 getValue 子属性为空时抛出异常
+        new AQCombineAttribute(
                 "tvoc", mockAttrClass, mockNativeUnit, mockDisplayUnit, 2, true, Collections.emptyList());
-        assertEquals(Double.valueOf(0.0), emptyCombine.getValue(), 0.0001);
     }
 
     @Test(expected = RuntimeException.class)
@@ -175,5 +177,105 @@ public class AQCombineAttributeTest {
         when(attr1.getValue()).thenReturn(1.2);
         when(attr2.getValue()).thenReturn(2.3);
         assertEquals(Double.valueOf(3.5), deprecatedAttr.getValue(), 0.0001);
+    }
+
+    // ========== convertValueToUnit 单元测试 ==========
+
+    @Test
+    public void testConvertValueToUnit_SameClass_MassToMass() {
+        // 测试同单位类转换：mg/m³ → μg/m³
+        // AQCombineAttribute 继承自 AQAttribute，应该支持同单位类转换
+        Double result = combineAttr.convertValueToUnit(1.0, mockNativeUnit, mockNativeUnit);
+        // 由于 mockNativeUnit 的 convertUnit 方法没有 mock，这里主要验证方法可调用
+        assertNotNull(result);
+    }
+
+    @Test
+    public void testConvertValueToUnit_NullHandling() {
+        // 测试 null 值处理
+        Double result = combineAttr.convertValueToUnit(null, mockNativeUnit, mockDisplayUnit);
+        assertNull(result);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConvertValueToUnit_NullFromUnit() {
+        // 测试 fromUnit 为 null 时抛出异常
+        combineAttr.convertValueToUnit(1.0, null, mockDisplayUnit);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConvertValueToUnit_NullToUnit() {
+        // 测试 toUnit 为 null 时抛出异常
+        combineAttr.convertValueToUnit(1.0, mockNativeUnit, null);
+    }
+
+    @Test
+    public void testConvertValueToUnit_WithRealAQAttributes() {
+        // 使用真实的 AQAttribute 对象测试跨单位类转换
+        AQAttribute so2Attr1 = new AQAttribute("so2_1", mockAttrClass,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, 64.06);
+        AQAttribute so2Attr2 = new AQAttribute("so2_2", mockAttrClass,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        List<AQAttribute> speAttrs = Arrays.asList(so2Attr1, so2Attr2);
+        AQCombineAttribute realCombineAttr = new AQCombineAttribute(
+                "sox", mockAttrClass,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, speAttrs);
+
+        // 测试跨单位类转换：ppm → μg/m³
+        Double result = realCombineAttr.convertValueToUnit(1.0,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3);
+        assertNotNull(result);
+        assertTrue(result > 2850 && result < 2870);
+    }
+
+    @Test
+    public void testConvertValueToUnit_RoundTrip() {
+        // 测试往返转换：ppm → μg/m³ → ppm
+        AQAttribute so2Attr1 = new AQAttribute("so2_1", mockAttrClass,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, 64.06);
+
+        List<AQAttribute> speAttrs = Arrays.asList(so2Attr1);
+        AQCombineAttribute realCombineAttr = new AQCombineAttribute(
+                "sox", mockAttrClass,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, speAttrs);
+
+        Double original = 0.5;
+        Double mass = realCombineAttr.convertValueToUnit(original,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3);
+        Double backToVolume = realCombineAttr.convertValueToUnit(mass,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM);
+        assertEquals(original, backToVolume, 0.01);
+    }
+
+    @Test
+    public void testConvertValueToUnit_DatabaseToDisplayValue() {
+        // 测试场景：从数据库读取的值（存储为 ppm）转换为用户显示单位（μg/m³）
+        AQAttribute so2Attr1 = new AQAttribute("so2_1", mockAttrClass,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 1, true, false, 64.06);
+        so2Attr1.updateValue(0.5);  // 数据库值为 0.5 ppm
+
+        List<AQAttribute> speAttrs = Arrays.asList(so2Attr1);
+        AQCombineAttribute realCombineAttr = new AQCombineAttribute(
+                "sox", mockAttrClass,
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 1, true, speAttrs);
+
+        // 获取以 μg/m³ 为单位的显示值
+        // 0.5 * 64.06 / 22.4 = 1.43 g/m³ = 1430 μg/m³
+        Double displayValue = realCombineAttr.convertValueToUnit(realCombineAttr.getValue(),
+                com.ecat.core.State.Unit.AirVolumeUnit.PPM,
+                com.ecat.core.State.Unit.AirMassUnit.UGM3);
+        assertNotNull(displayValue);
+        assertEquals(1429.0, displayValue, 1.0);
     }
 }

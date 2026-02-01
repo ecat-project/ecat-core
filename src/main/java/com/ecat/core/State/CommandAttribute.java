@@ -133,6 +133,13 @@ abstract class CommandAttribute<T> extends AttributeBase<T> {
         return value;
     }
 
+    @Override
+    public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+        // CommandAttribute does not support unit conversion by default
+        // Subclasses can override if they need numeric unit conversion
+        throw new UnsupportedOperationException("CommandAttribute does not support unit conversion");
+    }
+
     /**
      * 子类实现具体的命令下发逻辑
      * @param cmd

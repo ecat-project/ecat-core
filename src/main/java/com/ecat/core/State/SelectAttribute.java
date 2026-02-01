@@ -116,6 +116,13 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
         return value;
     }
 
+    @Override
+    public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+        // SelectAttribute does not support unit conversion by default
+        // Subclasses can override if they need numeric unit conversion
+        throw new UnsupportedOperationException("SelectAttribute does not support unit conversion");
+    }
+
     /**
      * just for device data update, not for user used to select option
      */

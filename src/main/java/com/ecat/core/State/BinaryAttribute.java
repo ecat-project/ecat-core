@@ -115,6 +115,11 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
     }
 
     @Override
+    public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+        throw new UnsupportedOperationException("BinaryAttribute does not support unit conversion");
+    }
+
+    @Override
     public String getDisplayValue(UnitInfo toUnit){
         if (value == null) {
             return null;

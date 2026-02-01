@@ -105,6 +105,11 @@ public class SelectAttributeTest {
         public AttributeType getAttributeType() {
             return AttributeType.STRING_SELECT;
         }
+
+        @Override
+        public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) {
+            throw new UnsupportedOperationException("TestSelectAttribute does not support unit conversion");
+        }
     }
 
     @Before
