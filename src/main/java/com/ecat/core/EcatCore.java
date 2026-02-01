@@ -105,19 +105,24 @@ public class EcatCore {
         stateManager = new StateManager();
         taskManager = new TaskManager();
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
-        integrationManager.loadIntegrations();
         deviceRegistry = new DeviceRegistry();
         i18nRegistry = I18nRegistry.getInstance();
+    }
+
+    public void load(){
+        integrationManager.loadIntegrations();
     }
 
     public static void main(String[] args) {
         // 这里可以添加一些初始化逻辑
         EcatCore core = new EcatCore();
-
-        // core.setApplicationContext(null);
+        
         core.init();
+
         EcatCore.setInstance(core);
         // 例如，加载配置文件、注册服务等
+        core.load();
+        
         System.out.println("EcatCore initialized successfully.");
 
         // 添加关闭钩子，确保优雅退出
