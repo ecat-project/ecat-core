@@ -95,6 +95,12 @@ public interface AttributeAbility<T>{
     UnitInfo getDisplayUnit();
 
     /**
+     * 获取原始单位
+     * @return UnitInfo 或 null
+     */
+    UnitInfo getNativeUnit();
+
+    /**
      * 获取属性的类型
      * @return 属性类型枚举
      */

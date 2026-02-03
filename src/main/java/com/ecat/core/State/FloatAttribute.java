@@ -19,26 +19,22 @@ package com.ecat.core.State;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+import com.ecat.core.I18n.I18nKeyPath;
 
 /**
- * NumericAttribute class represents a numeric attribute with a specific unit and display format.
+ * Float 数值属性类
  *
- * This class extends the NumberAttribute class and provides methods to handle numeric values,
- * unit conversions, and display formatting.
+ * 提供Float类型的数值属性实现，适用于需要使用float而不是double的场景。
  *
- * It is suitable for attributes that represent numeric states such as
- * current, voltage, wind speed, wind direction, etc.
- *
- * @apiNote displayName i18n supported, path: state.numeric_attr.{attributeID}
- *
+ * @implNote displayName i18n supported, path: state.float_attr.{attributeID}
  * @author coffee
  */
-public class NumericAttribute extends NumberAttribute<Double> {
+public class FloatAttribute extends NumberAttribute<Float> {
 
     /**
      * 支持I18n的构造函数
      */
-	public NumericAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+    public FloatAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             boolean valueChangeable) {
         super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision,
@@ -48,7 +44,7 @@ public class NumericAttribute extends NumberAttribute<Double> {
     /**
      * 同时支持用户设置显示名称displayName和I18n的构造函数，displayName优先级高
      */
-    public NumericAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
+    public FloatAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             boolean valueChangeable) {
         super(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision,
@@ -58,9 +54,9 @@ public class NumericAttribute extends NumberAttribute<Double> {
     /**
      * 支持I18n的构造函数
      */
-    public NumericAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+    public FloatAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
-            boolean valueChangeable, Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
+            boolean valueChangeable, Function<AttrChangedCallbackParams<Float>, CompletableFuture<Boolean>> onChangedCallback) {
         super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
                 valueChangeable, onChangedCallback);
     }
@@ -68,26 +64,30 @@ public class NumericAttribute extends NumberAttribute<Double> {
     /**
      * 同时支持用户设置显示名称displayName和I18n的构造函数，displayName优先级高
      */
-    public NumericAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
+    public FloatAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
-            boolean valueChangeable, Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
+            boolean valueChangeable, Function<AttrChangedCallbackParams<Float>, CompletableFuture<Boolean>> onChangedCallback) {
         super(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
                 valueChangeable, onChangedCallback);
     }
 
     @Override
-    public boolean updateValue(Double value) {
+    public boolean updateValue(Float value) {
         return super.updateValue(value);
     }
 
     @Override
-    public boolean updateValue(Double value, AttributeStatus newStatus) {
+    public boolean updateValue(Float value, AttributeStatus newStatus) {
         return super.updateValue(value, newStatus);
     }
 
     @Override
-    protected Double convertToType(double value) {
-        return value;
+    protected Float convertToType(double value) {
+        return (float) value;
     }
 
+    @Override
+    public I18nKeyPath getI18nPrefixPath() {
+        return new I18nKeyPath("state.float_attr.", "");
+    }
 }

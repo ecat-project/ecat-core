@@ -1,5 +1,10 @@
 package com.ecat.core.State;
 
+import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.Bus.BusTopic;
+import com.ecat.core.Device.DeviceBase;
+import com.ecat.core.EcatCore;
+import com.ecat.core.State.Unit.AirVolumeUnit;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
@@ -10,6 +15,7 @@ import java.util.Collections;
 import java.util.List;
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -128,10 +134,11 @@ public class AQCombineAttributeTest {
 
     @Test
     public void testGetDisplayValueSum() {
-        // 测试 getDisplayValue 返回子属性 getDisplayValue 求和
+        // 测试 getDisplayValue 返回子属性 getDisplayValue 求和并应用精度格式化
+        // combineAttr 的 displayPrecision=2，所以结果应该有2位小数
         when(attr1.getDisplayValue(mockDisplayUnit)).thenReturn("1.2");
         when(attr2.getDisplayValue(mockDisplayUnit)).thenReturn("2.3");
-        assertEquals("3.5", combineAttr.getDisplayValue(mockDisplayUnit));
+        assertEquals("3.50", combineAttr.getDisplayValue(mockDisplayUnit));
     }
 
     @Test
@@ -277,5 +284,193 @@ public class AQCombineAttributeTest {
                 com.ecat.core.State.Unit.AirMassUnit.UGM3);
         assertNotNull(displayValue);
         assertEquals(1429.0, displayValue, 1.0);
+    }
+
+    // ========== 小数位精度测试 ==========
+
+    @Test
+    public void testGetDisplayValueWithPrecision() {
+        // 使用真实的 AQAttribute 对象测试小数位精度格式化
+        // NumberFormatter 使用 HALF_EVEN（Banker's rounding）舍入模式
+        // 注意：子属性的 getDisplayValue 返回已格式化的字符串，会被解析后再相加
+        // 例如：attr1.getDisplayValue(precision=1) 返回 "0.1"，attr2 返回 "0.2"，和为 0.3
+        AQAttribute attr1 = new AQAttribute("no", AttributeClass.NO,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 30.0);
+        AQAttribute attr2 = new AQAttribute("no2", AttributeClass.NO2,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 46.0);
+
+        AQCombineAttribute noxAttr = new AQCombineAttribute(
+                "nox_total", AttributeClass.NOX,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false,
+                Arrays.asList(attr1, attr2));
+
+        // 设置子属性值（有更多小数位）
+        attr1.updateValue(0.14);
+        attr2.updateValue(0.24);
+
+        // 子属性格式化：0.14 -> "0.1", 0.24 -> "0.2"
+        // 组合属性求和：0.1 + 0.2 = 0.3
+        // 组合属性格式化：0.3 -> "0.3"
+        String displayValue = noxAttr.getDisplayValue(AirVolumeUnit.PPM);
+        assertEquals("0.3", displayValue);
+    }
+
+    @Test
+    public void testGetDisplayValueWithZeroPrecision() {
+        // 测试 displayPrecision=0 的情况（四舍五入到整数）
+        // HALF_EVEN: 1.5 rounds to 2 (nearest even), 2.5 rounds to 2
+        AQAttribute attr1 = new AQAttribute("no", AttributeClass.NO,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 0, false, false, 30.0);
+        AQAttribute attr2 = new AQAttribute("no2", AttributeClass.NO2,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 0, false, false, 46.0);
+
+        AQCombineAttribute noxAttr = new AQCombineAttribute(
+                "nox_total", AttributeClass.NOX,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 0, false,
+                Arrays.asList(attr1, attr2));
+
+        attr1.updateValue(1.0);
+        attr2.updateValue(0.0);
+
+        // NOX total = 1.0, displayPrecision=0, 应显示为 "1"
+        String displayValue = noxAttr.getDisplayValue(AirVolumeUnit.PPM);
+        assertEquals("1", displayValue);
+    }
+
+    @Test
+    public void testGetDisplayValueWithTwoPrecision() {
+        // 测试 displayPrecision=2 的情况
+        AQAttribute attr1 = new AQAttribute("no", AttributeClass.NO,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 2, false, false, 30.0);
+        AQAttribute attr2 = new AQAttribute("no2", AttributeClass.NO2,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 2, false, false, 46.0);
+
+        AQCombineAttribute noxAttr = new AQCombineAttribute(
+                "nox_total", AttributeClass.NOX,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 2, false,
+                Arrays.asList(attr1, attr2));
+
+        attr1.updateValue(0.123);
+        attr2.updateValue(0.234);
+
+        // 子属性格式化：0.123 -> "0.12", 0.234 -> "0.23"
+        // 组合属性求和：0.12 + 0.23 = 0.35
+        // 组合属性格式化：0.35 -> "0.35" (HALF_EVEN, precision=2)
+        String displayValue = noxAttr.getDisplayValue(AirVolumeUnit.PPM);
+        assertEquals("0.35", displayValue);
+    }
+
+    // ========== 数据总线推送测试 ==========
+
+    @Test
+    public void testPublicStateWithSubAttributeUpdate() {
+        // 使用真实的 AQAttribute 对象
+        AQAttribute attr1 = new AQAttribute("no", AttributeClass.NO,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 30.0);
+        AQAttribute attr2 = new AQAttribute("no2", AttributeClass.NO2,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 46.0);
+
+        AQCombineAttribute noxAttr = new AQCombineAttribute(
+                "nox_total", AttributeClass.NOX,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false,
+                Arrays.asList(attr1, attr2));
+
+        // Mock device and core
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        EcatCore mockCore = mock(EcatCore.class);
+        BusRegistry mockBusRegistry = mock(BusRegistry.class);
+
+        when(mockDevice.getCore()).thenReturn(mockCore);
+        when(mockCore.getBusRegistry()).thenReturn(mockBusRegistry);
+
+        noxAttr.setDevice(mockDevice);
+
+        // 初始状态：子属性未更新，组合属性未更新
+        assertFalse(noxAttr.isValueUpdated());
+
+        // 更新子属性
+        attr1.updateValue(0.5);
+        assertTrue(attr1.isValueUpdated());
+        assertFalse(noxAttr.isValueUpdated());  // 组合属性未直接更新
+
+        // 调用 publicState() 应该检测到子属性更新并推送
+        // 注意：publicState() 成功后会重置 isValueUpdated 标志
+        boolean result = noxAttr.publicState();
+        assertTrue(result);  // publicState() 应该返回 true 表示成功
+        assertFalse(noxAttr.isValueUpdated());  // publicState() 后应该重置标志
+
+        // 验证推送到数据总线
+        verify(mockBusRegistry).publish(eq("device.data.update"), eq(noxAttr));
+    }
+
+    @Test
+    public void testPublicStateWithoutSubAttributeUpdate() {
+        // 测试子属性未更新时不推送
+        AQAttribute attr1 = new AQAttribute("no", AttributeClass.NO,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 30.0);
+        AQAttribute attr2 = new AQAttribute("no2", AttributeClass.NO2,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 46.0);
+
+        AQCombineAttribute noxAttr = new AQCombineAttribute(
+                "nox_total", AttributeClass.NOX,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false,
+                Arrays.asList(attr1, attr2));
+
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        EcatCore mockCore = mock(EcatCore.class);
+        BusRegistry mockBusRegistry = mock(BusRegistry.class);
+
+        when(mockDevice.getCore()).thenReturn(mockCore);
+        when(mockCore.getBusRegistry()).thenReturn(mockBusRegistry);
+
+        noxAttr.setDevice(mockDevice);
+
+        // 不更新子属性，直接调用 publicState()
+        assertFalse(noxAttr.isValueUpdated());
+        assertFalse(attr1.isValueUpdated());
+        assertFalse(attr2.isValueUpdated());
+
+        // 调用 publicState() 不应该推送（子属性未更新）
+        noxAttr.publicState();
+
+        // 验证没有推送到数据总线
+        verify(mockBusRegistry, never()).publish(eq("device.data.update"), eq(noxAttr));
+    }
+
+    @Test
+    public void testPublicStateWithBothSubAttributesUpdated() {
+        // 测试两个子属性都更新的情况
+        AQAttribute attr1 = new AQAttribute("no", AttributeClass.NO,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 30.0);
+        AQAttribute attr2 = new AQAttribute("no2", AttributeClass.NO2,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 46.0);
+
+        AQCombineAttribute noxAttr = new AQCombineAttribute(
+                "nox_total", AttributeClass.NOX,
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false,
+                Arrays.asList(attr1, attr2));
+
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        EcatCore mockCore = mock(EcatCore.class);
+        BusRegistry mockBusRegistry = mock(BusRegistry.class);
+
+        when(mockDevice.getCore()).thenReturn(mockCore);
+        when(mockCore.getBusRegistry()).thenReturn(mockBusRegistry);
+
+        noxAttr.setDevice(mockDevice);
+
+        // 更新两个子属性
+        attr1.updateValue(0.3);
+        attr2.updateValue(0.4);
+
+        assertTrue(attr1.isValueUpdated());
+        assertTrue(attr2.isValueUpdated());
+
+        // 调用 publicState() 应该推送
+        noxAttr.publicState();
+
+        // 验证推送到数据总线
+        verify(mockBusRegistry).publish(eq("device.data.update"), eq(noxAttr));
+        assertFalse(noxAttr.isValueUpdated());  // publicState() 后应该重置标志
     }
 }

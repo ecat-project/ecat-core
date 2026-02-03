@@ -9,6 +9,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 import com.ecat.core.Device.DeviceBase;
@@ -18,8 +20,8 @@ import com.ecat.core.State.Unit.AirVolumeUnit;
 import com.ecat.core.State.Unit.WeightUnit;
 
 /**
- * 测试 AQAttribute 类的功能
- * 
+ * Unit tests for AQAttribute class functionality.
+ *
  * @author coffee
  */
 public class AQAttributeTest {
@@ -58,9 +60,8 @@ public class AQAttributeTest {
 
     @Test
     public void testConstructorAndGetters() {
-        // 测试构造函数和getter方法，确保属性初始化正确
+        // Test constructor and getter methods to ensure proper initialization
         assertEquals("aq1", attr.getAttributeID());
-        // 测试时直接验证I18n路径，不依赖具体的资源文件
         assertEquals("state.aq_attr.aq1", attr.getI18nPrefixPath().withLastSegment("aq1").getI18nPath());
         assertEquals(mockAttrClass, attr.attrClass);
         assertEquals(nativeUnit, attr.nativeUnit);
@@ -74,14 +75,14 @@ public class AQAttributeTest {
 
     @Test
     public void testSetAndGetStatus() {
-        // 测试设置和获取属性状态
+        // Test setting and getting attribute status
         assertTrue(attr.setStatus(AttributeStatus.NORMAL));
         assertEquals(AttributeStatus.NORMAL, attr.getStatus());
     }
 
     @Test
     public void testChangeDisplayUnit() {
-        // 测试切换显示单位
+        // Test changing display unit
         AirMassUnit newUnit = AirMassUnit.UGM3;
         when(mockAttrClass.isValidUnit(newUnit)).thenReturn(true);
         assertTrue(attr.changeDisplayUnit(newUnit));
@@ -90,7 +91,7 @@ public class AQAttributeTest {
 
     @Test
     public void testChangeDisplayUnit_NotAllowed() {
-        // 测试不允许切换显示单位的情况
+        // Test changing display unit when not allowed
         AQAttribute attr2 = new AQAttribute(
                 "aq2", mockAttrClass, nativeUnit, displayUnit, 2, false, true, 64.0);
         attr2.setDevice(mockDevice);
@@ -100,13 +101,13 @@ public class AQAttributeTest {
 
     @Test
     public void testChangeDisplayPrecision() {
-        // 测试切换显示精度
+        // Test changing display precision
         assertTrue(attr.changeDisplayPrecision(5));
     }
 
     @Test
     public void testGetDisplayUnitStr() {
-        // 测试获取显示单位字符串
+        // Test getting display unit string
         assertEquals("mg/m3", attr.getDisplayUnitStr());
         AQAttribute attr2 = new AQAttribute(
                 "aq2", mockAttrClass, nativeUnit, null, 2, true, true, 64.0);
@@ -116,7 +117,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetDisplayValue_Success() throws Exception {
-        // 测试通过字符串设置显示值并成功回调
+        // Test setting display value with string and successful callback
         when(mockCallback.apply(any())).thenReturn(CompletableFuture.completedFuture(true));
         attr.onChangedCallback = mockCallback;
         CompletableFuture<Boolean> future = attr.setDisplayValue("123.45");
@@ -126,14 +127,14 @@ public class AQAttributeTest {
 
     @Test
     public void testSetDisplayValue_TypeConversionFail() {
-        // 测试设置显示值时类型转换失败
+        // Test setting display value with type conversion failure
         CompletableFuture<Boolean> future = attr.setDisplayValue("notADouble");
         assertTrue(future.isCompletedExceptionally());
     }
 
     @Test
     public void testSetDisplayValueImpAndSetValue() throws Exception {
-        // 测试直接设置显示值并回调
+        // Test setting display value directly with callback
         when(mockCallback.apply(any())).thenReturn(CompletableFuture.completedFuture(true));
         attr.onChangedCallback = mockCallback;
         CompletableFuture<Boolean> future = attr.setDisplayValueImp(456.78, attr.getDisplayUnit());
@@ -143,7 +144,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetValue_ValueChangeableFalse() throws Exception {
-        // 测试属性不可更改值时setValue返回false
+        // Test setValue when value is not changeable
         AQAttribute attr2 = new AQAttribute(
                 "aq2", mockAttrClass, nativeUnit, displayUnit, 2, true, false, 64.0);
         attr2.setDevice(mockDevice);
@@ -153,7 +154,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetValueUpdatedAndUpdateTime() {
-        // 测试设置值已更新并获取更新时间
+        // Test setting value updated and getting update time
         attr.setValueUpdated(true);
         assertTrue(attr.isValueUpdated());
         assertNotNull(attr.getUpdateTime());
@@ -161,7 +162,7 @@ public class AQAttributeTest {
 
     @Test
     public void testUpdateValueAndStatus() {
-        // 测试更新属性值和状态
+        // Test updating attribute value and status
         assertTrue(attr.updateValue(111.11));
         assertEquals(Double.valueOf(111.11), attr.getValue());
         assertTrue(attr.updateValue(222.22, AttributeStatus.NORMAL));
@@ -171,7 +172,7 @@ public class AQAttributeTest {
 
     @Test
     public void testPublicState_Success() {
-        // 测试属性状态发布成功
+        // Test successful attribute state publication
         attr.setValueUpdated(true);
         DeviceBase device = mock(DeviceBase.class, RETURNS_DEEP_STUBS);
         when(device.getId()).thenReturn("mockDeviceId");
@@ -186,7 +187,7 @@ public class AQAttributeTest {
 
     @Test
     public void testPublicState_Fail() {
-        // 测试属性状态发布失败
+        // Test failed attribute state publication
         attr.setValueUpdated(true);
         DeviceBase device = mock(DeviceBase.class);
         attr.setDevice(device);
@@ -196,7 +197,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetDisplayValue_WithUnit() throws Exception {
-        // 测试带单位设置显示值
+        // Test setting display value with unit
         when(mockCallback.apply(any())).thenReturn(CompletableFuture.completedFuture(true));
         attr.onChangedCallback = mockCallback;
         CompletableFuture<Boolean> future = attr.setDisplayValue("321.12", displayUnit);
@@ -206,7 +207,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetValue_WithUnit_NullUnit() {
-        // 测试设置值时单位为null抛出异常
+        // Test setValue with null unit throws exception
         AQAttribute attr2 = new AQAttribute(
                 "aq2", mockAttrClass, nativeUnit, displayUnit, 2, true, true, 64.0);
         attr2.setDevice(mockDevice);
@@ -221,7 +222,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetValue_WithUnit_NativeUnitNull() {
-        // 测试设置值时nativeUnit为null抛出异常
+        // Test setValue with null nativeUnit throws exception
         AQAttribute attr2 = new AQAttribute(
                 "aq2", mockAttrClass, null, displayUnit, 2, true, true, 64.0);
         attr2.setDevice(mockDevice);
@@ -236,7 +237,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetValue_WithUnit_ValueNull() {
-        // 测试设置值时value为null返回future，同时测试转换单位设置值
+        // Test setValue with null value and unit conversion
         AirVolumeUnit displayUnit2 = AirVolumeUnit.PPB;
         AirMassUnit nativeUnit2 = AirMassUnit.MGM3;
         AQAttribute attr2 = new AQAttribute(
@@ -247,10 +248,10 @@ public class AQAttributeTest {
         assertEquals(4.285, attr2.getValue(), 0.001);
     }
 
-    // 跨class单位转换测试
+    // Cross-class unit conversion tests
     @Test
     public void testSetDisplayValueImp_CrossClassUnit_VolumeToMass() throws Exception {
-        // 测试O3分子量=48，displayUnit为体积单位，nativeUnit为质量单位的跨class转换
+        // Test O3 with MW=48, cross-class conversion from volume to mass
         AirVolumeUnit displayUnit2 = AirVolumeUnit.PPM;
         AirMassUnit nativeUnit2 = AirMassUnit.MGM3;
         AQAttribute attrO3 = new AQAttribute(
@@ -267,7 +268,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetDisplayValueImp_CrossClassUnit_MassToVolume() throws Exception {
-        // 测试O3分子量=48，displayUnit为质量单位，nativeUnit为体积单位的跨class转换
+        // Test O3 with MW=48, cross-class conversion from mass to volume
         AirVolumeUnit nativeUnit2 = AirVolumeUnit.PPM;
         AirMassUnit displayUnit2 = AirMassUnit.MGM3;
         AQAttribute attrO3 = new AQAttribute(
@@ -284,7 +285,7 @@ public class AQAttributeTest {
 
     @Test
     public void testSetDisplayValueImp_CrossClassUnit_Invalid() {
-        // 测试O3分子量=48，displayUnit为体积单位，nativeUnit为重量单位且两者类型不同，无法转换时抛出异常
+        // Test invalid cross-class conversion throws exception
         AirVolumeUnit displayUnit2 = AirVolumeUnit.PPM;
         // 这里用 WeightUnit.KG 作为 nativeUnit，但 displayUnit2 是体积单位，且没有合法的转换关系
         WeightUnit nativeUnit2 = WeightUnit.KG; // 假设这是一个重量单位
@@ -306,7 +307,7 @@ public class AQAttributeTest {
 
     @Test
     public void testDeprecatedConstructorCompatibility() {
-        // 测试已弃用的构造函数兼容性
+        // Test deprecated constructor compatibility
         AQAttribute deprecatedAttr = new AQAttribute(
                 "deprecatedAQ",
                 "AQ Attribute",
@@ -320,7 +321,6 @@ public class AQAttributeTest {
         );
         deprecatedAttr.setDevice(mockDevice);
 
-        // 验证基本功能仍然正常工作
         assertEquals("deprecatedAQ", deprecatedAttr.getAttributeID());
         assertEquals(mockAttrClass, deprecatedAttr.attrClass);
         assertEquals(nativeUnit, deprecatedAttr.nativeUnit);
@@ -330,23 +330,259 @@ public class AQAttributeTest {
         assertTrue(deprecatedAttr.canValueChange());
         assertEquals(mockDevice, deprecatedAttr.getDevice());
         assertEquals(Double.valueOf(64.0), deprecatedAttr.molecularWeight);
-
         // 验证I18n路径正确生成
         assertEquals("state.aq_attr.deprecatedaq", deprecatedAttr.getI18nPrefixPath().withLastSegment("deprecatedaq").getI18nPath());
-
         // 验证displayName仍然可访问（已弃用）
         assertEquals("AQ Attribute", deprecatedAttr.getDisplayName());
-
         // 验证基本操作仍然正常工作
         assertTrue(deprecatedAttr.updateValue(123.45));
         assertEquals(Double.valueOf(123.45), deprecatedAttr.getValue());
     }
 
-    // ========== convertValueToUnit 单元测试 ==========
+    // ========== Constructor without molecularWeight tests ==========
+
+    @Test
+    public void testConstructor_WithoutMolecularWeight_I18n() {
+        // Test constructor without molecularWeight for particulate matter
+        AQAttribute pm25Attr = new AQAttribute(
+                "pm25_value",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false
+        );
+        pm25Attr.setDevice(mockDevice);
+
+        assertEquals("pm25_value", pm25Attr.getAttributeID());
+        assertNull(pm25Attr.molecularWeight);
+        assertFalse(pm25Attr.supportsCrossClassConversion());
+    }
+
+    @Test
+    public void testConstructor_WithoutMolecularWeight_WithDisplayName() {
+        // Test constructor with displayName but without molecularWeight
+        AQAttribute pm10Attr = new AQAttribute(
+                "pm10_value",
+                "PM10 Value",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false
+        );
+        pm10Attr.setDevice(mockDevice);
+
+        assertEquals("pm10_value", pm10Attr.getAttributeID());
+        assertEquals("PM10 Value", pm10Attr.getDisplayName());
+        assertNull(pm10Attr.molecularWeight);
+        assertFalse(pm10Attr.supportsCrossClassConversion());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testConstructor_InvalidMolecularWeight_Zero() {
+        // Test constructor with zero molecularWeight throws exception
+        new AQAttribute(
+                "test",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false,
+                0.0
+        );
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testConstructor_InvalidMolecularWeight_Negative() {
+        // Test constructor with negative molecularWeight throws exception
+        new AQAttribute(
+                "test",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false,
+                -46.0
+        );
+    }
+
+    @Test
+    public void testConstructor_NullMolecularWeight() {
+        // Test constructor with explicit null molecularWeight
+        AQAttribute pmAttr = new AQAttribute(
+                "pm25",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false,
+                null
+        );
+
+        assertNull(pmAttr.molecularWeight);
+        assertFalse(pmAttr.supportsCrossClassConversion());
+    }
+
+    // ========== supportsCrossClassConversion tests ==========
+
+    @Test
+    public void testSupportsCrossClassConversion_GasPollutant() {
+        // Test that gas pollutants with molecularWeight support cross-class conversion
+        AQAttribute no2Attr = new AQAttribute(
+                "no2",
+                mockAttrClass,
+                AirVolumeUnit.PPM,
+                AirVolumeUnit.PPM,
+                2,
+                true,
+                true,
+                46.006
+        );
+
+        assertTrue(no2Attr.supportsCrossClassConversion());
+    }
+
+    @Test
+    public void testSupportsCrossClassConversion_ParticulateMatter() {
+        // Test that particulate matter without molecularWeight does not support cross-class conversion
+        AQAttribute pm25Attr = new AQAttribute(
+                "pm25",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false
+        );
+
+        assertFalse(pm25Attr.supportsCrossClassConversion());
+    }
+
+    @Test
+    public void testSupportsCrossClassConversion_WithNullMolecularWeight() {
+        // Test with explicit null molecularWeight
+        AQAttribute pm10Attr = new AQAttribute(
+                "pm10",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false,
+                null
+        );
+
+        assertFalse(pm10Attr.supportsCrossClassConversion());
+    }
+
+    // ========== Cross-class conversion rejection tests ==========
+
+    @Test(expected = IllegalStateException.class)
+    public void testConvertValueToUnit_CrossClass_RejectedForParticulateMatter() {
+        // Test that cross-class conversion is rejected for particulate matter
+        AQAttribute pm25Attr = new AQAttribute(
+                "pm25",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false
+        );
+
+        // Try to convert µg/m³ to ppm (should throw IllegalStateException)
+        pm25Attr.convertValueToUnit(86.0, AirMassUnit.UGM3, AirVolumeUnit.PPM);
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testConvertValueToUnit_CrossClass_RejectedForParticulateMatter_Reverse() {
+        // Test that cross-class conversion is rejected in reverse direction
+        AQAttribute pm10Attr = new AQAttribute(
+                "pm10",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false
+        );
+
+        // Try to convert ppm to µg/m³ (should throw IllegalStateException)
+        pm10Attr.convertValueToUnit(1.0, AirVolumeUnit.PPM, AirMassUnit.UGM3);
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testGetDisplayValue_CrossClass_RejectedForParticulateMatter() {
+        // Test that getDisplayValue rejects cross-class conversion for particulate matter
+        AQAttribute pm25Attr = new AQAttribute(
+                "pm25",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                1,
+                false,
+                false
+        );
+        pm25Attr.value = 86.0;
+
+        // Try to get display value in ppm (should throw IllegalStateException)
+        pm25Attr.getDisplayValue(AirVolumeUnit.PPM);
+    }
+
+    @Test
+    public void testGetDisplayValue_SameClass_AllowedForParticulateMatter() {
+        // Test that same-class conversion is allowed for particulate matter
+        AQAttribute pm25Attr = new AQAttribute(
+                "pm25",
+                mockAttrClass,
+                AirMassUnit.UGM3,
+                AirMassUnit.UGM3,
+                3,
+                false,
+                false
+        );
+        pm25Attr.value = 86.0;
+
+        // Should be able to convert to mg/m³ (same class)
+        String displayValue = pm25Attr.getDisplayValue(AirMassUnit.MGM3);
+        assertNotNull(displayValue);
+        // 86 µg/m³ = 0.086 mg/m³
+        assertEquals("0.086", displayValue);
+    }
+
+    @Test
+    public void testSameClassConversion_WithMolecularWeight() {
+        // Test that same-class conversion works even when molecularWeight is set
+        AQAttribute no2Attr = new AQAttribute(
+                "no2",
+                mockAttrClass,
+                AirVolumeUnit.PPM,
+                AirVolumeUnit.PPM,
+                2,
+                true,
+                true,
+                46.006
+        );
+        no2Attr.value = 1.0;
+
+        // Should be able to convert to ppb (same class)
+        String displayValue = no2Attr.getDisplayValue(AirVolumeUnit.PPB);
+        assertNotNull(displayValue);
+        // 1 ppm = 1000 ppb
+        assertTrue(displayValue.startsWith("1000"));
+    }
+
+    // ========== convertValueToUnit unit tests ==========
 
     @Test
     public void testConvertValueToUnit_SameClass_MassToMass() {
-        // 测试同单位类转换：质量浓度单位之间转换 mg/m³ → μg/m³
+        // Test same-class conversion: mg/m³ to μg/m³
         // SO2 分子量 = 64.06
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
                 AirMassUnit.MGM3, AirMassUnit.UGM3, 0, true, false, 64.06);
@@ -361,7 +597,7 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_SameClass_VolumeToVolume() {
-        // 测试同单位类转换：体积浓度单位之间转换 ppm → ppb
+        // Test same-class conversion: ppm to ppb
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
 
@@ -372,8 +608,8 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_CrossClass_VolumeToMass() {
-        // 测试跨单位类转换：ppm → μg/m³
-        // SO2 分子量 = 64.06 g/mol
+        // Test cross-class conversion: ppm to μg/m³
+        // SO2 MW = 64.06 g/mol
         // 公式: result = value × from.ratio × MW / 22.4 / to.ratio
         // result = 1.0 × 1.0 × 64.06 / 22.4 / 1.0 ≈ 2.859 g/m³ = 2859 μg/m³
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
@@ -385,7 +621,7 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_CrossClass_MassToVolume() {
-        // 测试跨单位类转换：μg/m³ → ppm
+        // Test cross-class conversion: μg/m³ to ppm
         // SO2 分子量 = 64.06 g/mol
         // 反向转换验证
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
@@ -400,7 +636,7 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_CrossClass_Ozone() {
-        // 测试跨单位类转换：O3 分子量 = 48 g/mol
+        // Test cross-class conversion: O3 MW = 48 g/mol
         // result = 1.0 × 1.0 × 48.0 / 22.4 / 1.0 ≈ 2.14 g/m³ = 2140 μg/m³
         AQAttribute o3Attr = new AQAttribute("o3", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 48.0);
@@ -416,7 +652,7 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_CrossClass_NO2() {
-        // 测试跨单位类转换：NO2 分子量 = 46 g/mol
+        // Test cross-class conversion: NO2 MW = 46 g/mol
         // result = 1.0 × 1.0 × 46.0 / 22.4 / 1.0 ≈ 2.05 g/m³ = 2050 μg/m³
         AQAttribute no2Attr = new AQAttribute("no2", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 46.0);
@@ -432,7 +668,7 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_CrossClass_CO() {
-        // 测试跨单位类转换：CO 分子量 = 28 g/mol
+        // Test cross-class conversion: CO MW = 28 g/mol
         // result = 1.0 × 1.0 × 28.0 / 22.4 / 1.0 ≈ 1.25
         AQAttribute coAttr = new AQAttribute("co", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.MGM3, 0, true, false, 28.0);
@@ -448,7 +684,7 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_NullHandling() {
-        // 测试 null 值处理
+        // Test null value handling
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
 
@@ -457,7 +693,7 @@ public class AQAttributeTest {
 
     @Test(expected = NullPointerException.class)
     public void testConvertValueToUnit_NullFromUnit() {
-        // 测试 fromUnit 为 null 时抛出异常
+        // Test exception when fromUnit is null
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
 
@@ -466,7 +702,7 @@ public class AQAttributeTest {
 
     @Test(expected = NullPointerException.class)
     public void testConvertValueToUnit_NullToUnit() {
-        // 测试 toUnit 为 null 时抛出异常
+        // Test exception when toUnit is null
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
 
@@ -475,7 +711,7 @@ public class AQAttributeTest {
 
     @Test(expected = RuntimeException.class)
     public void testConvertValueToUnit_InvalidCrossClassConversion() {
-        // 测试不支持的跨单位类转换抛出异常
+        // Test unsupported cross-class conversion throws exception
         // 体积单位不能直接转换为重量单位（没有分子量关联）
         AQAttribute attr = new AQAttribute("test", mockAttrClass,
                 AirVolumeUnit.PPM, AirVolumeUnit.PPB, 0, true, false, 64.06);
@@ -486,7 +722,7 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_RoundTrip() {
-        // 测试往返转换：ppm → μg/m³ → ppm 应该得到原值
+        // Test round-trip conversion: ppm → μg/m³ → ppm
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 0, true, false, 64.06);
 
@@ -498,7 +734,7 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_DatabaseToDisplayValue() {
-        // 测试场景：从数据库读取的值（存储为 ppm）转换为用户显示单位（μg/m³）
+        // Test scenario: database value in ppm to display in μg/m³
         // 模拟 SO2 浓度：数据库存储 0.5 ppm，用户希望以 μg/m³ 显示
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 1, true, false, 64.06);
@@ -514,12 +750,12 @@ public class AQAttributeTest {
 
     @Test
     public void testConvertValueToUnit_UserInputToDatabase() {
-        // 测试场景：用户输入的值（使用 μg/m³）转换为数据库存储单位
+        // Test scenario: user input in μg/m³ to database in ppm
         // 模拟用户输入 SO2 浓度 1430 μg/m³，需要转换为 ppm 存储
         AQAttribute so2Attr = new AQAttribute("so2", mockAttrClass,
                 AirVolumeUnit.PPM, AirMassUnit.UGM3, 1, true, false, 64.06);
 
-        Double userInput = 1429.0;  // 用户输入 1430 μg/m³
+        Double userInput = 1429.0;
         Double dbValue = so2Attr.convertValueToUnit(userInput,
                 AirMassUnit.UGM3, AirVolumeUnit.PPM);
         assertNotNull(dbValue);

@@ -207,6 +207,11 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
         return displayUnit;
     }
 
+    @Override
+    public UnitInfo getNativeUnit(){
+        return nativeUnit;
+    }
+
     /**
      * 获取原始单位的完整字符串表示
      * @return 完整的单位字符串，如"AirVolumeUnit.PPM"，如果nativeUnit为null则返回空字符串

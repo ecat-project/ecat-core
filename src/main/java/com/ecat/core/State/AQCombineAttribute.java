@@ -22,6 +22,7 @@ import java.util.concurrent.CompletableFuture;
 import com.ecat.core.I18n.I18nHelper;
 import com.ecat.core.I18n.I18nKeyPath;
 import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
+import com.ecat.core.Utils.NumberFormatter;
 
 /**
  * 适用于TVOC需要符合计算的参数
@@ -153,7 +154,7 @@ public class AQCombineAttribute extends AQAttribute {
             if (attr.getDisplayValue(toUnit) == null) return null;
             displayValue += Double.parseDouble(attr.getDisplayValue(toUnit));
         }
-        return displayValue.toString();
+        return NumberFormatter.formatValue(displayValue, displayPrecision);
     }
 
     @Override
@@ -171,6 +172,29 @@ public class AQCombineAttribute extends AQAttribute {
     @Override
     public AttributeType getAttributeType() {
         return AttributeType.NUMERIC;
+    }
+
+    /**
+     * 发布属性状态到数据总线
+     *
+     * 组合属性的值是通过子属性动态计算的，不会直接调用 updateValue()，因此 isValueUpdated 标志永远不会被设置。
+     * 为了让组合属性能够正确推送到数据总线，此方法检查子属性是否有更新，如果有则先标记自己为已更新。
+     * 
+     * @apiNote 目前存在缺陷，需要先判断和推送此参数才生效，如果是先推送它关联的子参数，则因为子参数updated被还原为false导致本参数updated为false
+     *
+     * @return true if publishing succeeded, false otherwise
+     */
+    @Override
+    public boolean publicState() {
+        // 检查子属性是否有更新，如果有则标记组合属性需要推送
+        for (AQAttribute attr : speAttrs) {
+            if (attr.isValueUpdated()) {
+                setValueUpdated(true);
+                break;
+            }
+        }
+        // 调用父类方法进行实际推送
+        return super.publicState();
     }
 
 }
