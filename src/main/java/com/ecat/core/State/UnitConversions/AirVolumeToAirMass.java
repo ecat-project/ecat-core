@@ -18,6 +18,7 @@ package com.ecat.core.State.UnitConversions;
 
 import com.ecat.core.State.Unit.AirMassUnit;
 import com.ecat.core.State.Unit.AirVolumeUnit;
+import com.ecat.core.Science.AirQuality.Consts.MolecularWeights;
 
 /**
  * Air volume to air mass unit converter.
@@ -29,7 +30,7 @@ import com.ecat.core.State.Unit.AirVolumeUnit;
  * <p>The conversion formula is based on the ideal gas law:
  * <pre>
  * C_mass = C_volume × M_molecular / V_molar × ratio_factor
- * where V_molar = 22.4 L/mol (standard conditions)
+ * where V_molar = 24.45 L/mol (standard conditions: 25°C, 1 atm)
  * </pre>
  *
  * <p>Usage Example:
@@ -106,7 +107,7 @@ public class AirVolumeToAirMass implements UnitConversion {
      *
      * <p>Conversion formula:
      * <pre>
-     * result = value × fromUnit.ratio × molecularWeight / 22.4 / toUnit.ratio
+     * result = value × fromUnit.ratio × molecularWeight / MOLAR_VOLUME_25C / toUnit.ratio
      * </pre>
      *
      * @param value The air volume concentration value to convert
@@ -114,7 +115,7 @@ public class AirVolumeToAirMass implements UnitConversion {
      */
     @Override
     public double convert(double value) {
-        double result = value * fromUnit.getRatio() * molecularWeight / 22.4 / toUnit.getRatio();
+        double result = value * fromUnit.getRatio() * molecularWeight / MolecularWeights.MOLAR_VOLUME_25C / toUnit.getRatio();
         return result;
     }
 

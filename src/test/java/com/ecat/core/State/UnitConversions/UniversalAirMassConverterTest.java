@@ -48,25 +48,25 @@ public class UniversalAirMassConverterTest {
 
     /**
      * 测试从体积单位的转换 - SO2 PPM到μg/m³
-     * 计算公式：value × fromRatio × molecularWeight / 22.4 / toRatio
-     * 0.1 × 1000000 × 64.0 / 22.4 / 1000 = 285.714286
+     * 计算公式：value × fromRatio × molecularWeight / MOLAR_VOLUME_25C / toRatio
+     * 0.1 × 1000000 × 64.066 / 24.465 / 1000 = 261.868
      */
     @Test
     public void testConvert_FromAirVolumeUnit_SO2() {
         double result = so2VolumeConverter.convert(0.1);
-        assertEquals(285.714286, result, DELTA);
+        assertEquals(261.868, result, DELTA);
         assertTrue("应该是体积单位转换", so2VolumeConverter.isFromVolumeUnit());
         assertFalse("不应该是质量单位转换", so2VolumeConverter.isFromMassUnit());
     }
 
     /**
      * 测试从体积单位的转换 - O3 PPB到mg/m³
-     * 计算公式：100 × 1000 × 48.0 / 22.4 / 1000000 = 0.214286
+     * 计算公式：100 × 1000 × 47.998 / 24.465 / 1000000 = 0.196239
      */
     @Test
     public void testConvert_FromAirVolumeUnit_O3() {
         double result = o3VolumeConverter.convert(100.0);
-        assertEquals(0.214286, result, DELTA);
+        assertEquals(0.196239, result, DELTA);
         assertTrue("应该是体积单位转换", o3VolumeConverter.isFromVolumeUnit());
         assertFalse("不应该是质量单位转换", o3VolumeConverter.isFromMassUnit());
     }
@@ -271,16 +271,16 @@ public class UniversalAirMassConverterTest {
      */
     @Test
     public void testToString() {
-        String so2Expected = "UniversalAirMassConverter{ppm -> ug/m3, MW=64.000, volume->mass}";
+        String so2Expected = "UniversalAirMassConverter{ppm -> ug/m3, MW=64.066, volume->mass}";
         assertEquals(so2Expected, so2VolumeConverter.toString());
 
-        String coExpected = "UniversalAirMassConverter{mg/m3 -> ug/m3, MW=28.000, mass->mass}";
+        String coExpected = "UniversalAirMassConverter{mg/m3 -> ug/m3, MW=28.010, mass->mass}";
         assertEquals(coExpected, coMassConverter.toString());
 
-        String o3Expected = "UniversalAirMassConverter{ppb -> mg/m3, MW=48.000, volume->mass}";
+        String o3Expected = "UniversalAirMassConverter{ppb -> mg/m3, MW=47.998, volume->mass}";
         assertEquals(o3Expected, o3VolumeConverter.toString());
 
-        String no2Expected = "UniversalAirMassConverter{ug/m3 -> mg/m3, MW=46.000, mass->mass}";
+        String no2Expected = "UniversalAirMassConverter{ug/m3 -> mg/m3, MW=46.006, mass->mass}";
         assertEquals(no2Expected, no2MassConverter.toString());
     }
 
@@ -317,7 +317,8 @@ public class UniversalAirMassConverterTest {
 
         // 测试转换
         double result = converter.convert(1.0);
-        double expected = 1.0 * AirVolumeUnit.PPM.getRatio() * molecularWeight / 22.4 / AirMassUnit.UGM3.getRatio();
+        // 使用 MOLAR_VOLUME_25C = 24.465 进行验证
+        double expected = 1.0 * AirVolumeUnit.PPM.getRatio() * molecularWeight / MolecularWeights.MOLAR_VOLUME_25C / AirMassUnit.UGM3.getRatio();
         assertEquals("体积转换 - 分子量 " + molecularWeight + " 错误", expected, result, DELTA);
 
         // 验证结果合理性
@@ -376,7 +377,7 @@ public class UniversalAirMassConverterTest {
     @Test
     public void testConvert_NegativeValues() {
         double negativeVolumeResult = so2VolumeConverter.convert(-0.1);
-        assertEquals("负体积值应该正确转换", -285.714286, negativeVolumeResult, DELTA);
+        assertEquals("负体积值应该正确转换", -261.868, negativeVolumeResult, DELTA);
 
         double negativeMassResult = coMassConverter.convert(-2.5);
         assertEquals("负质量值应该正确转换", -2500.0, negativeMassResult, DELTA);

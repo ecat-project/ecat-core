@@ -19,6 +19,7 @@ package com.ecat.core.State.UnitConversions;
 import com.ecat.core.State.Unit.AirMassUnit;
 import com.ecat.core.State.Unit.AirVolumeUnit;
 import com.ecat.core.State.UnitInfo;
+import com.ecat.core.Science.AirQuality.Consts.MolecularWeights;
 
 /**
  * Universal air mass concentration converter.
@@ -165,7 +166,7 @@ public class UniversalAirMassConverter implements UnitConversion {
         } else if (sourceUnit instanceof AirVolumeUnit) {
             // Volume units: need molecular weight for chemical conversion
             double sourceRatio = ((AirVolumeUnit) sourceUnit).getRatio();
-            return value * sourceRatio * molecularWeight / 22.4 / targetUnit.getRatio();
+            return value * sourceRatio * molecularWeight / MolecularWeights.MOLAR_VOLUME_25C / targetUnit.getRatio();
 
         } else {
             // Other types not supported

@@ -51,8 +51,8 @@ public class UnitConverterTest {
         double ppmValue = 0.1;
         double result = unitConverter.convertValue(ppmValue, volumeToMassConverter);
 
-        // 验证计算：0.1 × 1000000 × 64.0 / 22.4 / 1000 = 285.714286
-        assertEquals(285.714286, result, DELTA);
+        // 验证计算：0.1 × 1000000 × 64.066 / 24.465 / 1000 = 261.868
+        assertEquals(261.868, result, DELTA);
         assertTrue("转换结果应该为正数", result > 0);
     }
 
@@ -64,8 +64,8 @@ public class UnitConverterTest {
         double ugm3Value = 1000.0;
         double result = unitConverter.convertValue(ugm3Value, massToVolumeConverter);
 
-        // 验证计算：1000 × 1000 × 22.4 / 28.0 / 1000000 = 0.800000
-        assertEquals(0.800000, result, DELTA);
+        // 验证计算：1000 × 1000 × 24.465 / 28.0 / 1000000 = 0.873750
+        assertEquals(0.873750, result, DELTA);
         assertTrue("转换结果应该为正数", result > 0);
     }
 
@@ -77,8 +77,8 @@ public class UnitConverterTest {
         double ppbValue = 50.0;
         double result = unitConverter.convertValue(ppbValue, universalConverter);
 
-        // 验证计算：50 × 1000 × 46.0 / 22.4 / 1000 = 102.678571
-        assertEquals(102.678571, result, DELTA);
+        // 验证计算：50 × 1000 × 46.006 / 24.465 / 1000 = 94.024
+        assertEquals(94.024, result, DELTA);
         assertTrue("转换结果应该为正数", result > 0);
     }
 
@@ -92,21 +92,21 @@ public class UnitConverterTest {
             AirVolumeUnit.PPM, AirMassUnit.UGM3, MolecularWeights.SO2
         );
         double so2Result = unitConverter.convertValue(0.1, so2Converter);
-        assertEquals(285.714286, so2Result, DELTA);
+        assertEquals(261.868, so2Result, DELTA);
 
         // 测试 AirMassToAirVolume - O3
         AirMassToAirVolume o3Converter = new AirMassToAirVolume(
             AirMassUnit.UGM3, AirVolumeUnit.PPM, MolecularWeights.O3
         );
         double o3Result = unitConverter.convertValue(1000.0, o3Converter);
-        assertEquals(0.466667, o3Result, DELTA);
+        assertEquals(0.509702, o3Result, DELTA);
 
         // 测试 UniversalAirMassConverter - 体积到质量
         UniversalAirMassConverter volumeToMass = new UniversalAirMassConverter(
             AirVolumeUnit.PPB, AirMassUnit.UGM3, MolecularWeights.NO
         );
         double volumeToMassResult = unitConverter.convertValue(100.0, volumeToMass);
-        assertEquals(133.928571, volumeToMassResult, DELTA);
+        assertEquals(122.649, volumeToMassResult, DELTA);
 
         // 测试 UniversalAirMassConverter - 质量到质量
         UniversalAirMassConverter massToMass = new UniversalAirMassConverter(
@@ -168,7 +168,7 @@ public class UnitConverterTest {
 
         // 负值测试
         double negativeResult = unitConverter.convertValue(-0.1, volumeToMassConverter);
-        assertEquals(-285.714286, negativeResult, DELTA);
+        assertEquals(-261.868, negativeResult, DELTA);
 
         // 小值测试
         double smallResult = unitConverter.convertValue(0.001, volumeToMassConverter);
@@ -250,7 +250,7 @@ public class UnitConverterTest {
         );
         double deviceReading = 0.05;
         double displayValue = unitConverter.convertValue(deviceReading, so2DeviceConverter);
-        assertEquals("设备读数转换", 142.857143, displayValue, DELTA);
+        assertEquals("设备读数转换", 130.934, displayValue, DELTA);
 
         // 场景2：CO报警器数据转换
         // CO报警器：检测到25 PPB，需要转换为mg/m³
@@ -259,7 +259,7 @@ public class UnitConverterTest {
         );
         double alarmReading = 25.0;
         double alarmValue = unitConverter.convertValue(alarmReading, coAlarmConverter);
-        assertEquals(0.031250, alarmValue, DELTA);
+        assertEquals(0.028613, alarmValue, DELTA);
 
         // 场景3：数据记录格式转换
         // 数据库存储的是μg/m³，需要转换为PPM用于分析
@@ -268,7 +268,7 @@ public class UnitConverterTest {
         );
         double dbValue = 200.0;
         double analysisValue = unitConverter.convertValue(dbValue, analysisConverter);
-        assertEquals(0.097391, analysisValue, DELTA);
+        assertEquals(0.106194, analysisValue, DELTA);
     }
 
     /**
@@ -280,7 +280,7 @@ public class UnitConverterTest {
         );
 
         double result = unitConverter.convertValue(1.0, converter);
-        double expected = 1.0 * AirVolumeUnit.PPM.getRatio() * molecularWeight / 22.4 / AirMassUnit.UGM3.getRatio();
+        double expected = 1.0 * AirVolumeUnit.PPM.getRatio() * molecularWeight / MolecularWeights.MOLAR_VOLUME_25C / AirMassUnit.UGM3.getRatio();
         assertEquals("分子量 " + molecularWeight + " 转换错误", expected, result, DELTA);
 
         // 验证结果合理性

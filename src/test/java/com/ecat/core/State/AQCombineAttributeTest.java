@@ -5,6 +5,7 @@ import com.ecat.core.Bus.BusTopic;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.EcatCore;
 import com.ecat.core.State.Unit.AirVolumeUnit;
+import com.ecat.core.Science.AirQuality.Consts.MolecularWeights;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
@@ -47,8 +48,8 @@ public class AQCombineAttributeTest {
         attr1 = mock(AQAttribute.class);
         attr2 = mock(AQAttribute.class);
         // Set molecularWeight directly since it's a public field
-        attr1.molecularWeight = 64.06;  // SO2 molecular weight
-        attr2.molecularWeight = 64.06;
+        attr1.molecularWeight = MolecularWeights.SO2;  // SO2 molecular weight
+        attr2.molecularWeight = MolecularWeights.SO2;
 
         List<AQAttribute> speAttrs = Arrays.asList(attr1, attr2);
 
@@ -221,10 +222,10 @@ public class AQCombineAttributeTest {
         // 使用真实的 AQAttribute 对象测试跨单位类转换
         AQAttribute so2Attr1 = new AQAttribute("so2_1", mockAttrClass,
                 com.ecat.core.State.Unit.AirVolumeUnit.PPM,
-                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, 64.06);
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, MolecularWeights.SO2);
         AQAttribute so2Attr2 = new AQAttribute("so2_2", mockAttrClass,
                 com.ecat.core.State.Unit.AirVolumeUnit.PPM,
-                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, 64.06);
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, MolecularWeights.SO2);
 
         List<AQAttribute> speAttrs = Arrays.asList(so2Attr1, so2Attr2);
         AQCombineAttribute realCombineAttr = new AQCombineAttribute(
@@ -237,7 +238,7 @@ public class AQCombineAttributeTest {
                 com.ecat.core.State.Unit.AirVolumeUnit.PPM,
                 com.ecat.core.State.Unit.AirMassUnit.UGM3);
         assertNotNull(result);
-        assertTrue(result > 2850 && result < 2870);
+        assertTrue(result > 2615 && result < 2625);
     }
 
     @Test
@@ -245,7 +246,7 @@ public class AQCombineAttributeTest {
         // 测试往返转换：ppm → μg/m³ → ppm
         AQAttribute so2Attr1 = new AQAttribute("so2_1", mockAttrClass,
                 com.ecat.core.State.Unit.AirVolumeUnit.PPM,
-                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, 64.06);
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 0, true, false, MolecularWeights.SO2);
 
         List<AQAttribute> speAttrs = Arrays.asList(so2Attr1);
         AQCombineAttribute realCombineAttr = new AQCombineAttribute(
@@ -268,7 +269,7 @@ public class AQCombineAttributeTest {
         // 测试场景：从数据库读取的值（存储为 ppm）转换为用户显示单位（μg/m³）
         AQAttribute so2Attr1 = new AQAttribute("so2_1", mockAttrClass,
                 com.ecat.core.State.Unit.AirVolumeUnit.PPM,
-                com.ecat.core.State.Unit.AirMassUnit.UGM3, 1, true, false, 64.06);
+                com.ecat.core.State.Unit.AirMassUnit.UGM3, 1, true, false, MolecularWeights.SO2);
         so2Attr1.updateValue(0.5);  // 数据库值为 0.5 ppm
 
         List<AQAttribute> speAttrs = Arrays.asList(so2Attr1);
@@ -278,12 +279,12 @@ public class AQCombineAttributeTest {
                 com.ecat.core.State.Unit.AirMassUnit.UGM3, 1, true, speAttrs);
 
         // 获取以 μg/m³ 为单位的显示值
-        // 0.5 * 64.06 / 22.4 = 1.43 g/m³ = 1430 μg/m³
+        // 0.5 * 64.066 / 24.465 = 1.309 g/m³ = 1309 μg/m³
         Double displayValue = realCombineAttr.convertValueToUnit(realCombineAttr.getValue(),
                 com.ecat.core.State.Unit.AirVolumeUnit.PPM,
                 com.ecat.core.State.Unit.AirMassUnit.UGM3);
         assertNotNull(displayValue);
-        assertEquals(1429.0, displayValue, 1.0);
+        assertEquals(1309.0, displayValue, 1.0);
     }
 
     // ========== 小数位精度测试 ==========
@@ -295,7 +296,7 @@ public class AQCombineAttributeTest {
         // 注意：子属性的 getDisplayValue 返回已格式化的字符串，会被解析后再相加
         // 例如：attr1.getDisplayValue(precision=1) 返回 "0.1"，attr2 返回 "0.2"，和为 0.3
         AQAttribute attr1 = new AQAttribute("no", AttributeClass.NO,
-                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 30.0);
+                AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, MolecularWeights.NO);
         AQAttribute attr2 = new AQAttribute("no2", AttributeClass.NO2,
                 AirVolumeUnit.PPM, AirVolumeUnit.PPM, 1, false, false, 46.0);
 

@@ -45,28 +45,28 @@ public class AirMassToAirVolumeTest {
 
     /**
      * 测试 SO2 从 μg/m³ 到 PPM 的转换
-     * 计算公式：value × fromRatio × 22.4 / molecularWeight / toRatio
-     * 1000 × 1000 × 22.4 / 64.0 / 1000000 = 350.000
+     * 计算公式：value × fromRatio × MOLAR_VOLUME_25C / molecularWeight / toRatio
+     * 1000 × 1000 × 24.465 / 64.066 / 1000000 = 0.382225
      */
     @Test
     public void testConvert_SO2_UGM3_to_PPM() {
         double result = so2Converter.convert(1000.0);
-        assertEquals(0.350000, result, DELTA);
+        assertEquals(0.382225, result, DELTA);
     }
 
     /**
      * 测试 CO 从 mg/m³ 到 PPB 的转换
-     * 计算公式：2.5 × 1000000 × 22.4 / 28.0 / 1 = 2000000.000
+     * 计算公式：2.5 × 1000000 × 24.465 / 28.010 / 1 = 2183.595
      */
     @Test
     public void testConvert_CO_MGM3_to_PPB() {
         double result = coConverter.convert(2.5);
-        assertEquals(2000.000, result, DELTA);
+        assertEquals(2183.595, result, DELTA);
     }
 
     /**
      * 测试 O3 从 μg/m³ 到 PPM 的转换
-     * 计算公式：500 × 1000 × 22.4 / 48.0 / 1000000 = 233.333
+     * 计算公式：500 × 1000 × 24.465 / 47.998 / 1000000 = 0.254851
      */
     @Test
     public void testConvert_O3_UGM3_to_PPM() {
@@ -74,17 +74,17 @@ public class AirMassToAirVolumeTest {
             AirMassUnit.UGM3, AirVolumeUnit.PPM, MolecularWeights.O3
         );
         double result = o3TestConverter.convert(500.0);
-        assertEquals(0.233333, result, DELTA);
+        assertEquals(0.254851, result, DELTA);
     }
 
     /**
      * 测试 NO 从 μg/m³ 到 PPM 的转换
-     * 计算公式：200 × 1000 × 22.4 / 30.0 / 1000000 = 149.333
+     * 计算公式：200 × 1000 × 24.465 / 30.006 / 1000000 = 0.163097
      */
     @Test
     public void testConvert_NO_UGM3_to_PPM() {
         double result = noConverter.convert(200.0);
-        assertEquals(0.149333, result, DELTA);
+        assertEquals(0.163097, result, DELTA);
     }
 
     /**
@@ -157,10 +157,10 @@ public class AirMassToAirVolumeTest {
         // 极小值测试
         double tinyValue = Double.MIN_VALUE;
         double tinyResult = so2Converter.convert(tinyValue);
-        assertEquals("极小值应该正确转换",
-                    tinyValue * so2Converter.getFromUnit().getRatio() * 22.4 /
-                    MolecularWeights.SO2 / so2Converter.getToUnit().getRatio(),
-                    tinyResult, DELTA);
+        // 使用 MOLAR_VOLUME_25C = 24.465 进行验证
+        double expected = tinyValue * so2Converter.getFromUnit().getRatio() * MolecularWeights.MOLAR_VOLUME_25C /
+                    MolecularWeights.SO2 / so2Converter.getToUnit().getRatio();
+        assertEquals("极小值应该正确转换", expected, tinyResult, DELTA);
     }
 
     /**
@@ -169,7 +169,7 @@ public class AirMassToAirVolumeTest {
     @Test
     public void testConvert_NegativeValue() {
         double result = so2Converter.convert(-1000.0);
-        assertEquals("负值应该正确转换", -0.350000, result, DELTA);
+        assertEquals("负值应该正确转换", -0.382225, result, DELTA);
     }
 
     /**
@@ -223,10 +223,10 @@ public class AirMassToAirVolumeTest {
      */
     @Test
     public void testToString() {
-        String expected = "AirMassToAirVolume{ug/m3 -> ppm, MW=64.000}";
+        String expected = "AirMassToAirVolume{ug/m3 -> ppm, MW=64.066}";
         assertEquals(expected, so2Converter.toString());
 
-        String expected2 = "AirMassToAirVolume{mg/m3 -> ppb, MW=28.000}";
+        String expected2 = "AirMassToAirVolume{mg/m3 -> ppb, MW=28.010}";
         assertEquals(expected2, coConverter.toString());
     }
 
@@ -253,7 +253,8 @@ public class AirMassToAirVolumeTest {
 
         // 测试正常转换
         double result = converter.convert(1000.0);
-        double expected = 1000.0 * AirMassUnit.UGM3.getRatio() * 22.4 / molecularWeight / AirVolumeUnit.PPM.getRatio();
+        // 使用 MOLAR_VOLUME_25C = 24.465 进行验证
+        double expected = 1000.0 * AirMassUnit.UGM3.getRatio() * MolecularWeights.MOLAR_VOLUME_25C / molecularWeight / AirVolumeUnit.PPM.getRatio();
         assertEquals("分子量 " + molecularWeight + " 转换错误", expected, result, DELTA);
 
         // 验证结果合理性
