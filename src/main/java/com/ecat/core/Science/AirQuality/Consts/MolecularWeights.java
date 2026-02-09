@@ -81,6 +81,8 @@ public final class MolecularWeights {
      *
      * 示例计算：1 ppb SO₂ = 2.6187 μg/m³
      * formula: 1 × 1000 × 64.066 / 24.465 = 2618.67 μg/m³ = 2.6187 mg/m³
+     * 
+     * https://starlighttools.org/science/moles-mass-volume-calculator
      */
     public static final double MOLAR_VOLUME_25C = 24.465;
 
