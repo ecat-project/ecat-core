@@ -22,6 +22,7 @@ import com.ecat.core.EcatCore;
 import com.ecat.core.Device.DeviceRegistry;
 import com.ecat.core.I18n.I18nHelper;
 import com.ecat.core.I18n.I18nProxy;
+import com.ecat.core.Log.LogManager;
 import com.ecat.core.State.StateManager;
 
 import com.ecat.core.Utils.LogFactory;
@@ -30,9 +31,9 @@ import lombok.Getter;
 
 import com.ecat.core.Utils.Log;
 
-/** 
+/**
  * Base class for all integrations without device management.
- * 
+ *
  * @author coffee
  */
 public abstract class IntegrationBase implements IntegrationLifecycle {
@@ -62,8 +63,13 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
         this.integrationManager = core.getIntegrationManager();
         this.deviceRegistry = core.getDeviceRegistry();
         this.integrationRegistry = core.getIntegrationRegistry();
+
+        // 设置日志上下文，将日志路由到对应集成的日志文件
+        String coordinate = loadOption.getIntegrationInfo().getCoordinate();
+        Log.setIntegrationContext(coordinate);
+        LogManager.getInstance().registerIntegration(coordinate, loadOption.getIntegrationInfo());
     }
-    
+
     public String getName() {
         return this.getClass().getSimpleName();
     }
@@ -71,5 +77,17 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
     // integration schedule task executor
     public ScheduledExecutorService getScheduledExecutor() {
         return this.core.getTaskManager().getExecutorService();
+    }
+
+    @Override
+    public void onRelease() {
+        // 清除日志上下文
+        Log.clearIntegrationContext();
+
+        // 从日志管理器中注销集成
+        if (this.loadOption != null && this.loadOption.getIntegrationInfo() != null) {
+            String coordinate = this.loadOption.getIntegrationInfo().getCoordinate();
+            LogManager.getInstance().unregisterIntegration(coordinate);
+        }
     }
 }

@@ -40,9 +40,19 @@ import java.util.List;
  */
 public class CloudRepositoryClient {
 
+    /** 默认云端仓库 API 地址 */
+    public static final String DEFAULT_CLOUD_API_URL = "https://mvn.ecat.bellyking.top";
+
     private final String cloudApiBaseUrl;
     private final int connectTimeout;
     private final int readTimeout;
+
+    /**
+     * 默认构造函数 - 使用默认云端仓库地址
+     */
+    public CloudRepositoryClient() {
+        this(DEFAULT_CLOUD_API_URL);
+    }
 
     /**
      * 构造函数

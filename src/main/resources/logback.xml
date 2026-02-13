@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <!-- 注册自定义转换器，跳过 Log.java 包装器显示真实调用位置 -->
+    <!-- TurboFilter: 自动设置 MDC 坐标 -->
+    <turboFilter class="com.ecat.core.Log.ClassLoaderCoordinateFilter"/>
+
+    <!-- 注册自定义转换器 -->
     <conversionRule conversionWord="callerEx" converterClass="com.ecat.core.Utils.CallerDataConverter" />
+    <conversionRule conversionWord="coordinate" converterClass="com.ecat.core.Utils.CoordinateConverter"/>
 
     <!-- 日志输出格式 -->
     <property name="log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%callerEx] - %msg%n" />
+    <property name="log.pattern.coordinate" value="%d{HH:mm:ss.SSS} [%coordinate] [%thread] %-5level %logger{36} - %msg%n" />
 
     <!-- 日志存放路径 项目根目录/logs -->
     <property name="log.path" value="logs" />
@@ -31,7 +36,7 @@
             <maxHistory>7</maxHistory>
         </rollingPolicy>
         <encoder>
-            <pattern>${log.pattern}</pattern>
+            <pattern>${log.pattern.coordinate}</pattern>
         </encoder>
     </appender>
 
@@ -45,7 +50,7 @@
             <maxHistory>7</maxHistory>
         </rollingPolicy>
         <encoder>
-            <pattern>${log.pattern}</pattern>
+            <pattern>${log.pattern.coordinate}</pattern>
         </encoder>
         <filter class="ch.qos.logback.classic.filter.LevelFilter">
             <level>DEBUG</level>
@@ -64,7 +69,7 @@
             <maxHistory>60</maxHistory>
         </rollingPolicy>
         <encoder>
-            <pattern>${log.pattern}</pattern>
+            <pattern>${log.pattern.coordinate}</pattern>
         </encoder>
         <filter class="ch.qos.logback.classic.filter.LevelFilter">
             <level>ERROR</level>
@@ -73,6 +78,31 @@
         </filter>
     </appender>
 
+    <!-- SiftingAppender: 按插件分离日志文件 -->
+    <appender name="file_integration" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator>
+            <key>integration.coordinate</key>
+            <defaultValue>core</defaultValue>
+        </discriminator>
+        <sift>
+            <appender name="FILE-${integration.coordinate}" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${log.path}/integrations/${integration.coordinate}/ecat.log</file>
+                <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                    <fileNamePattern>${log.path}/integrations/${integration.coordinate}/ecat.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+                    <maxFileSize>${max.file.size}</maxFileSize>
+                    <totalSizeCap>1GB</totalSizeCap>
+                    <maxHistory>7</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>${log.pattern.coordinate}</pattern>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+
+    <!-- 广播 Appender: 将日志推送到 SSE -->
+    <appender name="broadcast" class="com.ecat.core.Log.LogBroadcastAppender"/>
+
     <!-- 日志级别控制 -->
     <!-- 启用 ecat 核心和集成的 debug 日志 -->
     <logger name="com.ecat" level="debug" additivity="false">
@@ -80,6 +110,8 @@
         <appender-ref ref="file_all" />
         <appender-ref ref="file_debug" />
         <appender-ref ref="file_error" />
+        <appender-ref ref="file_integration" />
+        <appender-ref ref="broadcast" />
     </logger>
 
     <!-- ruoyi 框架日志级别 -->
@@ -91,5 +123,7 @@
         <appender-ref ref="console" />
         <appender-ref ref="file_all" />
         <appender-ref ref="file_error" />
+        <appender-ref ref="file_integration" />
+        <appender-ref ref="broadcast" />
     </root>
 </configuration>

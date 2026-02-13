@@ -17,35 +17,63 @@
 package com.ecat.core.Utils;
 
 /**
- * LogFactory is a factory class responsible for creating Log instances.
- * It implements the Singleton pattern to ensure only one instance of LogFactory exists.
- * 
- * @author coffee
+ * Log 工厂类
+ *
+ * <p>创建 Log 实例，支持自动坐标检测。
+ *
+ * <p>使用示例：
+ * <pre>
+ * Log log = LogFactory.getLogger(MyClass.class);
+ * log.info("Hello, World!");
+ * </pre>
  */
 public class LogFactory {
-    /**
-     * The single instance of LogFactory, created eagerly.
-     * This is a static final field, ensuring it's thread-safe and immutable.
-     */
     private static final LogFactory INSTANCE = new LogFactory();
 
-    /**
-     * Private constructor to prevent external instantiation of this class.
-     * This ensures the Singleton pattern is maintained by controlling object creation.
-     */
     private LogFactory() {
-        // 私有构造函数，防止外部实例化
     }
 
+    /**
+     * 获取工厂实例
+     *
+     * @return 工厂实例
+     */
     public static LogFactory getInstance() {
         return INSTANCE;
     }
 
+    /**
+     * 获取日志器（按类）
+     *
+     * <p>自动检测类的坐标。
+     *
+     * @param clazz 类
+     * @return 日志器
+     */
     public static Log getLogger(Class<?> clazz) {
-        return new Log(clazz.getName());
+        return new Log(clazz);
     }
 
+    /**
+     * 获取日志器（按名称）
+     *
+     * @param name 日志器名称
+     * @return 日志器
+     */
     public static Log getLogger(String name) {
         return new Log(name);
+    }
+
+    /**
+     * 获取日志器（按名称+类）
+     *
+     * <p>使用指定的名称，但坐标检测使用类。
+     *
+     * @param name 日志器名称
+     * @param clazz 类（用于坐标检测）
+     * @return 日志器
+     */
+    public static Log getLogger(String name, Class<?> clazz) {
+        return new Log(name, clazz);
     }
 }

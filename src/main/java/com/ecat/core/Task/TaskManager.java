@@ -18,33 +18,47 @@ package com.ecat.core.Task;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+
+import com.ecat.core.Utils.Mdc.MdcScheduledExecutorService;
 
 /**
  * TaskManager class is responsible for managing scheduled tasks using a thread pool.
  * It provides methods to pause, stop, and access the executor service.
- * 
+ * Uses MDC-wrapped executor to preserve context across async tasks.
+ *
  * @author coffee
  */
 public class TaskManager {
-    // Executor service for scheduling and executing tasks
-    private final ScheduledExecutorService executorService;
-    private static final int THREAD_POOL_SIZE = 2; // 可根据实际情况调整线程池大小
+    // Raw executor service (for shutdown)
+    private final ScheduledExecutorService rawExecutorService = Executors.newScheduledThreadPool(2);
+    // MDC-wrapped executor service (for task execution with context propagation)
+    private final ScheduledExecutorService executorService = MdcScheduledExecutorService.wrap(this.rawExecutorService);
 
-    public TaskManager() {
-        this.executorService = Executors.newScheduledThreadPool(THREAD_POOL_SIZE);
-    }
+    private static final int THREAD_POOL_SIZE = 2;
 
     public ScheduledExecutorService getExecutorService() {
-        return executorService;
+        return this.executorService;
+    }
+
+    public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long period, TimeUnit unit) {
+        return this.executorService.scheduleWithFixedDelay(command, initialDelay, period, unit);
+    }
+
+    public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period, TimeUnit unit) {
+        return this.executorService.scheduleAtFixedRate(command, initialDelay, period, unit);
+    }
+
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+        return this.executorService.schedule(command, delay, unit);
     }
 
     public void pauseAllTasks() {
-        // 这里可以实现更复杂的暂停逻辑，例如标记任务状态等
-        // 简单情况下可以直接调用 shutdownNow，但会直接停止所有任务
-        // executorService.shutdownNow();
+        // 空实现，可扩展
     }
 
     public void stopAllTasks() {
-        executorService.shutdownNow();
+        this.rawExecutorService.shutdownNow();
     }
 }

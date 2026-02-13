@@ -26,6 +26,7 @@ import com.ecat.core.Utils.JarScanException;
 import com.ecat.core.Utils.LoadJarResult;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
+import com.ecat.core.Utils.Mdc.MdcExecutorService;
 
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -69,7 +70,7 @@ public class IntegrationManager {
     private final EcatCore core;
     private final IntegrationRegistry integrationRegistry;
     private final StateManager stateManager;
-    private ExecutorService executorService = Executors.newFixedThreadPool(1);
+    private ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1));
     private final LoadJarUtils loadJarUtils;
     private final URLClassLoader restartClassLoader;
 
@@ -357,6 +358,7 @@ public class IntegrationManager {
                             // Object checkService = clazz.getDeclaredConstructor().newInstance();
                             IntegrationBase integration = checkService.getIntegration();
                             IntegrationLoadOption loadOption = new IntegrationLoadOption(checkService.getClassLoader());
+                            loadOption.setIntegrationInfo(info);
 
                             try{
                                 integration.onLoad(core, loadOption);
@@ -389,7 +391,7 @@ public class IntegrationManager {
                 log.warn("集成加载超时，部分集成可能未完全加载");
             }
             // 重新创建线程池（后续操作可能需要）
-            executorService = Executors.newFixedThreadPool(1);
+            executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1));
 
             // 更新所有成功加载的集成状态为 RUNNING（包括之前是 PENDING_ADDED 的）
             updateLoadedIntegrationsState();

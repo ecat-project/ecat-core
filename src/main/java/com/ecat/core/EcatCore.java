@@ -22,6 +22,7 @@ import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.I18n.I18nRegistry;
 import com.ecat.core.Integration.IntegrationManager;
 import com.ecat.core.Integration.IntegrationRegistry;
+import com.ecat.core.Log.LogManager;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
 
@@ -107,6 +108,9 @@ public class EcatCore {
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
         deviceRegistry = new DeviceRegistry();
         i18nRegistry = I18nRegistry.getInstance();
+
+        // 注册 core 日志缓冲区
+        LogManager.getInstance().registerIntegration("core", null);
     }
 
     public void load(){
