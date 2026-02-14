@@ -9,7 +9,6 @@ import com.ecat.core.Device.DeviceClasses;
 import com.ecat.core.Device.DeviceStatus;
 import org.junit.Test;
 import static org.junit.Assert.*;
-import java.io.InputStream;
 
 /**
  * Test class for Core I18n functionality
@@ -110,9 +109,9 @@ public class CoreI18nTest {
         I18nProxy proxy = I18nHelper.createCoreProxy();
         assertNotNull(proxy);
 
-        // Test that the proxy has correct artifactId
-        assertEquals(Const.CORE_ARTIFACT_ID, proxy.getArtifactId());
-        assertEquals(Const.CORE_ARTIFACT_ID, proxy.getNamespace());
+        // Test that the proxy has correct coordinate
+        assertEquals(Const.CORE_COORDINATE, proxy.getCoordinate());
+        assertEquals(Const.CORE_COORDINATE, proxy.getNamespace());
     }
 
     @Test

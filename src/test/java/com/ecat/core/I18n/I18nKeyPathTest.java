@@ -133,6 +133,10 @@ public class I18nKeyPathTest {
         assertEquals("state.select_attr.", original.getPathPrefix());
         assertEquals("options", original.getLastSegment());
         assertEquals("state.select_attr.options", original.getFullPath());
+        // Modified should equal the new values
+        assertEquals("state.select_attr.", modified.getPathPrefix());
+        assertEquals("commands", modified.getLastSegment());
+        assertEquals("state.select_attr.commands", modified.getFullPath());
     }
 
     @Test
@@ -164,6 +168,7 @@ public class I18nKeyPathTest {
         assertEquals("devices.qc_device.", original.getPathPrefix());
         assertEquals("device_status", original.getLastSegment());
         assertEquals("devices.qc_device.device_status", original.getFullPath());
+        assertEquals("devices.qc_device.device_status_commands", modified.getFullPath());
     }
 
     @Test

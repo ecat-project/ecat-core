@@ -100,7 +100,7 @@ public class EcatCore {
     // }
 
     public void init() {
-        i18nProxy = new I18nProxy(Const.CORE_ARTIFACT_ID, EcatCore.class, EcatCore.class.getClassLoader());
+        i18nProxy = new I18nProxy(Const.CORE_COORDINATE, EcatCore.class, EcatCore.class.getClassLoader());
         integrationRegistry = new IntegrationRegistry();
         busRegistry = new BusRegistry();
         stateManager = new StateManager();

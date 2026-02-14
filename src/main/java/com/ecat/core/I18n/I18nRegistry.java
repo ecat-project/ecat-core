@@ -45,23 +45,26 @@ public class I18nRegistry {
 
     /**
      * Register an I18nProxy instance
+     * @param coordinate groupId:artifactId format
      */
-    public void registerProxy(String artifactId, I18nProxy proxy) {
-        proxyMap.put(artifactId, proxy);
+    public void registerProxy(String coordinate, I18nProxy proxy) {
+        proxyMap.put(coordinate, proxy);
     }
 
     /**
-     * Get an I18nProxy instance by artifactId
+     * Get an I18nProxy instance by coordinate
+     * @param coordinate groupId:artifactId format
      */
-    public I18nProxy getProxy(String artifactId) {
-        return proxyMap.get(artifactId);
+    public I18nProxy getProxy(String coordinate) {
+        return proxyMap.get(coordinate);
     }
 
     /**
      * Unregister and remove an I18nProxy instance
+     * @param coordinate groupId:artifactId format
      */
-    public void unregisterProxy(String artifactId) {
-        I18nProxy proxy = proxyMap.remove(artifactId);
+    public void unregisterProxy(String coordinate) {
+        I18nProxy proxy = proxyMap.remove(coordinate);
         if (proxy != null) {
             allResources.remove(proxy.getNamespace());
         }
@@ -119,8 +122,8 @@ public class I18nRegistry {
         }
 
         // Fallback to core namespace
-        if (!Const.CORE_ARTIFACT_ID.equals(namespace)) {
-            Map<String, Object> coreResources = allResources.get(Const.CORE_ARTIFACT_ID);
+        if (!Const.CORE_COORDINATE.equals(namespace)) {
+            Map<String, Object> coreResources = allResources.get(Const.CORE_COORDINATE);
             if (coreResources != null) {
                 return getNestedValue(coreResources, key);
             }

@@ -25,8 +25,8 @@ public class SimpleI18nTest {
         I18nProxy proxy = I18nHelper.createCoreProxy();
         assertNotNull(proxy);
 
-        // Test namespace
-        assertEquals(Const.CORE_ARTIFACT_ID, proxy.getNamespace());
+        // Test namespace (now uses coordinate)
+        assertEquals(Const.CORE_COORDINATE, proxy.getNamespace());
 
         // Test basic translation (should return key if not found)
         String result = proxy.t("test.key");

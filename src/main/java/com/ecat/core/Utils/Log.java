@@ -61,7 +61,7 @@ public class Log implements Logger {
     private static CoordinateMode coordinateMode = CoordinateMode.LOG_FIRST;
     private static final String COORDINATE_MODE_PROPERTY = "ecat.log.coordinate.mode";
     private static final String CONFIG_FILE_PATH = ".ecat-data/core/config.yml";
-    private static final String CORE_COORDINATE = "core";
+    private static final String CORE_COORDINATE = com.ecat.core.Const.CORE_COORDINATE;
 
     static {
         coordinateMode = loadCoordinateMode();
@@ -387,313 +387,268 @@ public class Log implements Logger {
     }
 
     // ========== TRACE 方法 ==========
+    // broadcast 由 Logback LogBroadcastAppender 处理，避免重复
 
     @Override
     public void trace(String msg) {
         logger.trace(msg);
-        broadcast("TRACE", msg, null);
     }
 
     @Override
     public void trace(String format, Object arg) {
         logger.trace(format, arg);
-        broadcast("TRACE", this.format(format, arg), null);
     }
 
     @Override
     public void trace(String format, Object arg1, Object arg2) {
         logger.trace(format, arg1, arg2);
-        broadcast("TRACE", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void trace(String format, Object... arguments) {
         logger.trace(format, arguments);
-        broadcast("TRACE", this.format(format, arguments), null);
     }
 
     @Override
     public void trace(String msg, Throwable t) {
         logger.trace(msg, t);
-        broadcast("TRACE", msg, t);
     }
 
     @Override
     public void trace(Marker marker, String msg) {
         logger.trace(marker, msg);
-        broadcast("TRACE", msg, null);
     }
 
     @Override
     public void trace(Marker marker, String format, Object arg) {
         logger.trace(marker, format, arg);
-        broadcast("TRACE", this.format(format, arg), null);
     }
 
     @Override
     public void trace(Marker marker, String format, Object arg1, Object arg2) {
         logger.trace(marker, format, arg1, arg2);
-        broadcast("TRACE", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void trace(Marker marker, String format, Object... argArray) {
         logger.trace(marker, format, argArray);
-        broadcast("TRACE", this.format(format, argArray), null);
     }
 
     @Override
     public void trace(Marker marker, String msg, Throwable t) {
         logger.trace(marker, msg, t);
-        broadcast("TRACE", msg, t);
     }
 
     // ========== DEBUG 方法 ==========
+    // broadcast 由 Logback LogBroadcastAppender 处理，避免重复
 
     @Override
     public void debug(String msg) {
         logger.debug(msg);
-        broadcast("DEBUG", msg, null);
     }
 
     @Override
     public void debug(String format, Object arg) {
         logger.debug(format, arg);
-        broadcast("DEBUG", this.format(format, arg), null);
     }
 
     @Override
     public void debug(String format, Object arg1, Object arg2) {
         logger.debug(format, arg1, arg2);
-        broadcast("DEBUG", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void debug(String format, Object... arguments) {
         logger.debug(format, arguments);
-        broadcast("DEBUG", this.format(format, arguments), null);
     }
 
     @Override
     public void debug(String msg, Throwable t) {
         logger.debug(msg, t);
-        broadcast("DEBUG", msg, t);
     }
 
     @Override
     public void debug(Marker marker, String msg) {
         logger.debug(marker, msg);
-        broadcast("DEBUG", msg, null);
     }
 
     @Override
     public void debug(Marker marker, String format, Object arg) {
         logger.debug(marker, format, arg);
-        broadcast("DEBUG", this.format(format, arg), null);
     }
 
     @Override
     public void debug(Marker marker, String format, Object arg1, Object arg2) {
         logger.debug(marker, format, arg1, arg2);
-        broadcast("DEBUG", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void debug(Marker marker, String format, Object... argArray) {
         logger.debug(marker, format, argArray);
-        broadcast("DEBUG", this.format(format, argArray), null);
     }
 
     @Override
     public void debug(Marker marker, String msg, Throwable t) {
         logger.debug(marker, msg, t);
-        broadcast("DEBUG", msg, t);
     }
 
     // ========== INFO 方法 ==========
+    // broadcast 由 Logback LogBroadcastAppender 处理，避免重复
 
     @Override
     public void info(String msg) {
         logger.info(msg);
-        broadcast("INFO", msg, null);
     }
 
     @Override
     public void info(String format, Object arg) {
         logger.info(format, arg);
-        broadcast("INFO", this.format(format, arg), null);
     }
 
     @Override
     public void info(String format, Object arg1, Object arg2) {
         logger.info(format, arg1, arg2);
-        broadcast("INFO", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void info(String format, Object... arguments) {
         logger.info(format, arguments);
-        broadcast("INFO", this.format(format, arguments), null);
     }
 
     @Override
     public void info(String msg, Throwable t) {
         logger.info(msg, t);
-        broadcast("INFO", msg, t);
     }
 
     @Override
     public void info(Marker marker, String msg) {
         logger.info(marker, msg);
-        broadcast("INFO", msg, null);
     }
 
     @Override
     public void info(Marker marker, String format, Object arg) {
         logger.info(marker, format, arg);
-        broadcast("INFO", this.format(format, arg), null);
     }
 
     @Override
     public void info(Marker marker, String format, Object arg1, Object arg2) {
         logger.info(marker, format, arg1, arg2);
-        broadcast("INFO", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void info(Marker marker, String format, Object... arguments) {
         logger.info(marker, format, arguments);
-        broadcast("INFO", this.format(format, arguments), null);
     }
 
     @Override
     public void info(Marker marker, String msg, Throwable t) {
         logger.info(marker, msg, t);
-        broadcast("INFO", msg, t);
     }
 
     // ========== WARN 方法 ==========
+    // broadcast 由 Logback LogBroadcastAppender 处理，避免重复
 
     @Override
     public void warn(String msg) {
         logger.warn(msg);
-        broadcast("WARN", msg, null);
     }
 
     @Override
     public void warn(String format, Object arg) {
         logger.warn(format, arg);
-        broadcast("WARN", this.format(format, arg), null);
     }
 
     @Override
     public void warn(String format, Object arg1, Object arg2) {
         logger.warn(format, arg1, arg2);
-        broadcast("WARN", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void warn(String format, Object... arguments) {
         logger.warn(format, arguments);
-        broadcast("WARN", this.format(format, arguments), null);
     }
 
     @Override
     public void warn(String msg, Throwable t) {
         logger.warn(msg, t);
-        broadcast("WARN", msg, t);
     }
 
     @Override
     public void warn(Marker marker, String msg) {
         logger.warn(marker, msg);
-        broadcast("WARN", msg, null);
     }
 
     @Override
     public void warn(Marker marker, String format, Object arg) {
         logger.warn(marker, format, arg);
-        broadcast("WARN", this.format(format, arg), null);
     }
 
     @Override
     public void warn(Marker marker, String format, Object arg1, Object arg2) {
         logger.warn(marker, format, arg1, arg2);
-        broadcast("WARN", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void warn(Marker marker, String format, Object... argArray) {
         logger.warn(marker, format, argArray);
-        broadcast("WARN", this.format(format, argArray), null);
     }
 
     @Override
     public void warn(Marker marker, String msg, Throwable t) {
         logger.warn(marker, msg, t);
-        broadcast("WARN", msg, t);
     }
 
     // ========== ERROR 方法 ==========
+    // broadcast 由 Logback LogBroadcastAppender 处理，避免重复
 
     @Override
     public void error(String msg) {
         logger.error(msg);
-        broadcast("ERROR", msg, null);
     }
 
     @Override
     public void error(String format, Object arg) {
         logger.error(format, arg);
-        broadcast("ERROR", this.format(format, arg), null);
     }
 
     @Override
     public void error(String format, Object arg1, Object arg2) {
         logger.error(format, arg1, arg2);
-        broadcast("ERROR", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void error(String format, Object... arguments) {
         logger.error(format, arguments);
-        broadcast("ERROR", this.format(format, arguments), null);
     }
 
     @Override
     public void error(String msg, Throwable t) {
         logger.error(msg, t);
-        broadcast("ERROR", msg, t);
     }
 
     @Override
     public void error(Marker marker, String msg) {
         logger.error(marker, msg);
-        broadcast("ERROR", msg, null);
     }
 
     @Override
     public void error(Marker marker, String format, Object arg) {
         logger.error(marker, format, arg);
-        broadcast("ERROR", this.format(format, arg), null);
     }
 
     @Override
     public void error(Marker marker, String format, Object arg1, Object arg2) {
         logger.error(marker, format, arg1, arg2);
-        broadcast("ERROR", this.format(format, arg1, arg2), null);
     }
 
     @Override
     public void error(Marker marker, String format, Object... arguments) {
         logger.error(marker, format, arguments);
-        broadcast("ERROR", this.format(format, arguments), null);
     }
 
     @Override
     public void error(Marker marker, String msg, Throwable t) {
         logger.error(marker, msg, t);
-        broadcast("ERROR", msg, t);
     }
 
     /**

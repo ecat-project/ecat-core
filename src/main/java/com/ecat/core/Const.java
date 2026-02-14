@@ -24,6 +24,17 @@ package com.ecat.core;
  */
 public class Const {
 
+    /**
+     * Core module coordinate (groupId:artifactId format)
+     * Used as unique identifier for I18n to avoid conflicts between different groupIds
+     */
+    public static final String CORE_COORDINATE = "com.ecat:ecat-core";
+
+    /**
+     * Core module artifactId
+     * @deprecated Use {@link #CORE_COORDINATE} instead for I18n purposes
+     */
+    @Deprecated
     public static final String CORE_ARTIFACT_ID = "ecat-core"; // 与pom.xml中保持一致，为i18n使用
 
 }

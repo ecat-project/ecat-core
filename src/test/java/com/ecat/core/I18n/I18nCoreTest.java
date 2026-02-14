@@ -8,7 +8,6 @@ import com.ecat.core.Const;
 import java.util.Locale;
 import java.util.Map;
 import java.util.HashMap;
-import java.lang.reflect.Method;
 
 import static org.junit.Assert.*;
 
@@ -94,13 +93,13 @@ public class I18nCoreTest {
 
     /** 注入测试proxy到I18nHelper.proxyCache，保证全局t方法走测试资源 */
     private void injectTestProxyToCache() throws Exception {
-        I18nProxy proxy = new I18nProxy(Const.CORE_ARTIFACT_ID, getClass(), getClass().getClassLoader());
+        I18nProxy proxy = new I18nProxy(Const.CORE_COORDINATE, getClass(), getClass().getClassLoader());
         com.ecat.core.Utils.TestTools.setPrivateField(proxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
         java.lang.reflect.Field cacheField = I18nHelper.class.getDeclaredField("proxyCache");
         cacheField.setAccessible(true);
         @SuppressWarnings("unchecked")
         java.util.Map<String, I18nProxy> cache = (java.util.Map<String, I18nProxy>) cacheField.get(null);
-        cache.put(Const.CORE_ARTIFACT_ID, proxy);
+        cache.put(Const.CORE_COORDINATE, proxy);
     }
 
     /**
@@ -150,7 +149,21 @@ public class I18nCoreTest {
      */
     @Test
     public void testI18nProxyCreation() throws Exception {
-        I18nProxy proxy = new I18nProxy("myecat", getClass(), getClass().getClassLoader()) {
+        // Test integration proxy with coordinate format
+        I18nProxy proxy = new I18nProxy("com.ecat:myecat", getClass(), getClass().getClassLoader()) {
+            {
+                // 注入测试资源加载器
+                com.ecat.core.Utils.TestTools.setPrivateField(this, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
+            }
+        };
+        assertNotNull(proxy);
+
+        // Verify namespace is correct (now using coordinate directly)
+        assertEquals("com.ecat:myecat", proxy.getNamespace());
+        assertEquals("com.ecat:myecat", proxy.getCoordinate());
+
+        // Test core proxy
+        proxy = new I18nProxy(Const.CORE_COORDINATE, getClass(), getClass().getClassLoader()) {
             {
                 // 注入测试资源加载器
                 com.ecat.core.Utils.TestTools.setPrivateField(this, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
@@ -159,18 +172,7 @@ public class I18nCoreTest {
         assertNotNull(proxy);
 
         // Verify namespace is correct
-        assertEquals("integration.myecat", proxy.getNamespace());
-
-        proxy = new I18nProxy(Const.CORE_ARTIFACT_ID, getClass(), getClass().getClassLoader()) {
-            {
-                // 注入测试资源加载器
-                com.ecat.core.Utils.TestTools.setPrivateField(this, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
-            }
-        };
-        assertNotNull(proxy);
-
-        // Verify namespace is correct
-        assertEquals(Const.CORE_ARTIFACT_ID, proxy.getNamespace());
+        assertEquals(Const.CORE_COORDINATE, proxy.getNamespace());
     }
 
     /**
@@ -178,7 +180,7 @@ public class I18nCoreTest {
      */
     @Test
     public void testI18nProxyBasicTranslation() throws Exception {
-        I18nProxy proxy = new I18nProxy("custom-test", getClass(), getClass().getClassLoader());
+        I18nProxy proxy = new I18nProxy("com.ecat:custom-test", getClass(), getClass().getClassLoader());
         com.ecat.core.Utils.TestTools.setPrivateField(proxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
 
         // Test English translations
@@ -198,7 +200,7 @@ public class I18nCoreTest {
      */
     @Test
     public void testI18nProxyLocaleSwitching() throws Exception {
-        I18nProxy proxy = new I18nProxy("custom-test", getClass(), getClass().getClassLoader());
+        I18nProxy proxy = new I18nProxy("com.ecat:custom-test", getClass(), getClass().getClassLoader());
         com.ecat.core.Utils.TestTools.setPrivateField(proxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
 
         // Test English translations
@@ -212,7 +214,7 @@ public class I18nCoreTest {
      */
     @Test
     public void testI18nProxyParameterizedTranslation() throws Exception {
-        I18nProxy proxy = new I18nProxy("custom-test", getClass(), getClass().getClassLoader());
+        I18nProxy proxy = new I18nProxy("com.ecat:custom-test", getClass(), getClass().getClassLoader());
         com.ecat.core.Utils.TestTools.setPrivateField(proxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
         I18nHelper.setLocale("en-US");
 
@@ -226,7 +228,7 @@ public class I18nCoreTest {
      */
     @Test
     public void testI18nProxyNamedParameterTranslation() throws Exception {
-        I18nProxy proxy = new I18nProxy("custom-test", getClass(), getClass().getClassLoader());
+        I18nProxy proxy = new I18nProxy("com.ecat:custom-test", getClass(), getClass().getClassLoader());
         com.ecat.core.Utils.TestTools.setPrivateField(proxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
         I18nHelper.setLocale("en-US");
 
@@ -235,21 +237,6 @@ public class I18nCoreTest {
         String result = proxy.t("turn_off", params);
         assertNotNull(result);
         assertTrue(result.contains("Light") || result.contains("{entity_name}"));
-    }
-
-    /**
-     * 测试 I18nHelper.getArtifactId 只返回本 jar 的 artifactId
-     */
-    @Test
-    public void testI18nHelperArtifactIdJarLocation() throws Exception {
-        // 通过反射获取I18nHelper的getArtifactId方法
-        Method method = com.ecat.core.Utils.TestTools.findMethod(
-            I18nHelper.class, "getArtifactId", Class.class, ClassLoader.class
-        );
-        method.setAccessible(true);
-        String artifactId = (String) method.invoke(null, I18nHelper.class, I18nHelper.class.getClassLoader());
-        assertNotNull(artifactId);
-        assertEquals(Const.CORE_ARTIFACT_ID, artifactId); // 只允许本jar返回ecat
     }
 
     /**
@@ -269,7 +256,7 @@ public class I18nCoreTest {
      */
     @Test
     public void testI18nProxyPluralization() throws Exception {
-        I18nProxy proxy = new I18nProxy("custom-test", getClass(), getClass().getClassLoader());
+        I18nProxy proxy = new I18nProxy("com.ecat:custom-test", getClass(), getClass().getClassLoader());
         com.ecat.core.Utils.TestTools.setPrivateField(proxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
         I18nHelper.setLocale("en-US");
 
@@ -357,7 +344,7 @@ public class I18nCoreTest {
      */
     @Test
     public void testI18nNestedKeyAccess() throws Exception {
-        I18nProxy proxy = new I18nProxy("custom-test", getClass(), getClass().getClassLoader());
+        I18nProxy proxy = new I18nProxy("com.ecat:custom-test", getClass(), getClass().getClassLoader());
         com.ecat.core.Utils.TestTools.setPrivateField(proxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
         I18nHelper.setLocale("en-US");
 
@@ -376,12 +363,34 @@ public class I18nCoreTest {
     public void testI18nRegistryProxyManagement() {
         I18nRegistry registry = I18nRegistry.getInstance();
 
-        // Create proxy for custom namespace
-        I18nProxy customProxy = I18nHelper.createProxy("custom.namespace", getClass());
-        registry.registerProxy("custom.namespace", customProxy);
+        // Create proxy for custom coordinate
+        I18nProxy customProxy = I18nHelper.createProxy("com.ecat:custom.namespace", getClass());
+        registry.registerProxy("com.ecat:custom.namespace", customProxy);
 
         // Verify proxy is registered
-        I18nProxy retrievedProxy = registry.getProxy("custom.namespace");
+        I18nProxy retrievedProxy = registry.getProxy("com.ecat:custom.namespace");
         assertSame(customProxy, retrievedProxy);
+    }
+
+    /**
+     * 测试 I18nProxy 的 getCoordinate 和 getArtifactId 方法
+     */
+    @Test
+    public void testI18nProxyCoordinateMethods() throws Exception {
+        I18nProxy proxy = new I18nProxy("com.ecat:my-integration", getClass(), getClass().getClassLoader());
+        com.ecat.core.Utils.TestTools.setPrivateField(proxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
+
+        // Test getCoordinate
+        assertEquals("com.ecat:my-integration", proxy.getCoordinate());
+
+        // Test getArtifactId (deprecated, extracts from coordinate)
+        assertEquals("my-integration", proxy.getArtifactId());
+
+        // Test core proxy
+        I18nProxy coreProxy = new I18nProxy(Const.CORE_COORDINATE, getClass(), getClass().getClassLoader());
+        com.ecat.core.Utils.TestTools.setPrivateField(coreProxy, "resourceLoader", new TestResourceLoader(getClass(), getClass().getClassLoader()));
+
+        assertEquals(Const.CORE_COORDINATE, coreProxy.getCoordinate());
+        assertEquals("ecat-core", coreProxy.getArtifactId());
     }
 }

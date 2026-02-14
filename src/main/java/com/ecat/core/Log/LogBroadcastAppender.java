@@ -85,7 +85,7 @@ public class LogBroadcastAppender extends AppenderBase<ILoggingEvent> {
         if (coordinate != null && !coordinate.isEmpty()) {
             return coordinate;
         }
-        Map<String, String> mdcMap = event.getMdc();
+        Map<String, String> mdcMap = event.getMDCPropertyMap();
         if (mdcMap != null) {
             coordinate = mdcMap.get(MDC_COORDINATE_KEY);
             if (coordinate != null && !coordinate.isEmpty()) {

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <!-- TurboFilter: 自动设置 MDC 坐标 -->
+    <!-- TurboFilter: 为动态加载的JAR自动设置MDC坐标 -->
     <turboFilter class="com.ecat.core.Log.ClassLoaderCoordinateFilter"/>
 
     <!-- 注册自定义转换器 -->

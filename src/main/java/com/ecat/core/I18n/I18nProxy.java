@@ -16,7 +16,6 @@
 
 package com.ecat.core.I18n;
 
-import com.ecat.core.Const;
 import com.ibm.icu.text.MessageFormat;
 import com.ibm.icu.text.PluralFormat;
 import com.ibm.icu.text.PluralRules;
@@ -34,7 +33,7 @@ public class I18nProxy {
 
     private static final I18nRegistry REGISTRY = I18nRegistry.getInstance();
 
-    private final String artifactId;
+    private final String coordinate;
     private final String namespace;
     private final ClassLoader classLoader;
     private final ResourceLoader resourceLoader;
@@ -43,26 +42,40 @@ public class I18nProxy {
 
     /**
      * Create I18nProxy for a specific integration
+     * @param coordinate groupId:artifactId format (e.g., "com.ecat:ecat-core" or "com.ecat:integration-xxx")
      */
-    public I18nProxy(String artifactId, Class<?> clazz, ClassLoader classLoader) {
-        this.artifactId = artifactId;
+    public I18nProxy(String coordinate, Class<?> clazz, ClassLoader classLoader) {
+        this.coordinate = coordinate;
         this.clazz = clazz;
-        this.namespace = Const.CORE_ARTIFACT_ID.equals(artifactId) ? Const.CORE_ARTIFACT_ID : "integration." + artifactId;
+        this.namespace = coordinate;  // Use coordinate directly as namespace
         this.classLoader = classLoader;
         this.resourceLoader = new ResourceLoader(this.clazz, classLoader);
 
         // Register this proxy with the registry
-        REGISTRY.registerProxy(artifactId, this);
+        REGISTRY.registerProxy(coordinate, this);
 
         // Load initial resources
         reloadResources();
     }
 
     /**
-     * Get the artifactId
+     * Get the coordinate (groupId:artifactId)
      */
+    public String getCoordinate() {
+        return coordinate;
+    }
+
+    /**
+     * Get the artifactId
+     * @deprecated Use {@link #getCoordinate()} instead
+     */
+    @Deprecated
     public String getArtifactId() {
-        return artifactId;
+        // Extract artifactId from coordinate for backward compatibility
+        if (coordinate != null && coordinate.contains(":")) {
+            return coordinate.substring(coordinate.indexOf(":") + 1);
+        }
+        return coordinate;
     }
 
     /**

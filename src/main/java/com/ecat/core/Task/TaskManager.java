@@ -32,7 +32,7 @@ import com.ecat.core.Utils.Mdc.MdcScheduledExecutorService;
  */
 public class TaskManager {
     // Raw executor service (for shutdown)
-    private final ScheduledExecutorService rawExecutorService = Executors.newScheduledThreadPool(2);
+    private final ScheduledExecutorService rawExecutorService = Executors.newScheduledThreadPool(THREAD_POOL_SIZE);
     // MDC-wrapped executor service (for task execution with context propagation)
     private final ScheduledExecutorService executorService = MdcScheduledExecutorService.wrap(this.rawExecutorService);
 
