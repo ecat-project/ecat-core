@@ -158,10 +158,11 @@ public class TaskManager {
     /**
      * Infer the caller's coordinate by inspecting the call stack.
      * Looks for IntegrationBase subclasses and extracts their coordinate.
+     * Returns format: integration-{name} (e.g., integration-serial, integration-sailhero)
      *
      * @return inferred coordinate prefix, or "ecat" as default
      */
-    private String inferCallerCoordinate() {
+    String inferCallerCoordinate() {
         StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
         for (StackTraceElement element : stackTrace) {
             String className = element.getClassName();
@@ -172,7 +173,9 @@ public class TaskManager {
                     if (IntegrationBase.class.isAssignableFrom(clazz) && clazz != IntegrationBase.class) {
                         // Return simplified coordinate using class name
                         String simpleName = clazz.getSimpleName();
-                        return simpleName.replace("Integration", "").toLowerCase();
+                        String name = simpleName.replace("Integration", "").toLowerCase();
+                        // Return in integration-{name} format for clarity
+                        return "integration-" + name;
                     }
                 } catch (ClassNotFoundException ignored) {
                     // Class not found, continue searching

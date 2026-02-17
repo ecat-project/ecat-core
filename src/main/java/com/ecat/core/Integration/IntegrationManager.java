@@ -17,6 +17,7 @@
 package com.ecat.core.Integration;
 
 import com.ecat.core.EcatCore;
+import com.ecat.core.Task.NamedThreadFactory;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Utils.LoadJarUtils;
 import com.ecat.core.Utils.MavenDependencyParser;
@@ -70,7 +71,7 @@ public class IntegrationManager {
     private final EcatCore core;
     private final IntegrationRegistry integrationRegistry;
     private final StateManager stateManager;
-    private ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1));
+    private ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1, new NamedThreadFactory("integration-manager")));
     private final LoadJarUtils loadJarUtils;
     private final URLClassLoader restartClassLoader;
 
@@ -391,7 +392,7 @@ public class IntegrationManager {
                 log.warn("集成加载超时，部分集成可能未完全加载");
             }
             // 重新创建线程池（后续操作可能需要）
-            executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1));
+            executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1, new NamedThreadFactory("integration-manager")));
 
             // 更新所有成功加载的集成状态为 RUNNING（包括之前是 PENDING_ADDED 的）
             updateLoadedIntegrationsState();

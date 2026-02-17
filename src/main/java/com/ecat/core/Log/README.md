@@ -22,6 +22,7 @@
 | TraceIdConverter | ecat-core/.../Utils/Mdc/TraceIdConverter.java | 从 MDC 获取 Trace ID |
 | TraceContext | ecat-core/.../Utils/Mdc/TraceContext.java | 内部使用：提供线程间 MDC 上下文传播 |
 | MdcExecutorService | ecat-core/.../Utils/Mdc/MdcExecutorService.java | 带 MDC 支持的线程池包装器 |
+| NamedThreadFactory | ecat-core/.../Task/NamedThreadFactory.java | 线程工厂，为线程池设置有意义的名称 |
 | MdcScheduledExecutorService | ecat-core/.../Utils/Mdc/MdcScheduledExecutorService.java | 带 MDC 支持的定时任务执行器 |
 | Log | ecat-core/.../Utils/Log.java | 增强版日志包装器，支持坐标模式和日志广播 |
 | LogFactory | ecat-core/.../Utils/LogFactory.java | 日志工厂，创建 Log 实例 |
@@ -278,6 +279,30 @@ scheduler.scheduleAtFixedRate(() -> {
 **MdcExecutorService 工作原理**：
 1. 任务提交时：捕获当前线程的 MDC 上下文
 2. 任务执行时：恢复捕获的上下文，执行任务，清理上下文
+
+**线程命名最佳实践**：
+推荐使用 `NamedThreadFactory` 为线程池设置有意义的名称，便于日志追踪和问题排查：
+
+```java
+// ✅ 推荐：使用 NamedThreadFactory 命名线程
+ExecutorService executor = MdcExecutorService.wrap(
+    Executors.newFixedThreadPool(4, new NamedThreadFactory("integration-myfeature"))
+);
+// 线程名将显示为: integration-myfeature-0, integration-myfeature-1, ...
+
+// ✅ 推荐：定时任务同样需要命名
+ScheduledExecutorService scheduler = MdcScheduledExecutorService.wrap(
+    Executors.newScheduledThreadPool(2, new NamedThreadFactory("integration-scheduler"))
+);
+```
+
+**常见线程池命名规范**：
+| 线程池用途 | 推荐命名 |
+|-----------|---------|
+| 集成管理 | `integration-manager` |
+| 事件总线 | `integration-bus` |
+| 串口异步 | `integration-serial` |
+| 定时任务 | `integration-{feature}-scheduler` |
 
 ---
 

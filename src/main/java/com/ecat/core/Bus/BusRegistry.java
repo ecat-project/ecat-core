@@ -24,6 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
+import com.ecat.core.Task.NamedThreadFactory;
 import com.ecat.core.Utils.Mdc.MdcExecutorService;
 
 /**
@@ -37,7 +38,7 @@ public class BusRegistry {
     // 使用Map存储主题和对应的订阅者列表，键为主题名称，值为订阅者列表
     private final Map<String, List<EventSubscriber>> subscribers = new HashMap<>();
     // 创建一个MDC包装的线程池来处理异步任务，保留traceId
-    private final ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(2));
+    private final ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(2, new NamedThreadFactory("integration-bus")));
 
     // 订阅方法，返回一个 Subscription 对象用于取消订阅
     public Subscription subscribe(String topic, EventSubscriber subscriber) {
