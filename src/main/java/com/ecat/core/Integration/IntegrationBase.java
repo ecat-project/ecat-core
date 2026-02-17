@@ -22,6 +22,7 @@ import com.ecat.core.EcatCore;
 import com.ecat.core.Device.DeviceRegistry;
 import com.ecat.core.I18n.I18nHelper;
 import com.ecat.core.I18n.I18nProxy;
+import com.ecat.core.Log.ClassLoaderCoordinateFilter;
 import com.ecat.core.Log.LogManager;
 import com.ecat.core.State.StateManager;
 
@@ -67,6 +68,13 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
         // 设置日志上下文，将日志路由到对应集成的日志文件
         String coordinate = loadOption.getIntegrationInfo().getCoordinate();
         Log.setIntegrationContext(coordinate);
+
+        // 注册包名前缀与坐标的映射
+        // 业务类通过 LogFactory.getLogger(this.getClass()) 获取 logger
+        // logger.getName() 就是业务类的全限定名，通过包名前缀匹配实现日志路由
+        String packagePrefix = this.getClass().getPackage().getName();
+        ClassLoaderCoordinateFilter.registerPackagePrefix(packagePrefix, coordinate);
+
         LogManager.getInstance().registerIntegration(coordinate, loadOption.getIntegrationInfo());
     }
 
@@ -83,6 +91,10 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
     public void onRelease() {
         // 清除日志上下文
         Log.clearIntegrationContext();
+
+        // 注销包名前缀映射
+        String packagePrefix = this.getClass().getPackage().getName();
+        ClassLoaderCoordinateFilter.unregisterPackagePrefix(packagePrefix);
 
         // 从日志管理器中注销集成
         if (this.loadOption != null && this.loadOption.getIntegrationInfo() != null) {

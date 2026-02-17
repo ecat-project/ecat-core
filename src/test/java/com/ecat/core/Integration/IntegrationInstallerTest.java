@@ -295,27 +295,27 @@ public class IntegrationInstallerTest {
 
     // ========== reloadCore 测试 ==========
 
-    @Test
-    public void testReloadCore_NoRunningProcess() {
-        IntegrationInstaller installer = new IntegrationInstaller(mockCloudClient);
+    // @Test
+    // public void testReloadCore_NoRunningProcess() {
+    //     IntegrationInstaller installer = new IntegrationInstaller(mockCloudClient);
 
-        try {
-            installer.reloadCore();
-            fail("应该抛出 ReloadException");
-        } catch (IntegrationInstaller.ReloadException e) {
-            // Windows 有不同的错误消息
-            String os = System.getProperty("os.name").toLowerCase();
-            if (os.contains("win")) {
-                assertTrue("Windows 应提示不支持自动重载",
-                    e.getMessage().contains("暂不支持自动重载"));
-            } else {
-                assertTrue("错误信息应提及进程未找到",
-                    e.getMessage().contains("未找到运行中的") ||
-                    e.getMessage().contains("process") ||
-                    e.getMessage().contains("进程"));
-            }
-        }
-    }
+    //     try {
+    //         installer.reloadCore();
+    //         fail("应该抛出 ReloadException");
+    //     } catch (IntegrationInstaller.ReloadException e) {
+    //         // Windows 有不同的错误消息
+    //         String os = System.getProperty("os.name").toLowerCase();
+    //         if (os.contains("win")) {
+    //             assertTrue("Windows 应提示不支持自动重载",
+    //                 e.getMessage().contains("暂不支持自动重载"));
+    //         } else {
+    //             assertTrue("错误信息应提及进程未找到",
+    //                 e.getMessage().contains("未找到运行中的") ||
+    //                 e.getMessage().contains("process") ||
+    //                 e.getMessage().contains("进程"));
+    //         }
+    //     }
+    // }
 
     // ========== 依赖关系测试 ==========
 

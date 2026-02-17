@@ -35,7 +35,7 @@ import java.util.concurrent.ConcurrentMap;
  *   <li>广播日志条目到对应的缓冲区</li>
  *   <li>查询历史日志</li>
  * </ul>
- * 
+ *
  * @author coffee
  */
 public class LogManager {

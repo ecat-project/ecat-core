@@ -22,7 +22,7 @@ import static org.junit.Assert.*;
 
 /**
  * LogEntry 单元测试
- * 
+ *
  * @author coffee
  */
 public class LogEntryTest {
@@ -31,6 +31,7 @@ public class LogEntryTest {
     public void testDefaultConstructor() {
         LogEntry entry = new LogEntry();
         assertEquals(0, entry.getTimestamp());
+        assertNull(entry.getTraceId());
         assertNull(entry.getCoordinate());
         assertNull(entry.getLevel());
         assertNull(entry.getLogger());
@@ -40,11 +41,12 @@ public class LogEntryTest {
     }
 
     @Test
-    public void testConstructorWithoutThrowable() {
+    public void testConstructorWithTraceId() {
         long timestamp = System.currentTimeMillis();
-        LogEntry entry = new LogEntry(timestamp, "test-coord", "DEBUG", "TestLogger", "main", "Test message");
+        LogEntry entry = new LogEntry(timestamp, "abc123", "test-coord", "DEBUG", "TestLogger", "main", "Test message", null);
 
         assertEquals(timestamp, entry.getTimestamp());
+        assertEquals("abc123", entry.getTraceId());
         assertEquals("test-coord", entry.getCoordinate());
         assertEquals("DEBUG", entry.getLevel());
         assertEquals("TestLogger", entry.getLogger());
@@ -56,9 +58,10 @@ public class LogEntryTest {
     @Test
     public void testConstructorWithThrowable() {
         long timestamp = System.currentTimeMillis();
-        LogEntry entry = new LogEntry(timestamp, "core", "ERROR", "ErrorLogger", "thread-1", "Error occurred", "Stack trace here");
+        LogEntry entry = new LogEntry(timestamp, "def456", "core", "ERROR", "ErrorLogger", "thread-1", "Error occurred", "Stack trace here");
 
         assertEquals(timestamp, entry.getTimestamp());
+        assertEquals("def456", entry.getTraceId());
         assertEquals("core", entry.getCoordinate());
         assertEquals("ERROR", entry.getLevel());
         assertEquals("ErrorLogger", entry.getLogger());
@@ -72,6 +75,7 @@ public class LogEntryTest {
         LogEntry entry = new LogEntry();
 
         entry.setTimestamp(12345L);
+        entry.setTraceId("xyz789");
         entry.setCoordinate("integration-1");
         entry.setLevel("INFO");
         entry.setLogger("MyLogger");
@@ -80,6 +84,7 @@ public class LogEntryTest {
         entry.setThrowable("NullPointerException");
 
         assertEquals(12345L, entry.getTimestamp());
+        assertEquals("xyz789", entry.getTraceId());
         assertEquals("integration-1", entry.getCoordinate());
         assertEquals("INFO", entry.getLevel());
         assertEquals("MyLogger", entry.getLogger());
@@ -90,10 +95,11 @@ public class LogEntryTest {
 
     @Test
     public void testToString() {
-        LogEntry entry = new LogEntry(1000L, "coord", "DEBUG", "logger", "thread", "msg", "err");
+        LogEntry entry = new LogEntry(1000L, "trace1", "coord", "DEBUG", "logger", "thread", "msg", "err");
         String str = entry.toString();
 
         assertTrue(str.contains("timestamp=1000"));
+        assertTrue(str.contains("traceId='trace1'"));
         assertTrue(str.contains("coordinate='coord'"));
         assertTrue(str.contains("level='DEBUG'"));
         assertTrue(str.contains("logger='logger'"));

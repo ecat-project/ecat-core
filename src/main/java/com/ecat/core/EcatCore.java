@@ -110,7 +110,7 @@ public class EcatCore {
         i18nRegistry = I18nRegistry.getInstance();
 
         // 注册 core 日志缓冲区
-        LogManager.getInstance().registerIntegration("core", null);
+        LogManager.getInstance().registerIntegration(Const.CORE_COORDINATE, null);
     }
 
     public void load(){

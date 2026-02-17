@@ -80,8 +80,8 @@ public class LogManagerTest {
     public void testBroadcast() {
         logManager.registerIntegration("broadcast-test", null);
 
-        LogEntry entry = new LogEntry(System.currentTimeMillis(), "broadcast-test",
-                "INFO", "TestLogger", "main", "Test message");
+        LogEntry entry = new LogEntry(System.currentTimeMillis(), "trace123", "broadcast-test",
+                "INFO", "TestLogger", "main", "Test message", null);
         logManager.broadcast(entry);
 
         List<LogEntry> history = logManager.getHistory("broadcast-test", 10);
@@ -91,8 +91,8 @@ public class LogManagerTest {
 
     @Test
     public void testBroadcastToUnregisteredCoordinate() {
-        LogEntry entry = new LogEntry(System.currentTimeMillis(), "not-registered",
-                "INFO", "TestLogger", "main", "Test");
+        LogEntry entry = new LogEntry(System.currentTimeMillis(), "trace456", "not-registered",
+                "INFO", "TestLogger", "main", "Test", null);
         logManager.broadcast(entry);
 
         List<LogEntry> history = logManager.getHistory("not-registered", 10);
@@ -112,7 +112,7 @@ public class LogManagerTest {
         logManager.registerIntegration("history-test", null);
 
         for (int i = 1; i <= 5; i++) {
-            LogEntry entry = new LogEntry(i, "history-test", "DEBUG", "Logger", "thread", "msg" + i);
+            LogEntry entry = new LogEntry(i, "trace" + i, "history-test", "DEBUG", "Logger", "thread", "msg" + i, null);
             logManager.broadcast(entry);
         }
 
@@ -144,7 +144,7 @@ public class LogManagerTest {
         logManager.registerIntegration("count-test", null);
 
         for (int i = 0; i < 5; i++) {
-            logManager.broadcast(new LogEntry(i, "count-test", "INFO", "L", "t", "m"));
+            logManager.broadcast(new LogEntry(i, "trace" + i, "count-test", "INFO", "L", "t", "m", null));
         }
 
         assertEquals(5, logManager.getTotalLogCount());
@@ -159,7 +159,7 @@ public class LogManagerTest {
     public void testClearAllForTest() {
         logManager.registerIntegration("test1", null);
         logManager.registerIntegration("test2", null);
-        logManager.broadcast(new LogEntry(1, "test1", "INFO", "L", "t", "m"));
+        logManager.broadcast(new LogEntry(1, "trace1", "test1", "INFO", "L", "t", "m", null));
 
         logManager.clearAllForTest();
 

@@ -20,6 +20,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.IThrowableProxy;
 import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.AppenderBase;
+import com.ecat.core.Const;
+import com.ecat.core.Utils.Mdc.TraceContext;
 import org.slf4j.MDC;
 
 import java.util.Map;
@@ -33,23 +35,41 @@ import java.util.Map;
  * <pre>
  * &lt;appender name="broadcast" class="com.ecat.core.Log.LogBroadcastAppender"/&gt;
  * </pre>
- * 
+ *
  * @author coffee
  */
 public class LogBroadcastAppender extends AppenderBase<ILoggingEvent> {
     private static final String MDC_COORDINATE_KEY = "integration.coordinate";
-    private static final String DEFAULT_COORDINATE = "core";
+    // Debug flag for troubleshooting log routing
+    private static final boolean DEBUG_BROADCAST = Boolean.getBoolean("ecat.log.broadcast.debug");
+    // Debug specific logger names (comma-separated)
+    private static final String DEBUG_LOGGER_NAMES = System.getProperty("ecat.log.broadcast.debug.loggers", "");
 
     @Override
     protected void append(ILoggingEvent event) {
         try {
             String coordinate = getCoordinate(event);
+            String loggerName = event.getLoggerName();
+
+            // Debug output for specific loggers
+            boolean shouldDebug = DEBUG_BROADCAST &&
+                (DEBUG_LOGGER_NAMES.isEmpty() || loggerName.contains(DEBUG_LOGGER_NAMES) || DEBUG_LOGGER_NAMES.contains(loggerName));
+            if (shouldDebug) {
+                String threadMdc = MDC.get(MDC_COORDINATE_KEY);
+                String eventMdc = event.getMDCPropertyMap() != null ? event.getMDCPropertyMap().get(MDC_COORDINATE_KEY) : null;
+                System.out.println("[LogBroadcastAppender] logger=" + loggerName
+                    + " | threadMdc=" + threadMdc
+                    + " | eventMdc=" + eventMdc
+                    + " | resolved=" + coordinate
+                    + " | message=" + event.getFormattedMessage());
+            }
+
             LogManager logManager = LogManager.getInstance();
             if (!logManager.hasBuffer(coordinate)) {
                 return;
             }
+            String traceId = getTraceId(event);
             String level = event.getLevel().toString();
-            String loggerName = event.getLoggerName();
             String threadName = event.getThreadName();
             String message = event.getFormattedMessage();
             String throwable = null;
@@ -59,6 +79,7 @@ public class LogBroadcastAppender extends AppenderBase<ILoggingEvent> {
             }
             LogEntry entry = new LogEntry(
                     event.getTimeStamp(),
+                    traceId,
                     coordinate,
                     level,
                     loggerName,
@@ -92,6 +113,29 @@ public class LogBroadcastAppender extends AppenderBase<ILoggingEvent> {
                 return coordinate;
             }
         }
-        return DEFAULT_COORDINATE;
+        return Const.CORE_COORDINATE;
+    }
+
+    /**
+     * 获取 Trace ID
+     *
+     * <p>优先从 MDC 获取，其次从事件 MDC 获取。
+     *
+     * @param event 日志事件
+     * @return Trace ID，如果不存在返回 null
+     */
+    private String getTraceId(ILoggingEvent event) {
+        String traceId = MDC.get(TraceContext.TRACE_ID_KEY);
+        if (traceId != null && !traceId.isEmpty()) {
+            return traceId;
+        }
+        Map<String, String> mdcMap = event.getMDCPropertyMap();
+        if (mdcMap != null) {
+            traceId = mdcMap.get(TraceContext.TRACE_ID_KEY);
+            if (traceId != null && !traceId.isEmpty()) {
+                return traceId;
+            }
+        }
+        return null;
     }
 }

@@ -261,8 +261,10 @@ public class Log implements Logger {
             String effectiveCoordinate = getEffectiveCoordinate();
             LogManager logManager = LogManager.getInstance();
             if (logManager.hasBuffer(effectiveCoordinate)) {
+                String traceId = org.slf4j.MDC.get(com.ecat.core.Utils.Mdc.TraceContext.TRACE_ID_KEY);
                 LogEntry entry = new LogEntry(
                         System.currentTimeMillis(),
+                        traceId,
                         effectiveCoordinate,
                         level,
                         logger.getName(),

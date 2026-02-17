@@ -6,10 +6,11 @@
     <!-- 注册自定义转换器 -->
     <conversionRule conversionWord="callerEx" converterClass="com.ecat.core.Utils.CallerDataConverter" />
     <conversionRule conversionWord="coordinate" converterClass="com.ecat.core.Utils.CoordinateConverter"/>
+    <conversionRule conversionWord="traceId" converterClass="com.ecat.core.Utils.Mdc.TraceIdConverter"/>
 
     <!-- 日志输出格式 -->
     <property name="log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%callerEx] - %msg%n" />
-    <property name="log.pattern.coordinate" value="%d{HH:mm:ss.SSS} [%coordinate] [%thread] %-5level %logger{36} - %msg%n" />
+    <property name="log.pattern.coordinate" value="%d{HH:mm:ss.SSS} [%traceId] [%coordinate] [%thread] %-5level %logger{36} - %msg%n" />
 
     <!-- 日志存放路径 项目根目录/logs -->
     <property name="log.path" value="logs" />

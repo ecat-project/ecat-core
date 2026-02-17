@@ -142,7 +142,7 @@ public class LogBufferTest {
     }
 
     private LogEntry createEntry(long timestamp, String message) {
-        return new LogEntry(timestamp, "test", "DEBUG", "TestLogger", "main", message);
+        return new LogEntry(timestamp, "trace1", "test", "DEBUG", "TestLogger", "main", message, null);
     }
 
     /**

@@ -19,12 +19,13 @@ package com.ecat.core.Log;
 /**
  * 日志条目实体类
  *
- * <p>表示单条日志记录，包含时间戳、坐标、级别、日志器、线程、消息和异常信息。
- * 
+ * <p>表示单条日志记录，包含时间戳、Trace ID、坐标、级别、日志器、线程、消息和异常信息。
+ *
  * @author coffee
  */
 public class LogEntry {
     private long timestamp;
+    private String traceId;
     private String coordinate;
     private String level;
     private String logger;
@@ -35,17 +36,21 @@ public class LogEntry {
     public LogEntry() {
     }
 
-    public LogEntry(long timestamp, String coordinate, String level, String logger, String thread, String message) {
+    /**
+     * 完整构造函数
+     *
+     * @param timestamp 时间戳
+     * @param traceId 追踪 ID（可为 null）
+     * @param coordinate 集成坐标
+     * @param level 日志级别
+     * @param logger 日志器名称
+     * @param thread 线程名称
+     * @param message 日志消息
+     * @param throwable 异常信息（可为 null）
+     */
+    public LogEntry(long timestamp, String traceId, String coordinate, String level, String logger, String thread, String message, String throwable) {
         this.timestamp = timestamp;
-        this.coordinate = coordinate;
-        this.level = level;
-        this.logger = logger;
-        this.thread = thread;
-        this.message = message;
-    }
-
-    public LogEntry(long timestamp, String coordinate, String level, String logger, String thread, String message, String throwable) {
-        this.timestamp = timestamp;
+        this.traceId = traceId;
         this.coordinate = coordinate;
         this.level = level;
         this.logger = logger;
@@ -60,6 +65,14 @@ public class LogEntry {
 
     public void setTimestamp(long timestamp) {
         this.timestamp = timestamp;
+    }
+
+    public String getTraceId() {
+        return traceId;
+    }
+
+    public void setTraceId(String traceId) {
+        this.traceId = traceId;
     }
 
     public String getCoordinate() {
@@ -114,6 +127,7 @@ public class LogEntry {
     public String toString() {
         return "LogEntry{" +
                 "timestamp=" + timestamp +
+                ", traceId='" + traceId + '\'' +
                 ", coordinate='" + coordinate + '\'' +
                 ", level='" + level + '\'' +
                 ", logger='" + logger + '\'' +

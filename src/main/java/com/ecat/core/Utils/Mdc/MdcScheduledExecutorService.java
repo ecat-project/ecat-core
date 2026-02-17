@@ -16,8 +16,6 @@
 
 package com.ecat.core.Utils.Mdc;
 
-import org.slf4j.MDC;
-
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ScheduledExecutorService;
@@ -29,11 +27,15 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>自动将提交任务时的 MDC 上下文传递到任务执行线程。
  *
+ * <p>对于周期性任务（scheduleAtFixedRate、scheduleWithFixedDelay），
+ * 每次执行时生成新的 Trace ID，以便追踪单次执行的完整链路。
+ * coordinate 等其他上下文保持不变（来自提交时）。
+ *
  * <p>使用示例：
  * <pre>
  * ScheduledExecutorService scheduler = MdcScheduledExecutorService.wrap(Executors.newScheduledThreadPool(2));
  * </pre>
- * 
+ *
  * @author coffee
  */
 public class MdcScheduledExecutorService extends MdcExecutorService implements ScheduledExecutorService {
@@ -61,66 +63,58 @@ public class MdcScheduledExecutorService extends MdcExecutorService implements S
     }
 
     /**
-     * 捕获当前 MDC 上下文
+     * 捕获当前 MDC 上下文（包括 Trace ID）
      *
      * @return MDC 上下文
      */
     private Map<String, String> captureContext() {
-        return MDC.getCopyOfContextMap();
+        return TraceContext.capture();
     }
 
     /**
-     * 包装 Runnable
+     * 包装 Runnable，自动传播 MDC 上下文和 Trace ID
      *
      * @param task 原始任务
      * @param context MDC 上下文
      * @return 包装后的任务
      */
     private Runnable wrapRunnable(Runnable task, Map<String, String> context) {
-        return () -> {
-            Map<String, String> previousContext = MDC.getCopyOfContextMap();
-            try {
-                if (context != null) {
-                    for (Map.Entry<String, String> entry : context.entrySet()) {
-                        MDC.put(entry.getKey(), entry.getValue());
-                    }
-                }
-                task.run();
-            } finally {
-                MDC.clear();
-                if (previousContext != null) {
-                    for (Map.Entry<String, String> entry : previousContext.entrySet()) {
-                        MDC.put(entry.getKey(), entry.getValue());
-                    }
-                }
-            }
-        };
+        return TraceContext.wrapRunnable(task, context);
     }
 
     /**
-     * 包装 Callable
+     * 包装 Callable，自动传播 MDC 上下文和 Trace ID
      *
      * @param task 原始任务
      * @param context MDC 上下文
      * @return 包装后的任务
      */
     private <V> Callable<V> wrapCallable(Callable<V> task, Map<String, String> context) {
+        return TraceContext.wrapCallable(task, context);
+    }
+
+    /**
+     * 包装周期性任务，每次执行时生成新的 Trace ID
+     *
+     * <p>周期性任务（scheduleAtFixedRate、scheduleWithFixedDelay）每次执行是独立的业务操作，
+     * 应该有独立的 Trace ID 以便追踪单次执行链路。
+     * coordinate 等其他上下文保持不变（来自提交时）。
+     *
+     * @param task 原始任务
+     * @param context MDC 上下文（提交时捕获，不含 traceId）
+     * @return 包装后的任务
+     */
+    private Runnable wrapPeriodicRunnable(Runnable task, Map<String, String> context) {
         return () -> {
-            Map<String, String> previousContext = MDC.getCopyOfContextMap();
+            Map<String, String> previousContext = TraceContext.capture();
             try {
-                if (context != null) {
-                    for (Map.Entry<String, String> entry : context.entrySet()) {
-                        MDC.put(entry.getKey(), entry.getValue());
-                    }
-                }
-                return task.call();
+                // 恢复上下文（coordinate 等）
+                TraceContext.restore(context);
+                // 为每次执行生成新的 Trace ID
+                TraceContext.setTraceId(TraceContext.generateTraceId());
+                task.run();
             } finally {
-                MDC.clear();
-                if (previousContext != null) {
-                    for (Map.Entry<String, String> entry : previousContext.entrySet()) {
-                        MDC.put(entry.getKey(), entry.getValue());
-                    }
-                }
+                TraceContext.restore(previousContext);
             }
         };
     }
@@ -138,12 +132,12 @@ public class MdcScheduledExecutorService extends MdcExecutorService implements S
     @Override
     public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period, TimeUnit unit) {
         Map<String, String> context = captureContext();
-        return scheduledDelegate.scheduleAtFixedRate(wrapRunnable(command, context), initialDelay, period, unit);
+        return scheduledDelegate.scheduleAtFixedRate(wrapPeriodicRunnable(command, context), initialDelay, period, unit);
     }
 
     @Override
     public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay, TimeUnit unit) {
         Map<String, String> context = captureContext();
-        return scheduledDelegate.scheduleWithFixedDelay(wrapRunnable(command, context), initialDelay, delay, unit);
+        return scheduledDelegate.scheduleWithFixedDelay(wrapPeriodicRunnable(command, context), initialDelay, delay, unit);
     }
 }

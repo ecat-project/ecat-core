@@ -28,38 +28,50 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * ClassLoader 坐标 TurboFilter
+ * Logger 名称坐标 TurboFilter
  *
- * <p>根据调用者的 ClassLoader 自动设置 MDC 坐标，实现日志按集成分离。
+ * <p>根据 Logger 名称自动设置 MDC 坐标，实现日志按集成分离。
+ *
+ * <p>核心原理：业务类通过 LogFactory.getLogger(this.getClass()) 获取 logger，
+ * 所以 logger.getName() 就是业务类的全限定名。通过匹配已注册的包名前缀来确定坐标。
  *
  * <p>工作原理：
  * <ol>
- *   <li>获取调用栈中第一个非日志框架类的 ClassLoader</li>
- *   <li>查找该 ClassLoader 注册的坐标</li>
+ *   <li>获取 logger.getName() 作为业务类名</li>
+ *   <li>在已注册的包名前缀中查找最长匹配</li>
  *   <li>将坐标设置到 MDC 中</li>
+ *   <li>如果找不到匹配，使用默认 core</li>
  * </ol>
+ *
+ * <p>注册方式：{@link #registerPackagePrefix(String, String)}
  *
  * <p>配置示例：
  * <pre>
  * &lt;turboFilter class="com.ecat.core.Log.ClassLoaderCoordinateFilter"/&gt;
  * </pre>
  *
- * <p>JVM 参数：
+ * <p>新集成开发原则：
  * <ul>
- *   <li>ecat.log.turbo.stats - 是否启用统计（默认 false）</li>
- *   <li>ecat.log.turbo.stats.interval - 统计间隔（默认 10000）</li>
+ *   <li>业务集成：在 onLoad() 中注册业务包名前缀</li>
+ *   <li>嵌入式框架集成（如 ruoyi）：同时注册框架包名前缀</li>
  * </ul>
- * 
+ *
  * @author coffee
  */
 public class ClassLoaderCoordinateFilter extends TurboFilter {
     private static final String MDC_COORDINATE_KEY = "integration.coordinate";
-    private static final Map<Integer, String> classLoaderCoordinateMap = new ConcurrentHashMap<>();
-    private static final Map<Integer, ClassLoader> classLoaderRefs = new ConcurrentHashMap<>();
+
+    // 包名前缀到坐标的映射
+    private static final Map<String, String> packagePrefixCoordinateMap = new ConcurrentHashMap<>();
+
     private final AtomicLong processedCount = new AtomicLong(0L);
     private final AtomicLong mdcSetCount = new AtomicLong(0L);
     private boolean enableStats = false;
     private long statsInterval = 10000L;
+
+    // Debug flag for troubleshooting log routing
+    private static final boolean DEBUG_STACK_TRACE = Boolean.getBoolean("ecat.log.turbo.debug");
+    private static final String DEBUG_LOGGER_NAMES = System.getProperty("ecat.log.turbo.debug.loggers", "");
 
     @Override
     public void start() {
@@ -79,19 +91,36 @@ public class ClassLoaderCoordinateFilter extends TurboFilter {
         if (!isStarted()) {
             return FilterReply.NEUTRAL;
         }
-        if (classLoaderCoordinateMap.isEmpty()) {
-            return FilterReply.NEUTRAL;
+
+        // 直接使用 logger 名称进行匹配
+        // 原理：业务类通过 LogFactory.getLogger(this.getClass()) 获取 logger
+        // 所以 logger.getName() 就是业务类的全限定名
+        String loggerName = logger.getName();
+
+        boolean shouldDebug = DEBUG_STACK_TRACE &&
+            (DEBUG_LOGGER_NAMES.isEmpty() || loggerName.contains(DEBUG_LOGGER_NAMES) || DEBUG_LOGGER_NAMES.contains(loggerName));
+
+        if (shouldDebug) {
+            System.out.println("[ClassLoaderCoordinateFilter] CHECK logger: " + loggerName);
         }
-        ClassLoader callerClassLoader = getCallerClassLoader();
-        if (callerClassLoader == null) {
-            return FilterReply.NEUTRAL;
-        }
-        int loaderId = System.identityHashCode(callerClassLoader);
-        String coordinate = classLoaderCoordinateMap.get(loaderId);
+
+        // 通过 logger 名称查找坐标（基于注册的包名前缀，最长匹配）
+        String coordinate = lookupCoordinateByLoggerName(loggerName);
+
         if (coordinate != null) {
             MDC.put(MDC_COORDINATE_KEY, coordinate);
             mdcSetCount.incrementAndGet();
+            if (shouldDebug) {
+                System.out.println("[ClassLoaderCoordinateFilter] MATCH: " + loggerName + " -> " + coordinate);
+            }
+        } else {
+            // 找不到匹配时，清除 MDC coordinate，使用默认 core
+            MDC.remove(MDC_COORDINATE_KEY);
+            if (shouldDebug) {
+                System.out.println("[ClassLoaderCoordinateFilter] NO MATCH for logger: " + loggerName);
+            }
         }
+
         if (enableStats) {
             long count = processedCount.incrementAndGet();
             if (count % statsInterval == 0L) {
@@ -102,45 +131,29 @@ public class ClassLoaderCoordinateFilter extends TurboFilter {
     }
 
     /**
-     * 获取调用者的 ClassLoader
+     * 通过 Logger 名称查找坐标
      *
-     * <p>遍历调用栈，找到第一个非日志框架类的 ClassLoader。
+     * <p>直接基于已注册的前缀列表进行匹配，不限制包名格式。
      *
-     * @return ClassLoader
+     * <p>使用最长匹配原则：在所有注册的前缀中，找到最长的匹配前缀。
+     *
+     * @param loggerName Logger 名称（通常是业务类的全限定名）
+     * @return 坐标，如果未找到返回 null
      */
-    private ClassLoader getCallerClassLoader() {
-        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-        for (int i = 3; i < stackTrace.length; i++) {
-            StackTraceElement element = stackTrace[i];
-            String className = element.getClassName();
-            if (isLogFrameworkClass(className)) {
-                continue;
-            }
-            try {
-                ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
-                Class<?> clazz = Class.forName(className, false, contextLoader);
-                return clazz.getClassLoader();
-            } catch (ClassNotFoundException e) {
-                return Thread.currentThread().getContextClassLoader();
+    private String lookupCoordinateByLoggerName(String loggerName) {
+        String bestMatch = null;
+        String bestPrefix = null;
+
+        for (Map.Entry<String, String> entry : packagePrefixCoordinateMap.entrySet()) {
+            String prefix = entry.getKey();
+            if (loggerName.startsWith(prefix)) {
+                if (bestPrefix == null || prefix.length() > bestPrefix.length()) {
+                    bestPrefix = prefix;
+                    bestMatch = entry.getValue();
+                }
             }
         }
-        return Thread.currentThread().getContextClassLoader();
-    }
-
-    /**
-     * 检查是否为日志框架类
-     *
-     * @param className 类名
-     * @return 是否为日志框架类
-     */
-    private boolean isLogFrameworkClass(String className) {
-        return className.startsWith("ch.qos.logback.")
-                || className.startsWith("org.slf4j.")
-                || className.startsWith("com.ecat.core.Log.")
-                || className.startsWith("com.ecat.core.Utils.Log")
-                || className.startsWith("com.ecat.core.Utils.CallerDataConverter")
-                || className.startsWith("com.ecat.core.Utils.CoordinateConverter")
-                || className.equals("java.lang.Thread");
+        return bestMatch;
     }
 
     /**
@@ -149,94 +162,70 @@ public class ClassLoaderCoordinateFilter extends TurboFilter {
     private void logStats() {
         System.out.println("[ClassLoaderCoordinateFilter Stats] processed=" + processedCount.get()
                 + ", mdcSet=" + mdcSetCount.get()
-                + ", registeredLoaders=" + classLoaderCoordinateMap.size());
+                + ", registeredPackages=" + packagePrefixCoordinateMap.size());
     }
 
     @Override
     public void stop() {
-        classLoaderCoordinateMap.clear();
-        classLoaderRefs.clear();
+        packagePrefixCoordinateMap.clear();
         super.stop();
     }
 
     /**
-     * 注册 ClassLoader 坐标映射
+     * 注册包名前缀到坐标的映射
      *
-     * @param classLoader ClassLoader
+     * <p>示例：
+     * <pre>
+     * // 业务集成
+     * registerPackagePrefix("com.ecat.integration.SailheroIntegration", "com.ecat:integration-sailhero");
+     *
+     * // 嵌入式框架集成（如 ruoyi）
+     * registerPackagePrefix("com.ruoyi", "com.ecat:integration-ecat-core-ruoyi");
+     * registerPackagePrefix("org.springframework", "com.ecat:integration-ecat-core-ruoyi");
+     * </pre>
+     *
+     * @param packagePrefix 包名前缀（如 "com.ecat.integration.SailheroIntegration"）
      * @param coordinate 坐标
      */
-    public static void registerClassLoader(ClassLoader classLoader, String coordinate) {
-        if (classLoader == null || coordinate == null || coordinate.isEmpty()) {
+    public static void registerPackagePrefix(String packagePrefix, String coordinate) {
+        if (packagePrefix == null || packagePrefix.isEmpty() || coordinate == null || coordinate.isEmpty()) {
             return;
         }
-        int loaderId = System.identityHashCode(classLoader);
-        classLoaderCoordinateMap.put(loaderId, coordinate);
-        classLoaderRefs.put(loaderId, classLoader);
-        System.out.println("[ClassLoaderCoordinateFilter] Registered ClassLoader: "
-                + classLoader.getClass().getName() + "@" + loaderId + " -> " + coordinate);
+        packagePrefixCoordinateMap.put(packagePrefix, coordinate);
+        System.out.println("[ClassLoaderCoordinateFilter] Registered PackagePrefix: "
+                + packagePrefix + " -> " + coordinate);
     }
 
     /**
-     * 注销 ClassLoader 坐标映射
+     * 注销包名前缀映射
      *
-     * @param classLoader ClassLoader
+     * @param packagePrefix 包名前缀
      */
-    public static void unregisterClassLoader(ClassLoader classLoader) {
-        if (classLoader == null) {
+    public static void unregisterPackagePrefix(String packagePrefix) {
+        if (packagePrefix == null || packagePrefix.isEmpty()) {
             return;
         }
-        int loaderId = System.identityHashCode(classLoader);
-        String removed = classLoaderCoordinateMap.remove(loaderId);
-        classLoaderRefs.remove(loaderId);
+        String removed = packagePrefixCoordinateMap.remove(packagePrefix);
         if (removed != null) {
-            System.out.println("[ClassLoaderCoordinateFilter] Unregistered ClassLoader: "
-                    + classLoader.getClass().getName() + "@" + loaderId + " (was " + removed + ")");
+            System.out.println("[ClassLoaderCoordinateFilter] Unregistered PackagePrefix: "
+                    + packagePrefix + " (was " + removed + ")");
         }
     }
 
     /**
-     * 获取已注册的 ClassLoader 数量
+     * 获取已注册的包名前缀数量
      *
      * @return 数量
      */
-    public static int getRegisteredLoaderCount() {
-        return classLoaderCoordinateMap.size();
-    }
-
-    /**
-     * 检查 ClassLoader 是否已注册
-     *
-     * @param classLoader ClassLoader
-     * @return 是否已注册
-     */
-    public static boolean isRegistered(ClassLoader classLoader) {
-        if (classLoader == null) {
-            return false;
-        }
-        int loaderId = System.identityHashCode(classLoader);
-        return classLoaderCoordinateMap.containsKey(loaderId);
-    }
-
-    /**
-     * 获取 ClassLoader 的坐标
-     *
-     * @param classLoader ClassLoader
-     * @return 坐标
-     */
-    public static String getCoordinate(ClassLoader classLoader) {
-        if (classLoader == null) {
-            return null;
-        }
-        int loaderId = System.identityHashCode(classLoader);
-        return classLoaderCoordinateMap.get(loaderId);
+    public static int getRegisteredPackagePrefixCount() {
+        return packagePrefixCoordinateMap.size();
     }
 
     /**
      * 清除所有注册
      */
     public static void clearAll() {
-        classLoaderCoordinateMap.clear();
-        classLoaderRefs.clear();
-        System.out.println("[ClassLoaderCoordinateFilter] Cleared all registered ClassLoaders");
+        packagePrefixCoordinateMap.clear();
+        System.out.println("[ClassLoaderCoordinateFilter] Cleared all registered PackagePrefixes");
     }
 }

@@ -24,18 +24,20 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
+import com.ecat.core.Utils.Mdc.MdcExecutorService;
+
 /**
  * BusRegistry 类实现了一个事件总线注册表，用于管理事件的订阅和发布
  * 支持通配符模式匹配主题，并使用线程池异步处理事件
- * 
+ *
  * @author coffee
  */
 public class BusRegistry {
 
     // 使用Map存储主题和对应的订阅者列表，键为主题名称，值为订阅者列表
     private final Map<String, List<EventSubscriber>> subscribers = new HashMap<>();
-    // 创建一个固定大小的线程池来处理异步任务
-    private final ExecutorService executorService = Executors.newFixedThreadPool(2);
+    // 创建一个MDC包装的线程池来处理异步任务，保留traceId
+    private final ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(2));
 
     // 订阅方法，返回一个 Subscription 对象用于取消订阅
     public Subscription subscribe(String topic, EventSubscriber subscriber) {

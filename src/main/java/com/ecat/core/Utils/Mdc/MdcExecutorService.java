@@ -16,8 +16,6 @@
 
 package com.ecat.core.Utils.Mdc;
 
-import org.slf4j.MDC;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -65,68 +63,34 @@ public class MdcExecutorService implements ExecutorService {
     }
 
     /**
-     * 捕获当前 MDC 上下文
+     * 捕获当前 MDC 上下文（包括 Trace ID）
      *
      * @return MDC 上下文
      */
     private Map<String, String> captureContext() {
-        return MDC.getCopyOfContextMap();
+        return TraceContext.capture();
     }
 
     /**
-     * 包装 Runnable
+     * 包装 Runnable，自动传播 MDC 上下文和 Trace ID
      *
      * @param task 原始任务
      * @param context MDC 上下文
      * @return 包装后的任务
      */
     private Runnable wrapRunnable(Runnable task, Map<String, String> context) {
-        return () -> {
-            Map<String, String> previousContext = MDC.getCopyOfContextMap();
-            try {
-                if (context != null) {
-                    for (Map.Entry<String, String> entry : context.entrySet()) {
-                        MDC.put(entry.getKey(), entry.getValue());
-                    }
-                }
-                task.run();
-            } finally {
-                MDC.clear();
-                if (previousContext != null) {
-                    for (Map.Entry<String, String> entry : previousContext.entrySet()) {
-                        MDC.put(entry.getKey(), entry.getValue());
-                    }
-                }
-            }
-        };
+        return TraceContext.wrapRunnable(task, context);
     }
 
     /**
-     * 包装 Callable
+     * 包装 Callable，自动传播 MDC 上下文和 Trace ID
      *
      * @param task 原始任务
      * @param context MDC 上下文
      * @return 包装后的任务
      */
     private <T> Callable<T> wrapCallable(Callable<T> task, Map<String, String> context) {
-        return () -> {
-            Map<String, String> previousContext = MDC.getCopyOfContextMap();
-            try {
-                if (context != null) {
-                    for (Map.Entry<String, String> entry : context.entrySet()) {
-                        MDC.put(entry.getKey(), entry.getValue());
-                    }
-                }
-                return task.call();
-            } finally {
-                MDC.clear();
-                if (previousContext != null) {
-                    for (Map.Entry<String, String> entry : previousContext.entrySet()) {
-                        MDC.put(entry.getKey(), entry.getValue());
-                    }
-                }
-            }
-        };
+        return TraceContext.wrapCallable(task, context);
     }
 
     @Override
