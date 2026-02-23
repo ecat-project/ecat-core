@@ -338,7 +338,6 @@ public class IntegrationManagerTest {
         testGraph.put("com.ecat:integration-common", Arrays.asList("com.ecat:integration-a", "com.ecat:integration-b"));
 
         setPrivateField(integrationManager, "initialDependencyGraph", testGraph);
-        setPrivateField(integrationManager, "initialSnapshotTaken", true);
 
         // 验证 initialDependencyGraph 已被正确设置
         @SuppressWarnings("unchecked")
@@ -348,10 +347,6 @@ public class IntegrationManagerTest {
         assertEquals(2, graph.get("com.ecat:integration-common").size());
         assertTrue(graph.get("com.ecat:integration-common").contains("com.ecat:integration-a"));
         assertTrue(graph.get("com.ecat:integration-common").contains("com.ecat:integration-b"));
-
-        // 验证 initialSnapshotTaken 被设置为 true
-        boolean snapshotTaken = (boolean) getPrivateField(integrationManager, "initialSnapshotTaken");
-        assertTrue(snapshotTaken);
     }
 
     /**

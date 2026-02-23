@@ -72,12 +72,26 @@ public class CloudRepositoryClient {
      * 搜索包（公开接口）
      *
      * @param keyword 搜索关键词
+     * @param page 页码（从1开始）
+     * @param pageSize 每页数量
+     * @return 搜索结果
+     * @throws IOException 网络或解析异常
+     */
+    public PackageSearchResult searchPackages(String keyword, int page, int pageSize) throws IOException {
+        String url = cloudApiBaseUrl + "/api/packages?keyword=" + URLEncoder.encode(keyword, "UTF-8")
+                   + "&page=" + page + "&pageSize=" + pageSize;
+        return executeGet(url, PackageSearchResult.class);
+    }
+
+    /**
+     * 搜索包（无分页参数，默认返回第一页）
+     *
+     * @param keyword 搜索关键词
      * @return 搜索结果
      * @throws IOException 网络或解析异常
      */
     public PackageSearchResult searchPackages(String keyword) throws IOException {
-        String url = cloudApiBaseUrl + "/api/packages?keyword=" + URLEncoder.encode(keyword, "UTF-8");
-        return executeGet(url, PackageSearchResult.class);
+        return searchPackages(keyword, 1, 20);
     }
 
     /**
@@ -208,15 +222,21 @@ public class CloudRepositoryClient {
             throw new IOException("Invalid coordinate format: " + coordinate);
         }
 
-        // 使用新 v2.0.0 API
-        // 注意：API 使用 groupId 本身（含点号），不是路径格式
+        // 使用 v3.0.0 API: /packages/groups/{groupId}/artifacts/{artifactId}
+        // 返回包含 info 和 releases 的JSON，releases 的 key 就是版本号
         String url = cloudApiBaseUrl + "/api/packages/groups/"
-                   + groupId + "/artifacts/" + artifactId + "/versions";
-        // fastjson2 解析数组
+                   + groupId + "/artifacts/" + artifactId;
         HttpURLConnection conn = createConnection(url);
         try {
             String response = readResponse(conn, url);
-            return JSON.parseArray(response, String.class);
+            // 解析响应获取 releases 的 key 列表
+            java.util.Map<String, Object> result = JSON.parseObject(response,
+                new com.alibaba.fastjson2.TypeReference<java.util.Map<String, Object>>() {});
+            java.util.Map<String, Object> releases = (java.util.Map<String, Object>) result.get("releases");
+            if (releases == null) {
+                return new java.util.ArrayList<>();
+            }
+            return new java.util.ArrayList<>(releases.keySet());
         } finally {
             conn.disconnect();
         }

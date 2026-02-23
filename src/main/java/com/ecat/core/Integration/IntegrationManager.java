@@ -70,7 +70,6 @@ public class IntegrationManager {
 
     private final EcatCore core;
     private final IntegrationRegistry integrationRegistry;
-    private final StateManager stateManager;
     private ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1, new NamedThreadFactory("integration-manager")));
     private final LoadJarUtils loadJarUtils;
     private final URLClassLoader restartClassLoader;
@@ -78,8 +77,6 @@ public class IntegrationManager {
     // 初始依赖关系快照（系统启动时的依赖关系）
     // 用于判断 ClassLoader 层级是否需要调整
     private Map<String, List<String>> initialDependencyGraph;
-
-    private boolean initialSnapshotTaken = false;
 
     private Log log;
 
@@ -93,7 +90,6 @@ public class IntegrationManager {
     public IntegrationManager(EcatCore core, IntegrationRegistry integrationRegistry, StateManager stateManager) {
         this.core = core;
         this.integrationRegistry = integrationRegistry;
-        this.stateManager = stateManager;
         this.log = LogFactory.getLogger(getClass());
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
         // if classLoader is instance of URLClassLoader, set restartClassLoader to classLoader
@@ -108,12 +104,12 @@ public class IntegrationManager {
     }
 
     public void loadIntegrations() {
-        Yaml yaml = new Yaml();
-        InputStream inputStream = this.getClass()
-               .getClassLoader()
-               .getResourceAsStream("core-integrations.yml");
-        Map<String, Map<String, Object>> coreIntegrationsConfig = yaml.load(inputStream);
-        Map<String, Object> coreitgs = coreIntegrationsConfig.getOrDefault("integrations", null);
+        // Yaml yaml = new Yaml();
+        // InputStream inputStream = this.getClass()
+        //        .getClassLoader()
+        //        .getResourceAsStream("core-integrations.yml");
+        // Map<String, Map<String, Object>> coreIntegrationsConfig = yaml.load(inputStream);
+        // Map<String, Object> coreitgs = coreIntegrationsConfig.getOrDefault("integrations", null);
 
         // TODO: merge coreitgs and itgs for needed
 
@@ -444,6 +440,7 @@ public class IntegrationManager {
      * @param coordinate 集成坐标 (groupId:artifactId)
      * @return 集成状态信息
      */
+    @SuppressWarnings("unchecked")
     public IntegrationStatus getIntegrationStatus(String coordinate) {
         IntegrationStatus.Builder builder = IntegrationStatus.builder()
             .coordinate(coordinate);
@@ -648,51 +645,108 @@ public class IntegrationManager {
         // 如果是，启用新集成需要 ClassLoader 层级调整
         boolean needsAdjustment = requiresClassLoaderHierarchyChange(coordinate, dependencies);
 
-        // 5. 准备配置
-        Boolean enabled = (Boolean) config.getOrDefault("enabled", true);
+        // 6. 准备配置
+        Map<String, Map<String, Object>> configData = loadIntegrationsConfig();
+        Map<String, Object> integrations = configData.getOrDefault("integrations", new HashMap<>());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> integrationConfig = (Map<String, Object>) integrations.get(coordinate);
+
+        // 如果集成配置不存在，创建一个新的
+        if (integrationConfig == null) {
+            integrationConfig = new HashMap<>();
+            integrations.put(coordinate, integrationConfig);
+        }
+
+        // 确保 groupId, artifactId, version 被保存到配置中
+        integrationConfig.put("groupId", groupId);
+        integrationConfig.put("artifactId", artifactId);
+        integrationConfig.put("version", version);
+
+        Boolean enabled = (Boolean) integrationConfig.getOrDefault("enabled", true);
         // 注意：dependencies 不会保存到配置文件中，而是从 JAR 包的 ecat-config.yml 动态读取
 
         if (needsAdjustment) {
-            // 需要重启 → PENDING_ADDED
-            config.put("enabled", true);
-            config.put("state", IntegrationState.PENDING_ADDED.name());
-            saveIntegrationConfig(coordinate, config);
+            // 需要重启 → 根据用户选择的 enabled 状态决定
+            if (enabled) {
+                integrationConfig.put("enabled", true);
+                integrationConfig.put("state", IntegrationState.PENDING_ADDED.name());
+            } else {
+                // 用户选择不启用，保存为 STOPPED 状态
+                integrationConfig.put("enabled", false);
+                integrationConfig.put("state", IntegrationState.STOPPED.name());
+            }
+            saveIntegrationConfig(coordinate, integrationConfig);
 
-            return IntegrationStatus.builder()
-                .coordinate(coordinate)
-                .state(IntegrationState.PENDING_ADDED)
-                .message("新集成需要调整类加载器层级，请重启系统以加载")
-                .dependencies(dependencies)
-                .dependents(new ArrayList<>())
-                .version(version)
-                .isLocked(true)
-                .canEnable(false)
-                .canDisable(false)
-                .canRemove(false)
-                .canUpgrade(false)
-                .build();
+            if (enabled) {
+                return IntegrationStatus.builder()
+                    .coordinate(coordinate)
+                    .state(IntegrationState.PENDING_ADDED)
+                    .message("新集成需要调整类加载器层级，请重启系统以加载")
+                    .dependencies(dependencies)
+                    .dependents(new ArrayList<>())
+                    .version(version)
+                    .isLocked(true)
+                    .canEnable(false)
+                    .canDisable(false)
+                    .canRemove(false)
+                    .canUpgrade(false)
+                    .build();
+            } else {
+                return IntegrationStatus.builder()
+                    .coordinate(coordinate)
+                    .state(IntegrationState.STOPPED)
+                    .message("集成已添加但未启用")
+                    .dependencies(dependencies)
+                    .dependents(new ArrayList<>())
+                    .version(version)
+                    .isLocked(false)
+                    .canEnable(true)
+                    .canDisable(false)
+                    .canRemove(true)
+                    .canUpgrade(true)
+                    .build();
+            }
         } else {
-            // 热加载 → RUNNING
-            config.put("enabled", true);
-            config.put("state", IntegrationState.RUNNING.name());
-            saveIntegrationConfig(coordinate, config);
+            // 不需要类加载器调整时，根据 enabled 状态决定
+            if (enabled) {
+                // 热加载 → RUNNING
+                integrationConfig.put("enabled", true);
+                integrationConfig.put("state", IntegrationState.RUNNING.name());
+                saveIntegrationConfig(coordinate, integrationConfig);
 
-            // TODO: 实际加载集成
-            // 这里需要调用现有的加载逻辑
+                return IntegrationStatus.builder()
+                    .coordinate(coordinate)
+                    .state(IntegrationState.RUNNING)
+                    .message("集成已成功加载")
+                    .dependencies(dependencies)
+                    .dependents(new ArrayList<>())
+                    .version(version)
+                    .isLocked(false)
+                    .canEnable(false)
+                    .canDisable(true)
+                    .canRemove(true)
+                    .canUpgrade(true)
+                    .build();
+            } else {
+                // 用户选择不启用，保存为 STOPPED 状态
+                integrationConfig.put("enabled", false);
+                integrationConfig.put("state", IntegrationState.STOPPED.name());
+                saveIntegrationConfig(coordinate, integrationConfig);
 
-            return IntegrationStatus.builder()
-                .coordinate(coordinate)
-                .state(IntegrationState.RUNNING)
-                .message("集成已成功加载")
-                .dependencies(dependencies)
-                .dependents(new ArrayList<>())
-                .version(version)
-                .isLocked(false)
-                .canEnable(false)
-                .canDisable(true)
-                .canRemove(true)
-                .canUpgrade(true)
-                .build();
+                return IntegrationStatus.builder()
+                    .coordinate(coordinate)
+                    .state(IntegrationState.STOPPED)
+                    .message("集成已添加但未启用")
+                    .dependencies(dependencies)
+                    .dependents(new ArrayList<>())
+                    .version(version)
+                    .isLocked(false)
+                    .canEnable(true)
+                    .canDisable(false)
+                    .canRemove(true)
+                    .canUpgrade(true)
+                    .build();
+            }
         }
     }
 
@@ -733,6 +787,63 @@ public class IntegrationManager {
                 .canRemove(currentStatus.canRemove())
                 .canUpgrade(currentStatus.canUpgrade())
                 .build();
+        }
+
+        // 2.1 检查依赖是否已安装且启用
+        List<String> dependencies = currentStatus.getDependencies();
+        if (dependencies != null && !dependencies.isEmpty()) {
+            Map<String, Map<String, Object>> config = loadIntegrationsConfig();
+            Map<String, Object> integrations = config.getOrDefault("integrations", new HashMap<>());
+            List<String> missingDeps = new ArrayList<>();
+            List<String> disabledDeps = new ArrayList<>();
+
+            for (String dep : dependencies) {
+                if (!integrations.containsKey(dep)) {
+                    missingDeps.add(dep);
+                } else {
+                    // 检查依赖是否已启用
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> depConfig = (Map<String, Object>) integrations.get(dep);
+                    Boolean depEnabled = (Boolean) depConfig.get("enabled");
+                    if (depEnabled == null || !depEnabled) {
+                        disabledDeps.add(dep);
+                    }
+                }
+            }
+
+            if (!missingDeps.isEmpty()) {
+                log.warn("启用集成 {} 失败：缺少依赖 {}", coordinate, missingDeps);
+                return IntegrationStatus.builder()
+                    .coordinate(coordinate)
+                    .state(currentStatus.getState())
+                    .message("缺少依赖: " + String.join(", ", missingDeps) + "。请先安装这些依赖。")
+                    .isLocked(false)
+                    .canEnable(false)
+                    .canDisable(false)
+                    .canRemove(true)
+                    .canUpgrade(false)
+                    .dependencies(dependencies)
+                    .dependents(currentStatus.getDependents())
+                    .version(currentStatus.getVersion())
+                    .build();
+            }
+
+            if (!disabledDeps.isEmpty()) {
+                log.warn("启用集成 {} 失败：依赖未启用 {}", coordinate, disabledDeps);
+                return IntegrationStatus.builder()
+                    .coordinate(coordinate)
+                    .state(currentStatus.getState())
+                    .message("依赖未启用: " + String.join(", ", disabledDeps) + "。请先启用这些依赖。")
+                    .isLocked(false)
+                    .canEnable(false)
+                    .canDisable(false)
+                    .canRemove(true)
+                    .canUpgrade(false)
+                    .dependencies(dependencies)
+                    .dependents(currentStatus.getDependents())
+                    .version(currentStatus.getVersion())
+                    .build();
+            }
         }
 
         // 3. 关键修复：检查是否需要调整 ClassLoader 层级
@@ -899,7 +1010,6 @@ public class IntegrationManager {
             }
         }
 
-        initialSnapshotTaken = true;
         log.info("已保存初始依赖关系快照，共 {} 个集成有依赖者", initialDependencyGraph.size());
     }
 
@@ -1644,7 +1754,6 @@ public class IntegrationManager {
      * @param integrationConfig 集成配置
      * @return 依赖列表
      */
-    @SuppressWarnings("unchecked")
     private List<String> findDependencies(String coordinate, Map<String, Object> integrationConfig) {
         List<String> dependencies = new ArrayList<>();
 

@@ -67,16 +67,21 @@ public class JarDependencyLoader {
         );
 
         try {
-            URL url = jarFile.toURI().toURL();
-            url = new URL("jar:file:" + jarFile.getAbsolutePath() + "!/");
-            URL[] urls = new URL[] { url };
+            // 使用 JarFile 直接读取 YAML，避免 URLClassLoader 缓存问题
+            JarFile jar = new JarFile(jarFile);
+            JarEntry entry = jar.getJarEntry("ecat-config.yml");
+            if (entry == null) {
+                jar.close();
+                return partialInfo; // 无配置文件
+            }
 
-            try (URLClassLoader classLoader = new URLClassLoader(urls)) {
-                InputStream inputStream = classLoader.getResourceAsStream("ecat-config.yml");
-                if (inputStream == null) {
-                    return partialInfo; // 无配置文件，返回仅含默认值的对象（requiresCore 默认 "^1.0.0"）
-                }
+            InputStream inputStream = jar.getInputStream(entry);
+            if (inputStream == null) {
+                jar.close();
+                return partialInfo;
+            }
 
+            try {
                 Yaml yaml = new Yaml();
                 Map<String, Object> yamlMap = yaml.load(inputStream);
 
@@ -114,7 +119,6 @@ public class JarDependencyLoader {
                         }
                     }
 
-                    // 设置新格式
                     partialInfo.setDependencyInfoList(dependencyInfoList);
                 }
 
@@ -125,11 +129,12 @@ public class JarDependencyLoader {
                     boolean api = (Boolean) webPlatformMap.getOrDefault("api", false);
                     partialInfo.setWebPlatform(new WebPlatformSupport(ui, api));
                 }
-
-                // 注意：className 不从 ecat-config.yml 读取，由 IntegrationManager 通过扫描 JAR 获取
-
-                return partialInfo;
+            } finally {
+                inputStream.close();
+                jar.close();
             }
+            // 注意：className 不从 ecat-config.yml 读取，由 IntegrationManager 通过扫描 JAR 获取
+            return partialInfo;
         } catch (Exception e) {
             e.printStackTrace();
             return partialInfo; // 异常时返回初始默认对象
