@@ -178,6 +178,12 @@
         "second": "s",
         "minute": "min",
         "hour": "h"
+      },
+      "volume": {
+        "ml": "mL",
+        "l": "L",
+        "cm3": "cm³",
+        "m3": "m³"
       }
     }
   },
