@@ -34,7 +34,13 @@ public enum DeviceClasses {
     AIR_MONITOR_O3("air.monitor.o3"),
     AIR_MONITOR_CALIBRATOR("air.monitor.calibrator"), // 校准仪
     AIR_MONITOR_QC("air.monitor.qc"), // 质控仪
+
+    AIR_FILTER_MEMBRANE("air.filter.membrane"),  // 换膜器
+
+    AIR_QUALITY_DETECTOR("air.quality.detector"), // （复合型）空气质量检测仪
+
     AIR_CONDITIONER("air.conditioner"), // 空调控制器
+
     WEATHER_SENSOR("weather.sensor"), // 气象传感器
 
     POWER_SUPPLY_STABILIZER("power.supply.stabilizer"), // 稳压电源
@@ -44,8 +50,8 @@ public enum DeviceClasses {
     SAMPLE_TUBE("sample.tube"), // 采样管
 
     IO_DAM("io.dam"), // IO通信-采集单元
-    AIR_FILTER_MEMBRANE("air.filter.membrane"),  // 换膜器
-    AIR_QUALITY_DETECTOR("air.quality.detector"), // （复合型）空气质量检测仪
+
+    COM_MODBUS_RTUSLAVE("com.modbus.rtuslave"), // 通讯模块 Modbus RTU Slave
 
     DEFAULT_SENSOR("default.sensor"); // 默认的传感器类，可作为仅显示值没有控制功能的设备使用
 
