@@ -737,7 +737,7 @@ java -jar ecat-core.jar -Decat.log.turbo.debug=true -Decat.log.turbo.debug.logge
 
 ### 13.1 验证日志路由正确性
 
-1. 启动服务后，访问 http://localhost:9999/core-api/static/logs.html
+1. 启动服务后，访问 http://localhost:9999/core-api/index.html
 2. 选择不同的集成，查看日志是否只显示对应集成的日志
 3. 特别验证：env-data-manager 的 `insertRealdata` 日志不应出现在 aticloud
 
