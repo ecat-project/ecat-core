@@ -46,7 +46,7 @@ package com.ecat.core.ConfigFlow;
  * }
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public interface ConfigFlowProvider {
 

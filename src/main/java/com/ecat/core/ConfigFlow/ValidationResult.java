@@ -27,7 +27,7 @@ import java.util.Map;
  *
  * <p>用于封装表单验证结果，包含验证状态和错误信息。
  *
- * @author ECAT Core
+ * @author coffee
  */
 @Getter
 public class ValidationResult {

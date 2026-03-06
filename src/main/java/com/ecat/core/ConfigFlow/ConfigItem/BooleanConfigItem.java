@@ -31,7 +31,7 @@ import java.util.Map;
  *     .displayName("启用状态");
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public class BooleanConfigItem extends AbstractConfigItem<Boolean> {
 
@@ -69,6 +69,18 @@ public class BooleanConfigItem extends AbstractConfigItem<Boolean> {
     @Override
     public BooleanConfigItem displayName(String displayName) {
         this.displayName = displayName;
+        return this;
+    }
+
+    /**
+     * 设置占位符
+     *
+     * @param placeholder 占位符
+     * @return this
+     */
+    @Override
+    public BooleanConfigItem placeholder(String placeholder) {
+        this.placeholder = placeholder;
         return this;
     }
 

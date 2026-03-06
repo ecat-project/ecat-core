@@ -33,7 +33,7 @@ import java.util.Map;
  *     .range(1, 65535);
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public class NumericConfigItem extends AbstractConfigItem<Double> {
 
@@ -82,6 +82,18 @@ public class NumericConfigItem extends AbstractConfigItem<Double> {
     }
 
     /**
+     * 设置占位符
+     *
+     * @param placeholder 占位符
+     * @return this
+     */
+    @Override
+    public NumericConfigItem placeholder(String placeholder) {
+        this.placeholder = placeholder;
+        return this;
+    }
+
+    /**
      * 设置数值范围约束
      * <p>
      * 创建并添加 {@link NumericRangeValidator}。
@@ -97,13 +109,26 @@ public class NumericConfigItem extends AbstractConfigItem<Double> {
 
     @Override
     protected String validateType(Object value) {
-        if (!(value instanceof Double) && !(value instanceof Integer) &&
-            !(value instanceof Long) && !(value instanceof Float)) {
-            return displayName != null
-                ? displayName + " 必须是数值类型"
-                : "配置项 " + key + " 必须是数值类型";
+        // 支持 Double, Integer, Long, Float, BigDecimal (FastJSON2 解析 JSON 数字为 BigDecimal)
+        // 也支持 String 类型（前端输入）
+        if (value instanceof Double || value instanceof Integer || value instanceof Long ||
+            value instanceof Float || value instanceof java.math.BigDecimal) {
+            return null;
         }
-        return null;
+        // 尝试解析 String
+        if (value instanceof String) {
+            try {
+                Double.parseDouble((String) value);
+                return null;
+            } catch (NumberFormatException e) {
+                return displayName != null
+                    ? displayName + " 必须是有效的数值"
+                    : "配置项 " + key + " 必须是有效的数值";
+            }
+        }
+        return displayName != null
+            ? displayName + " 必须是数值类型"
+            : "配置项 " + key + " 必须是数值类型";
     }
 
     @Override
@@ -133,6 +158,16 @@ public class NumericConfigItem extends AbstractConfigItem<Double> {
             typedValue = ((Long) value).doubleValue();
         } else if (value instanceof Float) {
             typedValue = ((Float) value).doubleValue();
+        } else if (value instanceof java.math.BigDecimal) {
+            typedValue = ((java.math.BigDecimal) value).doubleValue();
+        } else if (value instanceof String) {
+            try {
+                typedValue = Double.parseDouble((String) value);
+            } catch (NumberFormatException e) {
+                return displayName != null
+                    ? displayName + " 必须是有效的数值"
+                    : "配置项 " + key + " 必须是有效的数值";
+            }
         } else {
             return displayName != null
                 ? displayName + " 必须是数值类型"

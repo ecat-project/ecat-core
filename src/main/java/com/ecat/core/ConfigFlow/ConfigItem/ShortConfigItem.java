@@ -33,7 +33,7 @@ import java.util.Map;
  *     .range((short) 1, (short) 10);
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public class ShortConfigItem extends AbstractConfigItem<Short> {
 
@@ -70,6 +70,30 @@ public class ShortConfigItem extends AbstractConfigItem<Short> {
     }
 
     /**
+     * 设置显示名称
+     *
+     * @param displayName 显示名称
+     * @return this
+     */
+    @Override
+    public ShortConfigItem displayName(String displayName) {
+        this.displayName = displayName;
+        return this;
+    }
+
+    /**
+     * 设置占位符
+     *
+     * @param placeholder 占位符
+     * @return this
+     */
+    @Override
+    public ShortConfigItem placeholder(String placeholder) {
+        this.placeholder = placeholder;
+        return this;
+    }
+
+    /**
      * 设置短整型范围约束
      * <p>
      * 创建并添加 {@link ShortRangeValidator}。
@@ -96,12 +120,26 @@ public class ShortConfigItem extends AbstractConfigItem<Short> {
 
     @Override
     protected String validateType(Object value) {
-        if (!(value instanceof Short) && !(value instanceof Integer) && !(value instanceof Long)) {
-            return displayName != null
-                ? displayName + " 必须是整数类型"
-                : "配置项 " + key + " 必须是整数类型";
+        // 支持 Short, Integer, Long, BigDecimal (FastJSON2 解析 JSON 数字为 BigDecimal)
+        // 也支持 String 类型（前端输入）
+        if (value instanceof Short || value instanceof Integer || value instanceof Long ||
+            value instanceof java.math.BigDecimal) {
+            return null;
         }
-        return null;
+        // 尝试解析 String
+        if (value instanceof String) {
+            try {
+                Short.parseShort((String) value);
+                return null;
+            } catch (NumberFormatException e) {
+                return displayName != null
+                    ? displayName + " 必须是有效的整数"
+                    : "配置项 " + key + " 必须是有效的整数";
+            }
+        }
+        return displayName != null
+            ? displayName + " 必须是整数类型"
+            : "配置项 " + key + " 必须是整数类型";
     }
 
     @Override
@@ -141,6 +179,29 @@ public class ShortConfigItem extends AbstractConfigItem<Short> {
                     : "配置项 " + key + " 超出短整型范围";
             }
             typedValue = (short) longValue.longValue();
+        } else if (value instanceof java.math.BigDecimal) {
+            java.math.BigDecimal bdValue = (java.math.BigDecimal) value;
+            // 检查是否为整数值
+            if (bdValue.scale() > 0 && bdValue.stripTrailingZeros().scale() > 0) {
+                return displayName != null
+                    ? displayName + " 必须是整数类型"
+                    : "配置项 " + key + " 必须是整数类型";
+            }
+            if (bdValue.compareTo(java.math.BigDecimal.valueOf(Short.MIN_VALUE)) < 0 ||
+                bdValue.compareTo(java.math.BigDecimal.valueOf(Short.MAX_VALUE)) > 0) {
+                return displayName != null
+                    ? displayName + " 超出短整型范围"
+                    : "配置项 " + key + " 超出短整型范围";
+            }
+            typedValue = bdValue.shortValue();
+        } else if (value instanceof String) {
+            try {
+                typedValue = Short.parseShort((String) value);
+            } catch (NumberFormatException e) {
+                return displayName != null
+                    ? displayName + " 必须是有效的整数"
+                    : "配置项 " + key + " 必须是有效的整数";
+            }
         } else {
             return displayName != null
                 ? displayName + " 必须是整数类型"

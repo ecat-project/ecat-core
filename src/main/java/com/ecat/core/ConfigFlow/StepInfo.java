@@ -24,7 +24,7 @@ import lombok.NoArgsConstructor;
  * <p>
  * 封装步骤的显示信息，支持未来扩展（如描述、图标等）。
  *
- * @author ECAT Core
+ * @author coffee
  */
 @Data
 @NoArgsConstructor

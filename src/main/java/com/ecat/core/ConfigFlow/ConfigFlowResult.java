@@ -33,7 +33,7 @@ import java.util.Map;
  *   <li>{@link ResultType#ABORT} - 中止流程</li>
  * </ul>
  *
- * @author ECAT Core
+ * @author coffee
  */
 @Getter
 public class ConfigFlowResult {

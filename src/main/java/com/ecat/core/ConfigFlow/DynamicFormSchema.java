@@ -27,7 +27,7 @@ import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
  * <p>实现此接口可以根据上下文信息（如已填写的表单数据、错误信息等）
  * 动态生成配置定义。
  *
- * @author ECAT Core
+ * @author coffee
  */
 @FunctionalInterface
 public interface DynamicFormSchema {

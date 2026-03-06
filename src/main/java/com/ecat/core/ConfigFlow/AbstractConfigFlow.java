@@ -16,6 +16,8 @@
 
 package com.ecat.core.ConfigFlow;
 
+import com.ecat.core.I18n.I18nHelper;
+import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
@@ -67,9 +69,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * }
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public abstract class AbstractConfigFlow {
+
+    /**
+     * i18n Key 前缀
+     */
+    private static final String PREFIX = "config_flow";
 
     /**
      * 日志实例
@@ -104,12 +111,19 @@ public abstract class AbstractConfigFlow {
     private List<String> stepHistory = new ArrayList<>();
 
     /**
+     * I18n 代理实例
+     * 用于获取翻译资源
+     */
+    protected final I18nProxy i18n;
+
+    /**
      * 构造函数
      *
      * @param flowId 流程实例 ID
      */
     protected AbstractConfigFlow(String flowId) {
         this.flowId = flowId;
+        this.i18n = I18nHelper.createProxy(this.getClass());
         cacheStepHandlers();
     }
 
@@ -227,6 +241,42 @@ public abstract class AbstractConfigFlow {
         }
 
         return ConfigFlowResult.showForm(stepId, configDef, errors, flowData);
+    }
+
+    /**
+     * 验证步骤用户输入
+     *
+     * <p>使用 ConfigDefinition 中的 ConfigItem 验证器自动验证用户输入。
+     * 如果验证失败，返回包含错误信息的 Map；如果验证通过，返回空 Map。
+     *
+     * @param stepId 步骤 ID
+     * @param userInput 用户输入
+     * @param schema Schema 生成函数
+     * @return 错误信息 Map（空表示验证通过）
+     */
+    protected final Map<String, Object> validateStepInput(String stepId,
+                                                          Map<String, Object> userInput,
+                                                          DynamicFormSchema schema) {
+        Map<String, Object> errors = new HashMap<>();
+
+        if (userInput == null || userInput.isEmpty()) {
+            return errors;
+        }
+
+        // 生成 ConfigDefinition 进行验证
+        FormContext context = new FormContext(stepId, userInput, errors);
+        ConfigDefinition configDef = schema.generateSchema(context);
+
+        // 执行验证
+        if (!configDef.validateConfig(userInput)) {
+            // 处理新版 AbstractConfigItem 错误
+            for (Map.Entry<com.ecat.core.ConfigFlow.ConfigItem.AbstractConfigItem<?>, String> entry :
+                    configDef.getInvalidFlowConfigItems().entrySet()) {
+                errors.put(entry.getKey().getKey(), entry.getValue());
+            }
+        }
+
+        return errors;
     }
 
     /**
@@ -402,16 +452,29 @@ public abstract class AbstractConfigFlow {
         return null;
     }
 
+    // ========== I18n 约定方法 ==========
+
     /**
-     * 获取单个步骤的显示名称
+     * 获取步骤显示名称
      * <p>
-     * 便捷方法，从 getStepInfos() 中获取指定步骤的显示名称。
-     * 如果未定义，则返回 stepId 作为兜底。
+     * 查找顺序：i18n 资源 -> getStepInfos() -> stepId
+     * <p>
+     * Key 格式: config_flow.step_{stepId}.display_name
      *
      * @param stepId 步骤 ID
      * @return 步骤显示名称
      */
     public String getStepDisplayName(String stepId) {
+        // 1. 优先从 i18n 资源获取
+        if (i18n != null) {
+            String key = PREFIX + ".step_" + stepId + ".display_name";
+            String translated = i18n.t(key);
+            if (!translated.equals(key)) {
+                return translated;
+            }
+        }
+
+        // 2. 从 getStepInfos() 获取
         Map<String, StepInfo> infos = getStepInfos();
         if (infos != null && infos.containsKey(stepId)) {
             StepInfo info = infos.get(stepId);
@@ -419,7 +482,144 @@ public abstract class AbstractConfigFlow {
                 return info.getDisplayName();
             }
         }
-        return stepId; // 兜底：返回 stepId
+
+        // 3. 兜底：返回 stepId
+        return stepId;
+    }
+
+    /**
+     * 获取字段显示名称
+     * <p>
+     * Key 格式: config_flow.step_{stepId}.items.{fieldKey}.display_name
+     *
+     * @param stepId 步骤 ID
+     * @param fieldKey 字段键
+     * @return 字段显示名称
+     */
+    public String getFieldDisplayName(String stepId, String fieldKey) {
+        if (i18n != null) {
+            String key = PREFIX + ".step_" + stepId + ".items." + fieldKey + ".display_name";
+            String translated = i18n.t(key);
+            if (!translated.equals(key)) {
+                return translated;
+            }
+        }
+        return fieldKey;
+    }
+
+    /**
+     * 获取字段占位符
+     * <p>
+     * Key 格式: config_flow.step_{stepId}.items.{fieldKey}.placeholder
+     *
+     * @param stepId 步骤 ID
+     * @param fieldKey 字段键
+     * @return 字段占位符，找不到时返回 null
+     */
+    public String getFieldPlaceholder(String stepId, String fieldKey) {
+        if (i18n != null) {
+            String key = PREFIX + ".step_" + stepId + ".items." + fieldKey + ".placeholder";
+            String translated = i18n.t(key);
+            if (!translated.equals(key)) {
+                return translated;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 获取字段描述
+     * <p>
+     * Key 格式: config_flow.step_{stepId}.items.{fieldKey}.description
+     *
+     * @param stepId 步骤 ID
+     * @param fieldKey 字段键
+     * @return 字段描述，找不到时返回 null
+     */
+    public String getFieldDescription(String stepId, String fieldKey) {
+        if (i18n != null) {
+            String key = PREFIX + ".step_" + stepId + ".items." + fieldKey + ".description";
+            String translated = i18n.t(key);
+            if (!translated.equals(key)) {
+                return translated;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 获取选项显示名称
+     * <p>
+     * Key 格式: config_flow.step_{stepId}.items.{fieldKey}.options.{optionValue}
+     *
+     * @param stepId 步骤 ID
+     * @param fieldKey 字段键
+     * @param optionValue 选项值
+     * @return 选项显示名称
+     */
+    public String getOptionDisplayName(String stepId, String fieldKey, String optionValue) {
+        if (i18n != null) {
+            String key = PREFIX + ".step_" + stepId + ".items." + fieldKey + ".options." + optionValue;
+            String translated = i18n.t(key);
+            if (!translated.equals(key)) {
+                return translated;
+            }
+        }
+        return optionValue;
+    }
+
+    /**
+     * 获取带翻译的选项 Map
+     * <p>
+     * 遍历所有选项，使用 getOptionDisplayName 获取翻译后的显示名称。
+     *
+     * @param stepId 步骤 ID
+     * @param fieldKey 字段键
+     * @param options 原始选项 Map (value -> label)
+     * @return 翻译后的选项 Map (value -> translated label)
+     */
+    public Map<String, String> getTranslatedOptions(String stepId, String fieldKey, Map<String, String> options) {
+        Map<String, String> translated = new LinkedHashMap<>();
+        if (options == null) {
+            return translated;
+        }
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            translated.put(entry.getKey(), getOptionDisplayName(stepId, fieldKey, entry.getKey()));
+        }
+        return translated;
+    }
+
+    // ========== I18n 特殊消息方法 ==========
+
+    /**
+     * 获取自定义消息
+     * <p>
+     * 用于获取无固定模式的特殊消息，需要使用常量定义 key。
+     *
+     * @param i18nKey 国际化 key (如 ConfigFlowI18n.ERROR_REQUIRED)
+     * @return 翻译后的消息
+     */
+    protected String t(String i18nKey) {
+        if (i18n != null) {
+            return i18n.t(i18nKey);
+        }
+        return i18nKey;
+    }
+
+    /**
+     * 获取自定义消息（带参数）
+     * <p>
+     * 用于获取无固定模式的特殊消息，支持 ICU MessageFormat 参数替换。
+     *
+     * @param i18nKey 国际化 key
+     * @param args 参数列表
+     * @return 翻译后的消息
+     */
+    protected String t(String i18nKey, Object... args) {
+        if (i18n != null) {
+            return i18n.t(i18nKey, args);
+        }
+        return i18nKey;
     }
 
     /**

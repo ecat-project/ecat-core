@@ -32,7 +32,7 @@ import java.util.Map;
  *     .length(1, 50);
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public class TextConfigItem extends AbstractConfigItem<String> {
 
@@ -66,6 +66,18 @@ public class TextConfigItem extends AbstractConfigItem<String> {
     @Override
     public TextConfigItem displayName(String displayName) {
         this.displayName = displayName;
+        return this;
+    }
+
+    /**
+     * 设置占位符
+     *
+     * @param placeholder 占位符
+     * @return this
+     */
+    @Override
+    public TextConfigItem placeholder(String placeholder) {
+        this.placeholder = placeholder;
         return this;
     }
 

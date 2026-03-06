@@ -33,7 +33,7 @@ import java.util.Map;
  *     .range(-40.0f, 100.0f);
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public class FloatConfigItem extends AbstractConfigItem<Float> {
 
@@ -59,6 +59,30 @@ public class FloatConfigItem extends AbstractConfigItem<Float> {
     }
 
     /**
+     * 设置显示名称
+     *
+     * @param displayName 显示名称
+     * @return this
+     */
+    @Override
+    public FloatConfigItem displayName(String displayName) {
+        this.displayName = displayName;
+        return this;
+    }
+
+    /**
+     * 设置占位符
+     *
+     * @param placeholder 占位符
+     * @return this
+     */
+    @Override
+    public FloatConfigItem placeholder(String placeholder) {
+        this.placeholder = placeholder;
+        return this;
+    }
+
+    /**
      * 设置浮点数范围约束
      * <p>
      * 创建并添加 {@link FloatRangeValidator}。
@@ -74,12 +98,26 @@ public class FloatConfigItem extends AbstractConfigItem<Float> {
 
     @Override
     protected String validateType(Object value) {
-        if (!(value instanceof Float) && !(value instanceof Double)) {
-            return displayName != null
-                ? displayName + " 必须是浮点数类型"
-                : "配置项 " + key + " 必须是浮点数类型";
+        // 支持 Float, Double, Integer, Long, BigDecimal (FastJSON2 解析 JSON 数字)
+        // 也支持 String 类型（前端输入）
+        if (value instanceof Float || value instanceof Double || value instanceof Integer ||
+            value instanceof Long || value instanceof java.math.BigDecimal) {
+            return null;
         }
-        return null;
+        // 尝试解析 String
+        if (value instanceof String) {
+            try {
+                Float.parseFloat((String) value);
+                return null;
+            } catch (NumberFormatException e) {
+                return displayName != null
+                    ? displayName + " 必须是有效的浮点数"
+                    : "配置项 " + key + " 必须是有效的浮点数";
+            }
+        }
+        return displayName != null
+            ? displayName + " 必须是浮点数类型"
+            : "配置项 " + key + " 必须是浮点数类型";
     }
 
     @Override
@@ -105,6 +143,20 @@ public class FloatConfigItem extends AbstractConfigItem<Float> {
             typedValue = (Float) value;
         } else if (value instanceof Double) {
             typedValue = ((Double) value).floatValue();
+        } else if (value instanceof Integer) {
+            typedValue = ((Integer) value).floatValue();
+        } else if (value instanceof Long) {
+            typedValue = ((Long) value).floatValue();
+        } else if (value instanceof java.math.BigDecimal) {
+            typedValue = ((java.math.BigDecimal) value).floatValue();
+        } else if (value instanceof String) {
+            try {
+                typedValue = Float.parseFloat((String) value);
+            } catch (NumberFormatException e) {
+                return displayName != null
+                    ? displayName + " 必须是有效的浮点数"
+                    : "配置项 " + key + " 必须是有效的浮点数";
+            }
         } else {
             return displayName != null
                 ? displayName + " 必须是浮点数类型"

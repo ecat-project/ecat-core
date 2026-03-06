@@ -36,13 +36,14 @@ import java.util.Map;
  * </ul>
  *
  * @param <T> 配置项值的类型
- * @author ECAT Core
+ * @author coffee
  */
 public abstract class AbstractConfigItem<T> {
 
     protected final String key;
     protected String displayName;
     protected String description;
+    protected String placeholder;
     protected boolean required;
     protected final List<ConstraintValidator<?>> validators = new ArrayList<>();
     protected T defaultValue;
@@ -92,6 +93,17 @@ public abstract class AbstractConfigItem<T> {
      */
     public AbstractConfigItem<T> description(String description) {
         this.description = description;
+        return this;
+    }
+
+    /**
+     * 设置占位符
+     *
+     * @param placeholder 占位符
+     * @return this
+     */
+    public AbstractConfigItem<T> placeholder(String placeholder) {
+        this.placeholder = placeholder;
         return this;
     }
 
@@ -217,6 +229,10 @@ public abstract class AbstractConfigItem<T> {
 
     public String getDescription() {
         return description;
+    }
+
+    public String getPlaceholder() {
+        return placeholder;
     }
 
     public boolean isRequired() {

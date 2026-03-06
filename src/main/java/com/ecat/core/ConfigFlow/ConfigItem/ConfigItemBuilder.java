@@ -47,7 +47,7 @@ import java.util.stream.Collectors;
  *     .buildValidator());
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public class ConfigItemBuilder {
 
@@ -317,30 +317,7 @@ public class ConfigItemBuilder {
     }
 
     /**
-     * 创建对象配置项
-     *
-     * @param key 配置项键
-     * @param required 是否必需
-     * @return 对象配置项
-     */
-    public static ObjectConfigItem object(String key, boolean required) {
-        return new ObjectConfigItem(key, required);
-    }
-
-    /**
-     * 创建对象配置项（带默认值）
-     *
-     * @param key 配置项键
-     * @param required 是否必需
-     * @param defaultValue 默认值
-     * @return 对象配置项
-     */
-    public static ObjectConfigItem object(String key, boolean required, Map<String, Object> defaultValue) {
-        return new ObjectConfigItem(key, required, defaultValue);
-    }
-
-    /**
-     * 创建字符串数组配置项
+     * 创建字符串数组配置项（用于多选）
      *
      * @param key 配置项键
      * @param required 是否必需

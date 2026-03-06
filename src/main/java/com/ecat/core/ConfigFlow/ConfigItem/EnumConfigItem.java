@@ -35,7 +35,7 @@ import java.util.*;
  *     .buildValidator();
  * }</pre>
  *
- * @author ECAT Core
+ * @author coffee
  */
 public class EnumConfigItem extends AbstractConfigItem<String> {
 
@@ -76,6 +76,18 @@ public class EnumConfigItem extends AbstractConfigItem<String> {
     }
 
     /**
+     * 设置占位符
+     *
+     * @param placeholder 占位符
+     * @return this
+     */
+    @Override
+    public EnumConfigItem placeholder(String placeholder) {
+        this.placeholder = placeholder;
+        return this;
+    }
+
+    /**
      * 添加选项
      *
      * @param value 选项值
@@ -96,6 +108,21 @@ public class EnumConfigItem extends AbstractConfigItem<String> {
      */
     public EnumConfigItem addOption(String value) {
         return addOption(value, value);
+    }
+
+    /**
+     * 批量添加选项
+     *
+     * @param options 选项映射 (value -> label)
+     * @return this
+     */
+    public EnumConfigItem addOptions(Map<String, String> options) {
+        if (options != null) {
+            for (Map.Entry<String, String> entry : options.entrySet()) {
+                addOption(entry.getKey(), entry.getValue());
+            }
+        }
+        return this;
     }
 
     /**
@@ -159,6 +186,52 @@ public class EnumConfigItem extends AbstractConfigItem<String> {
                 : "配置项 " + key + " 必须是文本类型";
         }
         return null;
+    }
+
+    @Override
+    public String validate(Object value) {
+        // 必填验证
+        if (value == null || (value instanceof String && ((String) value).isEmpty())) {
+            if (required) {
+                return displayName != null
+                    ? displayName + " 是必需的"
+                    : "配置项 " + key + " 是必需的";
+            }
+            return null;
+        }
+
+        // 类型验证
+        String typeError = validateType(value);
+        if (typeError != null) {
+            return typeError;
+        }
+
+        // 枚举值验证 - 使用显示标签生成友好的错误消息
+        String strValue = (String) value;
+        if (!validValues.contains(strValue)) {
+            // 生成显示标签列表
+            String displayValues = getDisplayValuesString();
+            return displayName != null
+                ? displayName + ": 请选择有效的选项 (" + displayValues + ")"
+                : "配置项 " + key + ": 请选择有效的选项 (" + displayValues + ")";
+        }
+
+        return null;
+    }
+
+    /**
+     * 获取有效值的显示字符串（用于错误消息）
+     */
+    private String getDisplayValuesString() {
+        if (optionLabels.isEmpty()) {
+            return validValues.toString();
+        }
+        // 使用显示标签而不是内部值
+        List<String> labels = new ArrayList<>();
+        for (String value : validValues) {
+            labels.add(optionLabels.getOrDefault(value, value));
+        }
+        return labels.toString();
     }
 
     @Override
