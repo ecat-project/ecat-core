@@ -151,6 +151,9 @@ public class ConfigEntryRegistry {
         // 6. 更新缓存
         entryCache.put(entry.getEntryId(), entry);
 
+        // 7. 通知 integration
+        notifyIntegrationCreate(entry);
+
         log.info("Created config entry: entryId={}, uniqueId={}",
                 entry.getEntryId(), entry.getUniqueId());
 
@@ -211,6 +214,9 @@ public class ConfigEntryRegistry {
         // 更新缓存
         entryCache.put(entryId, updated);
 
+        // 5. 通知 integration
+        notifyIntegrationReconfigure(updated);
+
         log.info("Reconfigured config entry: entryId={}, version {} (preserved)",
                 entryId, updated.getVersion());
 
@@ -224,11 +230,18 @@ public class ConfigEntryRegistry {
      * @throws EntryNotFoundException 如果 entryId 不存在
      */
     public void removeEntry(String entryId) {
-        ConfigEntry entry = entryCache.remove(entryId);
+        ConfigEntry entry = entryCache.get(entryId);
         if (entry == null) {
             throw new EntryNotFoundException(entryId);
         }
 
+        // 1. 先通知 integration 停止设备
+        notifyIntegrationRemove(entry);
+
+        // 2. 从缓存移除
+        entryCache.remove(entryId);
+
+        // 3. 从持久化删除
         persistence.delete(entryId);
 
         log.info("Removed config entry: entryId={}", entryId);
