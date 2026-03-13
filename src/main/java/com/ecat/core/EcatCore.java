@@ -135,7 +135,7 @@ public class EcatCore {
         stateManager = new StateManager();
         taskManager = new TaskManager();
         configFlowRegistry = new ConfigFlowRegistry();
-        configEntryRegistry = new ConfigEntryRegistry(new YmlConfigEntryPersistence());
+        configEntryRegistry = new ConfigEntryRegistry(this, new YmlConfigEntryPersistence());
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
         deviceRegistry = new DeviceRegistry();
         i18nRegistry = I18nRegistry.getInstance();
