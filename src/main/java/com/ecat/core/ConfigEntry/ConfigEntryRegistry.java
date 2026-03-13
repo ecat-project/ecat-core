@@ -324,4 +324,87 @@ public class ConfigEntryRegistry {
 
         return updated;
     }
+
+    // ==================== Integration 通知方法 ====================
+
+    /**
+     * 通知 integration 创建 entry
+     */
+    private void notifyIntegrationCreate(ConfigEntry entry) {
+        if (core == null) return;
+
+        String coordinate = entry.getCoordinate();
+        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
+        if (integrationRegistry == null) return;
+
+        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        if (integration == null) {
+            log.debug("Integration not found for coordinate: {}", coordinate);
+            return;
+        }
+
+        try {
+            integration.createEntry(entry);
+            log.debug("Notified integration {} to create entry {}", coordinate, entry.getEntryId());
+        } catch (UnsupportedOperationException e) {
+            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+        } catch (Exception e) {
+            log.error("Failed to notify integration {} to create entry {}: {}",
+                    coordinate, entry.getEntryId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 通知 integration 重新配置 entry
+     */
+    private void notifyIntegrationReconfigure(ConfigEntry entry) {
+        if (core == null) return;
+
+        String coordinate = entry.getCoordinate();
+        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
+        if (integrationRegistry == null) return;
+
+        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        if (integration == null) {
+            log.debug("Integration not found for coordinate: {}", coordinate);
+            return;
+        }
+
+        try {
+            integration.reconfigureEntry(entry.getEntryId(), entry);
+            log.debug("Notified integration {} to reconfigure entry {}", coordinate, entry.getEntryId());
+        } catch (UnsupportedOperationException e) {
+            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+        } catch (Exception e) {
+            log.error("Failed to notify integration {} to reconfigure entry {}: {}",
+                    coordinate, entry.getEntryId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 通知 integration 删除 entry
+     */
+    private void notifyIntegrationRemove(ConfigEntry entry) {
+        if (core == null) return;
+
+        String coordinate = entry.getCoordinate();
+        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
+        if (integrationRegistry == null) return;
+
+        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        if (integration == null) {
+            log.debug("Integration not found for coordinate: {}", coordinate);
+            return;
+        }
+
+        try {
+            integration.removeEntry(entry.getEntryId());
+            log.debug("Notified integration {} to remove entry {}", coordinate, entry.getEntryId());
+        } catch (UnsupportedOperationException e) {
+            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+        } catch (Exception e) {
+            log.error("Failed to notify integration {} to remove entry {}: {}",
+                    coordinate, entry.getEntryId(), e.getMessage());
+        }
+    }
 }
