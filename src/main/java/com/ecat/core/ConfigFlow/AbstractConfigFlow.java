@@ -16,32 +16,36 @@
 
 package com.ecat.core.ConfigFlow;
 
+import com.ecat.core.ConfigEntry.ConfigEntry;
+import com.ecat.core.ConfigEntry.SourceType;
 import com.ecat.core.I18n.I18nHelper;
 import com.ecat.core.I18n.I18nProxy;
-import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.Getter;
 
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 /**
- * 抽象配置流程基类
+ * 配置流程基类
  *
- * <p>提供步骤隔离、反射发现步骤、模板方法模式。
+ * <p>约定：step_user 入口，step_create_entry 出口
+ * <p>使用 registerStep() 注册步骤处理器和显示信息
+ * <p>支持入口步骤机制：registerStepUser()、registerStepReconfigure()、registerStepDiscovery()
  *
  * <p>使用方法：
  * <ol>
  *   <li>继承此类</li>
- *   <li>实现 {@code step_xxx(Map<String, Object> userInput)} 方法</li>
- *   <li>使用 {@link #show_form} 显示表单</li>
- *   <li>使用 {@link #create_entry} 完成流程</li>
+ *   <li>在构造函数中使用 {@link #registerStep(String, Function)} 注册步骤</li>
+ *   <li>使用 {@link #registerStepUser(String, String, BiFunction)} 注册用户入口步骤</li>
+ *   <li>使用 {@link #showForm(String, com.ecat.core.ConfigFlow.ConfigSchema, Map)} 显示表单</li>
+ *   <li>使用 {@link #createEntry()} 完成流程</li>
  * </ol>
- *
- * <p>步骤方法命名约定：方法名必须以 {@code step_} 开头，
- * 接收一个 {@code Map<String, Object>} 参数，返回 {@link ConfigFlowResult}。
  *
  * <p>示例：
  * <pre>{@code
@@ -49,23 +53,20 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  *     public DemoConfigFlow(String flowId) {
  *         super(flowId);
+ *         registerStepUser("user", "用户配置", this::handleUserStep);
+ *         registerStep("device_config", this::stepDeviceConfig, "设备基本配置");
+ *         registerStep("create_entry", this::stepCreateEntry, "完成");
  *     }
  *
- *     @Override
- *     protected ConfigFlowResult step_user(Map<String, Object> userInput) {
+ *     private ConfigFlowResult handleUserStep(Map<String, Object> userInput, FlowContext ctx) {
  *         if (userInput == null || userInput.isEmpty()) {
- *             return show_form("user", this::generateUserSchema, new HashMap<>());
+ *             return showForm("user", createUserSchema(), new HashMap<>());
  *         }
- *         // 验证并进入下一步
- *         return show_form("device_config", this::generateDeviceSchema, new HashMap<>());
+ *         getData().putAll(userInput);
+ *         return showForm("device_config", createDeviceSchema(), new HashMap<>());
  *     }
  *
- *     private ConfigDefinition generateUserSchema(FormContext context) {
- *         ConfigDefinition configDef = new ConfigDefinition();
- *         configDef.define(new ConfigItemBuilder()
- *             .add(new ConfigItem<>("username", String.class, true, null)));
- *         return configDef;
- *     }
+ *     // ... 其他步骤方法
  * }
  * }</pre>
  *
@@ -86,24 +87,55 @@ public abstract class AbstractConfigFlow {
     /**
      * 流程实例 ID
      */
-    @Getter
     protected final String flowId;
+
+    /**
+     * 流程上下文（唯一数据源）
+     */
+    protected FlowContext context;
+
+    /**
+     * Flow 注册表
+     */
+    protected ConfigFlowRegistry registry;
+
+    /**
+     * 步骤定义映射（处理器 + 显示信息）
+     */
+    protected final Map<String, StepDefinition> stepDefinitions = new LinkedHashMap<>();
+
+    // ========== 入口步骤机制 ==========
+
+    /**
+     * 来源类型
+     */
+    protected SourceType sourceType = SourceType.USER;
+
+    /**
+     * 重配置时的 entryId
+     */
+    protected String reconfigureEntryId;
+
+    /**
+     * 用户入口步骤 (每类只能注册一个)
+     */
+    protected EntryStepDefinition userStep;
+
+    /**
+     * 重配置入口步骤 (每类只能注册一个)
+     */
+    protected EntryStepDefinition reconfigureStep;
+
+    /**
+     * 发现入口步骤 (可选，每类只能注册一个)
+     */
+    protected EntryStepDefinition discoveryStep;
 
     /**
      * 当前步骤 ID
      */
     @Getter
     protected String currentStep = "user";
-
-    /**
-     * 流程数据存储
-     */
-    protected final Map<String, Object> flowData = new ConcurrentHashMap<>();
-
-    /**
-     * 步骤处理器方法缓存
-     */
-    private final Map<String, Method> stepHandlers = new ConcurrentHashMap<>();
 
     /**
      * 步骤历史记录
@@ -124,184 +156,442 @@ public abstract class AbstractConfigFlow {
     protected AbstractConfigFlow(String flowId) {
         this.flowId = flowId;
         this.i18n = I18nHelper.createProxy(this.getClass());
-        cacheStepHandlers();
     }
 
     /**
-     * 缓存步骤处理器方法
+     * 获取流程实例 ID
+     * <p>
+     * 优先从 context 获取，如果 context 未设置则返回构造函数传入的 flowId。
      *
-     * <p>基于命名约定自动发现 {@code step_*} 方法。
+     * @return 流程实例 ID
      */
-    private void cacheStepHandlers() {
-        for (Method method : this.getClass().getDeclaredMethods()) {
-            if (method.getName().startsWith("step_") &&
-                method.getParameterCount() == 1 &&
-                method.getParameterTypes()[0] == Map.class) {
-
-                String stepId = method.getName().substring("step_".length());
-                stepHandlers.put(stepId, method);
-            }
-        }
+    public String getFlowId() {
+        return context != null ? context.getFlowId() : flowId;
     }
 
+    // ========== Step 注册 API ==========
+
     /**
-     * 统一的步骤处理入口
-     *
-     * <p>通过反射动态调用对应的步骤处理方法。
+     * 注册步骤（只注册处理器，无显示信息）
      *
      * @param stepId 步骤 ID
-     * @param userInput 用户输入数据（首次进入时为 null）
-     * @return 配置流程结果
+     * @param handler 步骤处理函数
      */
-    public final ConfigFlowResult handleStep(String stepId, Map<String, Object> userInput) {
-        try {
-            // 记录步骤历史（记录处理的步骤）
-            if (!stepHistory.contains(stepId)) {
-                stepHistory.add(stepId);
-            }
-            // 暂时设置为处理的步骤，后续会根据结果更新
-            this.currentStep = stepId;
-
-            // 保存用户输入到步骤级数据存储
-            if (userInput != null) {
-                saveStepData(stepId, userInput);
-            }
-
-            // 动态调用步骤处理方法
-            Method handler = stepHandlers.get(stepId);
-            if (handler == null) {
-                return ConfigFlowResult.abort("未知步骤: " + stepId);
-            }
-
-            handler.setAccessible(true);
-            ConfigFlowResult result = (ConfigFlowResult) handler.invoke(this, userInput);
-
-            // 如果返回的是 SHOW_FORM，更新当前步骤为显示的步骤（而非处理的步骤）
-            // 这样导航信息才能正确反映用户看到的界面
-            if (result.getType() == ConfigFlowResult.ResultType.SHOW_FORM) {
-                String displayStepId = result.getStepId();
-                if (displayStepId != null && !displayStepId.equals(this.currentStep)) {
-                    this.currentStep = displayStepId;
-                    // 如果是新步骤，添加到历史记录
-                    if (!stepHistory.contains(displayStepId)) {
-                        stepHistory.add(displayStepId);
-                    }
-                }
-            }
-
-            return result;
-
-        } catch (Exception e) {
-            log.error("步骤处理异常", e);
-            return ConfigFlowResult.abort("步骤处理异常: " + e.getMessage());
-        }
+    protected void registerStep(String stepId,
+                                 Function<Map<String, Object>, ConfigFlowResult> handler) {
+        stepDefinitions.put(stepId, new StepDefinition(handler, null));
     }
 
     /**
-     * 显示表单
+     * 注册步骤（带显示名称）
      *
-     * @param stepId 当前步骤 ID
-     * @param schema Schema 生成函数
+     * @param stepId 步骤 ID
+     * @param handler 步骤处理函数
+     * @param displayName 显示名称
+     */
+    protected void registerStep(String stepId,
+                                 Function<Map<String, Object>, ConfigFlowResult> handler,
+                                 String displayName) {
+        stepDefinitions.put(stepId, new StepDefinition(handler, StepInfo.of(displayName)));
+    }
+
+    /**
+     * 注册步骤（带完整 StepInfo）
+     *
+     * @param stepId 步骤 ID
+     * @param handler 步骤处理函数
+     * @param stepInfo 步骤信息
+     */
+    protected void registerStep(String stepId,
+                                 Function<Map<String, Object>, ConfigFlowResult> handler,
+                                 StepInfo stepInfo) {
+        stepDefinitions.put(stepId, new StepDefinition(handler, stepInfo));
+    }
+
+    // ========== 入口步骤注册 ==========
+
+    /**
+     * 注册用户入口步骤 (每个 Flow 只能注册一个)
+     *
+     * @param stepId 步骤 ID
+     * @param displayName 显示名称
+     * @param handler 处理器 (接收 userInput 和 context)
+     */
+    protected void registerStepUser(String stepId, String displayName,
+                                    BiFunction<Map<String, Object>, FlowContext, ConfigFlowResult> handler) {
+        this.userStep = new EntryStepDefinition(stepId, displayName, handler);
+        // 同时加入 stepDefinitions，这样 handleStep() 能自然找到
+        stepDefinitions.put(stepId, new StepDefinition(
+            input -> handler.apply(input, context),
+            StepInfo.of(displayName)
+        ));
+        log.debug("Registered user entry step: {}", stepId);
+    }
+
+    /**
+     * 注册重配置入口步骤 (每个 Flow 只能注册一个)
+     *
+     * @param stepId 步骤 ID
+     * @param displayName 显示名称
+     * @param handler 处理器 (接收 userInput 和 context)
+     */
+    protected void registerStepReconfigure(String stepId, String displayName,
+                                           BiFunction<Map<String, Object>, FlowContext, ConfigFlowResult> handler) {
+        this.reconfigureStep = new EntryStepDefinition(stepId, displayName, handler);
+        // 同时加入 stepDefinitions，这样 handleStep() 能自然找到
+        stepDefinitions.put(stepId, new StepDefinition(
+            input -> handler.apply(input, context),
+            StepInfo.of(displayName)
+        ));
+        log.debug("Registered reconfigure entry step: {}", stepId);
+    }
+
+    /**
+     * 注册发现入口步骤 (可选，每个 Flow 只能注册一个)
+     *
+     * @param stepId 步骤 ID
+     * @param displayName 显示名称
+     * @param handler 处理器 (接收 userInput 和 context)
+     */
+    protected void registerStepDiscovery(String stepId, String displayName,
+                                         BiFunction<Map<String, Object>, FlowContext, ConfigFlowResult> handler) {
+        this.discoveryStep = new EntryStepDefinition(stepId, displayName, handler);
+        // 同时加入 stepDefinitions，这样 handleStep() 能自然找到
+        stepDefinitions.put(stepId, new StepDefinition(
+            input -> handler.apply(input, context),
+            StepInfo.of(displayName)
+        ));
+        log.debug("Registered discovery entry step: {}", stepId);
+    }
+
+    // ========== 能力查询接口 ==========
+
+    /**
+     * 是否支持用户入口
+     */
+    public boolean hasUserStep() {
+        return userStep != null;
+    }
+
+    /**
+     * 是否支持重配置入口
+     */
+    public boolean hasReconfigureStep() {
+        return reconfigureStep != null;
+    }
+
+    /**
+     * 是否支持发现入口
+     */
+    public boolean hasDiscoveryStep() {
+        return discoveryStep != null;
+    }
+
+    // ========== 入口获取方法 ==========
+
+    /**
+     * 获取用户入口步骤
+     */
+    public EntryStepDefinition getUserStep() {
+        return userStep;
+    }
+
+    /**
+     * 获取重配置入口步骤
+     */
+    public EntryStepDefinition getReconfigureStep() {
+        return reconfigureStep;
+    }
+
+    /**
+     * 获取发现入口步骤
+     */
+    public EntryStepDefinition getDiscoveryStep() {
+        return discoveryStep;
+    }
+
+    // ========== SourceType 管理 ==========
+
+    /**
+     * 设置来源类型
+     */
+    public void setSourceType(SourceType type) {
+        this.sourceType = type;
+    }
+
+    /**
+     * 获取来源类型
+     */
+    public SourceType getSourceType() {
+        return sourceType;
+    }
+
+    /**
+     * 设置重配置 entryId
+     */
+    public void setReconfigureEntryId(String entryId) {
+        this.reconfigureEntryId = entryId;
+    }
+
+    // ========== 入口执行方法 ==========
+
+    /**
+     * 执行用户入口步骤
+     *
+     * @param userInput 用户输入数据
+     * @return 流程结果
+     * @throws IllegalStateException 如果用户入口未注册
+     */
+    public ConfigFlowResult executeUserStep(Map<String, Object> userInput) {
+        if (userStep == null) {
+            throw new IllegalStateException("User entry step not registered");
+        }
+        return userStep.getHandler().apply(userInput, context);
+    }
+
+    /**
+     * 执行重配置入口步骤
+     *
+     * @param entryId 配置条目 ID
+     * @param userInput 用户输入数据
+     * @return 流程结果
+     * @throws IllegalStateException 如果重配置入口未注册
+     */
+    public ConfigFlowResult executeReconfigureStep(String entryId, Map<String, Object> userInput) {
+        if (reconfigureStep == null) {
+            throw new IllegalStateException("Reconfigure entry step not registered");
+        }
+        this.reconfigureEntryId = entryId;
+        this.sourceType = SourceType.RECONFIGURE;
+        return reconfigureStep.getHandler().apply(userInput, context);
+    }
+
+    // ========== 步骤信息获取 ==========
+
+    /**
+     * 获取步骤信息映射 - 从注册信息自动生成
+     * 子类不需要覆盖此方法
+     *
+     * @return 步骤信息映射
+     */
+    public Map<String, StepInfo> getStepInfos() {
+        Map<String, StepInfo> infos = new LinkedHashMap<>();
+        for (Map.Entry<String, StepDefinition> entry : stepDefinitions.entrySet()) {
+            if (entry.getValue().getStepInfo() != null) {
+                infos.put(entry.getKey(), entry.getValue().getStepInfo());
+            }
+        }
+        return infos;
+    }
+
+    /**
+     * 获取步骤显示名称
+     * 优先级：i18n 资源 -> 注册的 StepInfo -> stepId
+     *
+     * @param stepId 步骤 ID
+     * @return 步骤显示名称
+     */
+    public String getStepDisplayName(String stepId) {
+        // 1. 优先从 i18n 资源获取
+        if (i18n != null) {
+            String key = PREFIX + ".step_" + stepId + ".display_name";
+            String translated = i18n.t(key);
+            if (!translated.equals(key)) {
+                return translated;
+            }
+        }
+
+        // 2. 从注册的 StepInfo 获取
+        StepDefinition definition = stepDefinitions.get(stepId);
+        if (definition != null && definition.getStepInfo() != null) {
+            String displayName = definition.getStepInfo().getDisplayName();
+            if (displayName != null) {
+                return displayName;
+            }
+        }
+
+        // 3. 兜底：返回 stepId
+        return stepId;
+    }
+
+    // ========== 上下文管理 ==========
+
+    /**
+     * 设置流程上下文
+     *
+     * @param context 流程上下文
+     */
+    public void setContext(FlowContext context) {
+        this.context = context;
+    }
+
+    /**
+     * 获取流程上下文
+     *
+     * @return 流程上下文
+     */
+    public FlowContext getContext() {
+        return context;
+    }
+
+    /**
+     * 设置 Flow 注册表
+     *
+     * @param registry Flow 注册表
+     */
+    public void setRegistry(ConfigFlowRegistry registry) {
+        this.registry = registry;
+    }
+
+    /**
+     * 获取流程数据（便捷方法）
+     *
+     * @return 流程数据映射
+     */
+    protected Map<String, Object> getData() {
+        if (context != null) {
+            return context.getData();
+        }
+        // 兼容旧代码：如果没有 context，返回空 Map
+        return new HashMap<>();
+    }
+
+    // ========== 辅助方法 ==========
+
+    /**
+     * 显示表单（使用新版 ConfigSchema）
+     *
+     * <p>框架自动处理步骤数据持久化：
+     * <ul>
+     *   <li>context.getData() 已包含 step_inputs 中的步骤数据</li>
+     *   <li>前端从 data.step_inputs[stepId] 读取已填写内容</li>
+     *   <li>支持步骤漫游时数据不丢失</li>
+     * </ul>
+     *
+     * @param stepId 步骤 ID
+     * @param schema 配置 Schema
      * @param errors 错误信息
      * @return SHOW_FORM 类型结果
      */
-    protected final ConfigFlowResult show_form(String stepId,
-                                               DynamicFormSchema schema,
-                                               Map<String, Object> errors) {
-        Map<String, Object> tempData = new HashMap<>();
-
-        // 从 step_inputs 复制当前步骤数据
-        @SuppressWarnings("unchecked")
-        Map<String, Object> stepInputs = (Map<String, Object>) flowData.get("step_inputs");
-        if (stepInputs != null) {
-            Map<String, Object> currentStepData = (Map<String, Object>) stepInputs.get(stepId);
-            if (currentStepData != null) {
-                tempData.putAll(currentStepData);
-            }
-        }
-
-        // 生成表单 Schema
-        FormContext context = new FormContext(stepId, tempData, errors);
-        ConfigDefinition configDef = schema.generateSchema(context);
-        configDef.fillDefaults(tempData);
-
-        // 验证现有数据
-        if (!configDef.validateConfig(tempData)) {
-            errors = new HashMap<>();
-            // 处理旧版 ConfigItem 错误
-            for (Map.Entry<com.ecat.core.Utils.DynamicConfig.ConfigItem<?>, String> entry :
-                    configDef.getInvalidConfigItems().entrySet()) {
-                errors.put(entry.getKey().getKey(), entry.getValue());
-            }
-            // 处理新版 AbstractConfigItem 错误
-            for (Map.Entry<com.ecat.core.ConfigFlow.ConfigItem.AbstractConfigItem<?>, String> entry :
-                    configDef.getInvalidFlowConfigItems().entrySet()) {
-                errors.put(entry.getKey().getKey(), entry.getValue());
-            }
-        }
-
-        return ConfigFlowResult.showForm(stepId, configDef, errors, flowData);
+    protected ConfigFlowResult showForm(String stepId, com.ecat.core.ConfigFlow.ConfigSchema schema,
+                                         Map<String, Object> errors) {
+        // context.getData() 已包含 step_inputs，前端从 step_inputs[stepId] 读取
+        // 框架自动在 handleStep() 中保存数据到 step_inputs
+        return ConfigFlowResult.showForm(stepId, schema, errors, context);
     }
 
     /**
-     * 验证步骤用户输入
+     * 创建配置条目 (根据 sourceType 决定行为)
+     * <p>
+     * 从 context 获取 coordinate 和数据，根据 sourceType 决定创建或更新模式。
      *
-     * <p>使用 ConfigDefinition 中的 ConfigItem 验证器自动验证用户输入。
-     * 如果验证失败，返回包含错误信息的 Map；如果验证通过，返回空 Map。
-     *
-     * @param stepId 步骤 ID
-     * @param userInput 用户输入
-     * @param schema Schema 生成函数
-     * @return 错误信息 Map（空表示验证通过）
-     */
-    protected final Map<String, Object> validateStepInput(String stepId,
-                                                          Map<String, Object> userInput,
-                                                          DynamicFormSchema schema) {
-        Map<String, Object> errors = new HashMap<>();
-
-        if (userInput == null || userInput.isEmpty()) {
-            return errors;
-        }
-
-        // 生成 ConfigDefinition 进行验证
-        FormContext context = new FormContext(stepId, userInput, errors);
-        ConfigDefinition configDef = schema.generateSchema(context);
-
-        // 执行验证
-        if (!configDef.validateConfig(userInput)) {
-            // 处理新版 AbstractConfigItem 错误
-            for (Map.Entry<com.ecat.core.ConfigFlow.ConfigItem.AbstractConfigItem<?>, String> entry :
-                    configDef.getInvalidFlowConfigItems().entrySet()) {
-                errors.put(entry.getKey().getKey(), entry.getValue());
-            }
-        }
-
-        return errors;
-    }
-
-    /**
-     * 创建配置条目
-     *
-     * <p>此方法表示流程完成，可以创建最终的配置条目。
-     *
-     * @param data 最终配置数据
      * @return CREATE_ENTRY 类型结果
      */
-    protected final ConfigFlowResult create_entry(Map<String, Object> data) {
-        Map<String, Object> resultData = new HashMap<>();
+    protected ConfigFlowResult createEntry() {
+        // 从 context 获取 coordinate (由 ConfigFlowRegistry 设置)
+        String coordinate = context.getCoordinate();
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> stepInputs = (Map<String, Object>) flowData.get("step_inputs");
-        if (stepInputs != null) {
-            resultData.put("step_inputs", new HashMap<>(stepInputs));
+        // 构建 entry 数据
+        ConfigEntry.Builder builder = new ConfigEntry.Builder()
+                .coordinate(coordinate)
+                .data(new HashMap<>(getData()));
+
+        // 从 data 中获取 title 和 uniqueId
+        if (getData().containsKey("title")) {
+            builder.title((String) getData().get("title"));
+        }
+        if (getData().containsKey("uniqueId")) {
+            builder.uniqueId((String) getData().get("uniqueId"));
         }
 
-        if (data != null) {
-            resultData.putAll(data);
+        if (sourceType == SourceType.RECONFIGURE && reconfigureEntryId != null) {
+            // 更新模式: 需要保留原 entryId
+            builder.entryId(reconfigureEntryId);
+            return ConfigFlowResult.updateEntry(builder.build(), context);
+        } else {
+            // 创建模式
+            return ConfigFlowResult.createEntry(builder.build(), context);
         }
-
-        return ConfigFlowResult.createEntry(resultData);
     }
+
+    /**
+     * 统一的步骤处理入口 - 只查找注册的处理器
+     * <p>
+     * Public 方法，允许 ConfigFlowService 从外部调用。
+     * <p>
+     * 框架自动处理步骤数据持久化：
+     * <ul>
+     *   <li>当 userInput 非空时，自动保存到 step_inputs[stepId]</li>
+     *   <li>子类无需手动调用 saveStepData()</li>
+     * </ul>
+     *
+     * @param stepId 步骤 ID
+     * @param userInput 用户输入数据
+     * @return 配置流程结果
+     */
+
+    public ConfigFlowResult handleStep(String stepId, Map<String, Object> userInput) {
+        // 记录步骤历史
+        if (!stepHistory.contains(stepId)) {
+            stepHistory.add(stepId);
+        }
+        this.currentStep = stepId;
+        if (context != null) {
+            context.setCurrentStep(stepId);
+        }
+
+        // 框架自动保存步骤数据（用户提交时）
+        // 注意：在处理器调用前保存，确保即使验证失败，数据也不丢失
+        if (userInput != null && !userInput.isEmpty()) {
+            saveStepData(stepId, userInput);
+        }
+
+        // 统一从 stepDefinitions 查找（包括 entry steps 和普通 steps）
+        StepDefinition definition = stepDefinitions.get(stepId);
+        if (definition == null) {
+            return ConfigFlowResult.abort("Unknown step: " + stepId);
+        }
+
+        ConfigFlowResult result = definition.getHandler().apply(userInput);
+
+        // 如果返回的是 SHOW_FORM，更新当前步骤为显示的步骤
+        if (result.getType() == ConfigFlowResult.ResultType.SHOW_FORM) {
+            String displayStepId = result.getStepId();
+            if (displayStepId != null && !displayStepId.equals(this.currentStep)) {
+                this.currentStep = displayStepId;
+                if (context != null) {
+                    context.setCurrentStep(displayStepId);
+                }
+                if (!stepHistory.contains(displayStepId)) {
+                    stepHistory.add(displayStepId);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 获取 Flow 实例（共享上下文）
+     *
+     * @param flowClass Flow 类
+     * @param <T> Flow 类型
+     * @return Flow 实例
+     */
+    protected <T extends AbstractConfigFlow> T getFlow(Class<T> flowClass) {
+        if (registry == null) {
+            throw new IllegalStateException("Registry not set");
+        }
+        return registry.getFlow(() -> {
+            try {
+                return flowClass.getDeclaredConstructor(String.class).newInstance(flowId);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to create flow: " + flowClass, e);
+            }
+        }, context);
+    }
+
+    // ========== 兼容旧方法（保留以不破坏现有代码） ==========
 
     /**
      * 中止流程
@@ -320,6 +610,7 @@ public abstract class AbstractConfigFlow {
      * @param userInput 用户输入数据
      */
     protected void saveStepData(String stepId, Map<String, Object> userInput) {
+        Map<String, Object> flowData = getFlowDataMap();
         synchronized (flowData) {
             @SuppressWarnings("unchecked")
             Map<String, Object> stepInputs = (Map<String, Object>)
@@ -337,6 +628,7 @@ public abstract class AbstractConfigFlow {
      */
     @SuppressWarnings("unchecked")
     protected Map<String, Object> getStepData(String stepId) {
+        Map<String, Object> flowData = getFlowDataMap();
         synchronized (flowData) {
             Map<String, Object> stepInputs = (Map<String, Object>) flowData.get("step_inputs");
             if (stepInputs != null && stepInputs.containsKey(stepId)) {
@@ -353,15 +645,6 @@ public abstract class AbstractConfigFlow {
      */
     protected Map<String, Object> getCurrentStepData() {
         return getStepData(currentStep);
-    }
-
-    /**
-     * 获取流程数据
-     *
-     * @return 流程数据的副本
-     */
-    public Map<String, Object> getData() {
-        return new HashMap<>(flowData);
     }
 
     /**
@@ -389,6 +672,9 @@ public abstract class AbstractConfigFlow {
         }
 
         this.currentStep = previousStepId;
+        if (context != null) {
+            context.setCurrentStep(previousStepId);
+        }
 
         int currentIndex = stepHistory.indexOf(previousStepId);
         if (currentIndex >= 0 && currentIndex < stepHistory.size() - 1) {
@@ -412,7 +698,7 @@ public abstract class AbstractConfigFlow {
      * @return 值，不存在时返回 null
      */
     protected Object getFlowData(String key) {
-        return flowData.get(key);
+        return getFlowDataMap().get(key);
     }
 
     /**
@@ -422,7 +708,7 @@ public abstract class AbstractConfigFlow {
      * @param value 值
      */
     protected void setFlowData(String key, Object value) {
-        flowData.put(key, value);
+        getFlowDataMap().put(key, value);
     }
 
     /**
@@ -435,66 +721,40 @@ public abstract class AbstractConfigFlow {
      * @return 值，不存在或类型不匹配时返回默认值
      */
     protected <T> T getFlowData(String key, Class<T> type, T defaultValue) {
-        Object value = flowData.get(key);
+        Object value = getFlowDataMap().get(key);
         return value != null && type.isInstance(value) ? type.cast(value) : defaultValue;
     }
 
-    // ========== 步骤显示信息 ==========
+    /**
+     * 获取流程数据映射（兼容旧代码）
+     *
+     * @return 流程数据映射
+     */
+    private Map<String, Object> getFlowDataMap() {
+        if (context != null) {
+            return context.getData();
+        }
+        // 兼容旧代码：如果没有 context，返回临时的 Map
+        // 注意：这里使用线程本地存储以保证并发安全
+        return flowDataHolder.get();
+    }
 
     /**
-     * 获取步骤信息映射
-     * <p>
-     * 子类可覆盖此方法提供自定义的步骤信息，包括显示名称、描述等。
-     *
-     * @return 步骤 ID -> StepInfo 的映射，默认返回 null
+     * 临时流程数据存储（兼容旧代码）
      */
-    public Map<String, StepInfo> getStepInfos() {
-        return null;
-    }
+    private static final ThreadLocal<Map<String, Object>> flowDataHolder =
+            ThreadLocal.withInitial(() -> new ConcurrentHashMap<>());
 
     // ========== I18n 约定方法 ==========
 
     /**
-     * 获取步骤显示名称
-     * <p>
-     * 查找顺序：i18n 资源 -> getStepInfos() -> stepId
-     * <p>
-     * Key 格式: config_flow.step_{stepId}.display_name
-     *
-     * @param stepId 步骤 ID
-     * @return 步骤显示名称
-     */
-    public String getStepDisplayName(String stepId) {
-        // 1. 优先从 i18n 资源获取
-        if (i18n != null) {
-            String key = PREFIX + ".step_" + stepId + ".display_name";
-            String translated = i18n.t(key);
-            if (!translated.equals(key)) {
-                return translated;
-            }
-        }
-
-        // 2. 从 getStepInfos() 获取
-        Map<String, StepInfo> infos = getStepInfos();
-        if (infos != null && infos.containsKey(stepId)) {
-            StepInfo info = infos.get(stepId);
-            if (info != null && info.getDisplayName() != null) {
-                return info.getDisplayName();
-            }
-        }
-
-        // 3. 兜底：返回 stepId
-        return stepId;
-    }
-
-    /**
      * 获取字段显示名称
      * <p>
-     * Key 格式: config_flow.step_{stepId}.items.{fieldKey}.display_name
+     * 优先级：i18n 翻译 -> 返回 fieldKey（由 SchemaConversionService 回退到 item.getDisplayName()）
      *
      * @param stepId 步骤 ID
      * @param fieldKey 字段键
-     * @return 字段显示名称
+     * @return 字段显示名称，找不到 i18n 翻译时返回 fieldKey
      */
     public String getFieldDisplayName(String stepId, String fieldKey) {
         if (i18n != null) {
@@ -504,13 +764,12 @@ public abstract class AbstractConfigFlow {
                 return translated;
             }
         }
-        return fieldKey;
+        // 返回 null 表示找不到 i18n 翻译，让调用者回退到 item.getDisplayName()
+        return null;
     }
 
     /**
      * 获取字段占位符
-     * <p>
-     * Key 格式: config_flow.step_{stepId}.items.{fieldKey}.placeholder
      *
      * @param stepId 步骤 ID
      * @param fieldKey 字段键
@@ -529,8 +788,6 @@ public abstract class AbstractConfigFlow {
 
     /**
      * 获取字段描述
-     * <p>
-     * Key 格式: config_flow.step_{stepId}.items.{fieldKey}.description
      *
      * @param stepId 步骤 ID
      * @param fieldKey 字段键
@@ -549,8 +806,6 @@ public abstract class AbstractConfigFlow {
 
     /**
      * 获取选项显示名称
-     * <p>
-     * Key 格式: config_flow.step_{stepId}.items.{fieldKey}.options.{optionValue}
      *
      * @param stepId 步骤 ID
      * @param fieldKey 字段键
@@ -570,8 +825,6 @@ public abstract class AbstractConfigFlow {
 
     /**
      * 获取带翻译的选项 Map
-     * <p>
-     * 遍历所有选项，使用 getOptionDisplayName 获取翻译后的显示名称。
      *
      * @param stepId 步骤 ID
      * @param fieldKey 字段键
@@ -589,14 +842,10 @@ public abstract class AbstractConfigFlow {
         return translated;
     }
 
-    // ========== I18n 特殊消息方法 ==========
-
     /**
      * 获取自定义消息
-     * <p>
-     * 用于获取无固定模式的特殊消息，需要使用常量定义 key。
      *
-     * @param i18nKey 国际化 key (如 ConfigFlowI18n.ERROR_REQUIRED)
+     * @param i18nKey 国际化 key
      * @return 翻译后的消息
      */
     protected String t(String i18nKey) {
@@ -608,8 +857,6 @@ public abstract class AbstractConfigFlow {
 
     /**
      * 获取自定义消息（带参数）
-     * <p>
-     * 用于获取无固定模式的特殊消息，支持 ICU MessageFormat 参数替换。
      *
      * @param i18nKey 国际化 key
      * @param args 参数列表
@@ -623,12 +870,29 @@ public abstract class AbstractConfigFlow {
     }
 
     /**
-     * 第一步处理方法
-     *
-     * <p>子类必须实现此方法作为流程的入口。
+     * 第一步处理方法（抽象方法，保留以兼容旧代码）
      *
      * @param userInput 用户输入数据（首次进入时为 null）
      * @return 配置流程结果
      */
     protected abstract ConfigFlowResult step_user(Map<String, Object> userInput);
+
+    // ========== 内部类 ==========
+
+    /**
+     * 步骤定义 - 封装步骤处理器和显示信息
+     */
+    @Data
+    @AllArgsConstructor
+    protected static class StepDefinition {
+        /**
+         * 步骤处理函数
+         */
+        private final Function<Map<String, Object>, ConfigFlowResult> handler;
+
+        /**
+         * 步骤显示信息
+         */
+        private final StepInfo stepInfo;
+    }
 }

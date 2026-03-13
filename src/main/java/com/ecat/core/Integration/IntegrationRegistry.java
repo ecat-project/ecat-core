@@ -18,6 +18,7 @@ package com.ecat.core.Integration;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 集成注册表，用于注册和查找集成实例
@@ -66,5 +67,14 @@ public class IntegrationRegistry {
         }
 
         return null;
+    }
+
+    /**
+     * 获取所有已注册集成的坐标
+     *
+     * @return 坐标集合
+     */
+    public Set<String> getAllCoordinates() {
+        return registry.keySet();
     }
 }
