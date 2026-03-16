@@ -28,6 +28,10 @@ import com.ecat.core.Utils.LoadJarResult;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.Mdc.MdcExecutorService;
+import com.ecat.core.ConfigEntry.ConfigEntry;
+import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
+import com.ecat.core.ConfigFlow.AbstractConfigFlow;
+import com.ecat.core.ConfigFlow.ConfigFlowRegistry;
 
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -101,6 +105,124 @@ public class IntegrationManager {
         }
         this.loadJarUtils = new LoadJarUtils(core, restartClassLoader);
         this.systemRestarter = new SystemRestarter();
+    }
+
+    // ==================== ConfigEntry 相关便捷方法 ====================
+
+    /**
+     * 获取配置条目注册器
+     *
+     * @return ConfigEntryRegistry，如果 core 不可用则返回 null
+     */
+    private ConfigEntryRegistry getEntryRegistry() {
+        return core != null ? core.getEntryRegistry() : null;
+    }
+
+    /**
+     * 获取 Flow 注册器
+     *
+     * @return ConfigFlowRegistry，如果 core 不可用则返回 null
+     */
+    private ConfigFlowRegistry getFlowRegistry() {
+        return core != null ? core.getFlowRegistry() : null;
+    }
+
+    /**
+     * 注册集成的 ConfigFlow
+     *
+     * @param coordinate 集成标识
+     * @param integration 集成实例
+     */
+    private void registerConfigFlow(String coordinate, IntegrationBase integration) {
+        ConfigFlowRegistry flowRegistry = getFlowRegistry();
+        if (flowRegistry == null) {
+            log.warn("ConfigFlowRegistry not available, skip flow registration");
+            return;
+        }
+
+        // 通过接口方法获取 Flow (无需反射)
+        AbstractConfigFlow flow = integration.getConfigFlow();
+        if (flow != null) {
+            flowRegistry.registerFlow(coordinate, flow);
+            log.info("Registered config flow for: {} -> {}", coordinate, flow.getClass().getSimpleName());
+        } else {
+            log.debug("No config flow provided by: {}", coordinate);
+        }
+    }
+
+    /**
+     * 加载所有已加载集成的现有 ConfigEntries
+     * <p>
+     * 在所有集成启动完成后调用，从持久化条目重新创建设备。
+     */
+    private void loadExistingConfigEntries() {
+        ConfigEntryRegistry entryRegistry = getEntryRegistry();
+        if (entryRegistry == null) {
+            log.debug("ConfigEntryRegistry not available");
+            return;
+        }
+
+        for (String coordinate : integrationRegistry.getAllCoordinates()) {
+            loadExistingConfigEntriesForCoordinate(coordinate);
+        }
+    }
+
+    /**
+     * 加载指定集成的现有 ConfigEntries
+     * <p>
+     * 流程：
+     * 1. 从 Registry 获取该集成的所有 entries
+     * 2. 调用 integration.mergeEntries() 进行版本升级
+     * 3. 如果有合并结果，持久化并使用合并后的 entries
+     * 4. 对每个启用的 entry 调用 createEntry()
+     *
+     * @param coordinate 集成坐标
+     */
+    private void loadExistingConfigEntriesForCoordinate(String coordinate) {
+        ConfigEntryRegistry entryRegistry = getEntryRegistry();
+        if (entryRegistry == null) {
+            return;
+        }
+
+        IntegrationBase integration = integrationRegistry.getIntegration(coordinate);
+        if (integration == null) {
+            return;
+        }
+
+        List<ConfigEntry> entries = entryRegistry.listByCoordinate(coordinate);
+        if (entries.isEmpty()) {
+            return;
+        }
+
+        log.info("Loading {} existing entries for {}", entries.size(), coordinate);
+
+        // 1. 调用 mergeEntries() 进行版本升级
+        List<ConfigEntry> mergedEntries = integration.mergeEntries(entries);
+        if (mergedEntries != null) {
+            // 2. 持久化合并后的 entries
+            for (ConfigEntry merged : mergedEntries) {
+                entryRegistry.updateEntry(merged.getEntryId(), merged);
+            }
+            entries = mergedEntries;
+            log.info("Merged {} entries for {}", entries.size(), coordinate);
+        }
+
+        // 3. 创建设备
+        for (ConfigEntry entry : entries) {
+            if (!entry.isEnabled()) {
+                continue;
+            }
+            try {
+                integration.createEntry(entry);
+                log.info("Loaded entry: {} for {}", entry.getEntryId(), coordinate);
+            } catch (UnsupportedOperationException e) {
+                // Integration doesn't support ConfigEntry, skip this integration
+                log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+                break;
+            } catch (Exception e) {
+                log.error("Failed to load entry {}: {}", entry.getEntryId(), e.getMessage());
+            }
+        }
     }
 
     public void loadIntegrations() {
@@ -360,16 +482,18 @@ public class IntegrationManager {
                             try{
                                 integration.onLoad(core, loadOption);
                                 integrationRegistry.register(info.getCoordinate(), integration);
+                                // 注册 ConfigFlow
+                                registerConfigFlow(info.getCoordinate(), integration);
                                 integration.onInit();
                                 integration.onStart();
 
                             }
                             catch (Exception e) {
-                                log.error("集成 " + artifactId + " 加载失败: " + e.getStackTrace().toString());
+                                log.error("集成 " + artifactId + " 加载失败: " + e.getMessage(), e);
                             }
 
                         } catch (Exception e) {
-                            log.error(e.getStackTrace().toString());
+                            log.error("集成加载异常: " + e.getMessage(), e);
                         }
 
                     } catch (Exception e) {
@@ -395,6 +519,9 @@ public class IntegrationManager {
 
             // 保存初始依赖关系快照（用于判断 ClassLoader 层级调整）
             saveInitialDependencySnapshot();
+
+            // 加载所有已加载集成的现有 ConfigEntries
+            loadExistingConfigEntries();
 
         } catch (InterruptedException e) {
             log.error("等待集成加载完成被中断", e);
@@ -897,6 +1024,8 @@ public class IntegrationManager {
             if (integration != null) {
                 try {
                     integration.onStart();
+                    // 加载该集成的现有 ConfigEntries
+                    loadExistingConfigEntriesForCoordinate(coordinate);
                 } catch (Exception e) {
                     log.error("启动集成失败: {} - {}", coordinate, e.getMessage());
                 }
@@ -1179,7 +1308,28 @@ public class IntegrationManager {
                 .build();
         }
 
-        // 3. 更新配置
+        // 3. 检查是否有配置条目 (卸载保护)
+        ConfigEntryRegistry entryRegistry = getEntryRegistry();
+        if (entryRegistry != null && entryRegistry.hasEntries(coordinate)) {
+            return IntegrationStatus.builder()
+                .coordinate(coordinate)
+                .state(getIntegrationStatus(coordinate).getState())
+                .message("无法卸载：存在配置条目，请先删除所有配置条目")
+                .isLocked(false)
+                .canEnable(false)
+                .canDisable(false)
+                .canRemove(false)
+                .canUpgrade(true)
+                .build();
+        }
+
+        // 4. 注销 ConfigFlow
+        ConfigFlowRegistry flowRegistry = getFlowRegistry();
+        if (flowRegistry != null) {
+            flowRegistry.unregisterFlow(coordinate);
+        }
+
+        // 5. 更新配置
         Map<String, Map<String, Object>> config = loadIntegrationsConfig();
         Map<String, Object> integrations = config.getOrDefault("integrations", new HashMap<>());
         @SuppressWarnings("unchecked")

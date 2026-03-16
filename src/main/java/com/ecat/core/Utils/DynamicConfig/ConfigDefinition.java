@@ -16,19 +16,26 @@
 
 package com.ecat.core.Utils.DynamicConfig;
 
+import com.ecat.core.ConfigFlow.ConfigItem.AbstractConfigItem;
+
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * ConfigDefinition 类用于定义和验证配置项的结构和约束。
  * 它允许动态添加配置项，并提供验证和填充默认值的功能。
- * 
+ *
  * @author coffee
  */
 public class ConfigDefinition {
     private final LinkedHashMap<String, ConfigItem<?>> configItems = new LinkedHashMap<>();
     private final Map<ConfigItem<?>, String> invalidConfigItems = new HashMap<>();
+
+    // 存储 ConfigFlow 的新版 AbstractConfigItem
+    private final LinkedHashMap<String, AbstractConfigItem<?>> flowConfigItems = new LinkedHashMap<>();
+    private final Map<AbstractConfigItem<?>, String> invalidFlowConfigItems = new HashMap<>();
 
     public ConfigDefinition define(ConfigItemBuilder builder) {
         for (ConfigItem<?> item : builder.build()) {
@@ -37,10 +44,26 @@ public class ConfigDefinition {
         return this;
     }
 
+    /**
+     * 定义 ConfigFlow 的新版配置项
+     *
+     * @param builder ConfigFlow ConfigItemBuilder
+     * @return this
+     */
+    public ConfigDefinition defineFlowItems(com.ecat.core.ConfigFlow.ConfigItem.ConfigItemBuilder builder) {
+        for (AbstractConfigItem<?> item : builder.build()) {
+            flowConfigItems.put(item.getKey(), item);
+        }
+        return this;
+    }
+
     // 验证配置并添加默认值
     public boolean validateConfig(Map<String, Object> config) {
         invalidConfigItems.clear();
+        invalidFlowConfigItems.clear();
         boolean isValid = true;
+
+        // 验证旧版 ConfigItem
         for (ConfigItem<?> item : configItems.values()) {
             item.addDefaultValue(config);
             Object value = config.get(item.getKey());
@@ -50,12 +73,26 @@ public class ConfigDefinition {
                 isValid = false;
             }
         }
+
+        // 验证新版 AbstractConfigItem
+        for (AbstractConfigItem<?> item : flowConfigItems.values()) {
+            item.addDefaultValue(config);
+            Object value = config.get(item.getKey());
+            String errorMessage = item.validate(value);
+            if (errorMessage != null) {
+                invalidFlowConfigItems.put(item, errorMessage);
+                isValid = false;
+            }
+        }
+
         return isValid;
     }
 
     // 填充默认值
     public Map<String, Object> fillDefaults(Map<String, Object> config) {
         Map<String, Object> filledConfig = new HashMap<>(config);
+
+        // 填充旧版 ConfigItem 默认值
         for (ConfigItem<?> item : configItems.values()) {
             if (!filledConfig.containsKey(item.getKey()) && item.getDefaultValue() != null) {
                 filledConfig.put(item.getKey(), item.getDefaultValue());
@@ -72,6 +109,14 @@ public class ConfigDefinition {
                 }
             }
         }
+
+        // 填充新版 AbstractConfigItem 默认值
+        for (AbstractConfigItem<?> item : flowConfigItems.values()) {
+            if (!filledConfig.containsKey(item.getKey()) && item.getDefaultValue() != null) {
+                filledConfig.put(item.getKey(), item.getDefaultValue());
+            }
+        }
+
         return filledConfig;
     }
 
@@ -80,7 +125,43 @@ public class ConfigDefinition {
         return invalidConfigItems;
     }
 
+    /**
+     * 获取未通过验证的 ConfigFlow 配置项及其错误信息
+     *
+     * @return 未通过验证的配置项映射
+     */
+    public Map<AbstractConfigItem<?>, String> getInvalidFlowConfigItems() {
+        return invalidFlowConfigItems;
+    }
+
     public LinkedHashMap<String, ConfigItem<?>> getConfigItems() {
         return configItems;
+    }
+
+    /**
+     * 获取 ConfigFlow 配置项
+     *
+     * @return ConfigFlow 配置项映射
+     */
+    public LinkedHashMap<String, AbstractConfigItem<?>> getFlowConfigItems() {
+        return flowConfigItems;
+    }
+
+    /**
+     * 检查是否有任何配置项（旧版或新版）
+     *
+     * @return 是否有配置项
+     */
+    public boolean hasConfigItems() {
+        return !configItems.isEmpty() || !flowConfigItems.isEmpty();
+    }
+
+    /**
+     * 获取所有配置项数量（旧版 + 新版）
+     *
+     * @return 配置项数量
+     */
+    public int getConfigItemCount() {
+        return configItems.size() + flowConfigItems.size();
     }
 }

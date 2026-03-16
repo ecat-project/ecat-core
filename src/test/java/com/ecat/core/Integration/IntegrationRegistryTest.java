@@ -1,5 +1,6 @@
 package com.ecat.core.Integration;
 
+import com.ecat.core.ConfigEntry.ConfigEntry;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
@@ -115,6 +116,16 @@ public class IntegrationRegistryTest {
 
         @Override
         public void onRelease() {
+        }
+
+        @Override
+        public ConfigEntry createEntry(ConfigEntry entry) {
+            return entry;
+        }
+
+        @Override
+        public ConfigEntry reconfigureEntry(String entryId, ConfigEntry entry) {
+            return entry;
         }
     }
 }

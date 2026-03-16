@@ -16,8 +16,12 @@
 
 package com.ecat.core.Integration;
 
+import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 
+import com.ecat.core.ConfigEntry.ConfigEntry;
+import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
+import com.ecat.core.ConfigFlow.AbstractConfigFlow;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Device.DeviceRegistry;
 import com.ecat.core.I18n.I18nHelper;
@@ -101,5 +105,156 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
             String coordinate = this.loadOption.getIntegrationInfo().getCoordinate();
             LogManager.getInstance().unregisterIntegration(coordinate);
         }
+    }
+
+    // ==================== ConfigEntry 相关方法 ====================
+
+    /**
+     * 获取配置条目注册器
+     *
+     * @return ConfigEntryRegistry，如果 core 不可用则返回 null
+     */
+    protected ConfigEntryRegistry getEntryRegistry() {
+        return core != null ? core.getEntryRegistry() : null;
+    }
+
+    /**
+     * 获取集成的配置流程实例
+     * <p>
+     * 设计说明：
+     * <ul>
+     *   <li>返回的实例用于判断 Flow 能力（hasUserStep 等）</li>
+     *   <li>Registry 会提取实例的类定义存储</li>
+     *   <li>后续通过类定义创建新实例，保证状态隔离</li>
+     * </ul>
+     *
+     * @return AbstractConfigFlow 实例，默认 null 表示无 flow
+     */
+    public AbstractConfigFlow getConfigFlow() {
+        return null;  // 默认无 flow
+    }
+
+    /**
+     * 合并/升级配置条目到当前版本格式
+     * <p>
+     * 在加载持久化条目后、createEntry() 之前调用。
+     * 如果条目落后多个版本，应顺序升级每个版本。
+     * <p>
+     * 示例实现：
+     * <pre>{@code
+     * @Override
+     * public List<ConfigEntry> mergeEntries(List<ConfigEntry> entries) {
+     *     List<ConfigEntry> merged = new ArrayList<>();
+     *     boolean hasChanges = false;
+     *
+     *     for (ConfigEntry entry : entries) {
+     *         ConfigEntry current = entry;
+     *         int originalVersion = entry.getVersion();
+     *
+     *         // 顺序版本升级
+     *         if (entry.getVersion() < 2) {
+     *             current = upgradeV1toV2(current);
+     *         }
+     *         if (current.getVersion() < 3) {
+     *             current = upgradeV2toV3(current);
+     *         }
+     *
+     *         if (current.getVersion() != originalVersion) {
+     *             hasChanges = true;
+     *         }
+     *         merged.add(current);
+     *     }
+     *
+     *     return hasChanges ? merged : null;
+     * }
+     * }</pre>
+     *
+     * @param entries 待合并/升级的配置条目列表
+     * @return 合并后的条目列表，如果无需更改返回 null
+     */
+    public List<ConfigEntry> mergeEntries(List<ConfigEntry> entries) {
+        return null;  // 默认：无需合并
+    }
+
+    /**
+     * 创建配置条目
+     * <p>
+     * 默认实现：抛出异常，表示此集成不支持 ConfigEntry 机制。
+     * 需要 ConfigEntry 功能的子类应重写此方法。
+     *
+     * @param entry 配置条目
+     * @return 创建后的配置条目
+     * @throws UnsupportedOperationException 如果集成不支持 ConfigEntry
+     */
+    public ConfigEntry createEntry(ConfigEntry entry) {
+        throw new UnsupportedOperationException(
+            getClass().getSimpleName() + " does not support ConfigEntry");
+    }
+
+    /**
+     * 重新配置条目
+     * <p>
+     * 默认实现：抛出异常，表示此集成不支持 ConfigEntry 机制。
+     * 需要 ConfigEntry 功能的子类应重写此方法。
+     *
+     * @param entryId 配置条目 ID
+     * @param entry   新的配置数据
+     * @return 更新后的配置条目
+     * @throws UnsupportedOperationException 如果集成不支持 ConfigEntry
+     */
+    public ConfigEntry reconfigureEntry(String entryId, ConfigEntry entry) {
+        throw new UnsupportedOperationException(
+            getClass().getSimpleName() + " does not support ConfigEntry");
+    }
+
+    /**
+     * 删除配置条目
+     * <p>
+     * 默认实现：调用 onPreRemove() 然后从注册器中删除。
+     * 子类可重写此方法以提供自定义的删除逻辑。
+     *
+     * @param entryId 配置条目 ID
+     */
+    public void removeEntry(String entryId) {
+        onPreRemove(entryId);
+        ConfigEntryRegistry registry = getEntryRegistry();
+        if (registry != null) {
+            registry.removeEntry(entryId);
+        }
+    }
+
+    /**
+     * 禁用配置条目
+     * <p>
+     * 默认实现：调用 removeEntry() 停止并释放设备资源，但配置文件由 Registry 保留。
+     * 子类可重写此方法以提供自定义的禁用逻辑。
+     *
+     * @param entryId 配置条目 ID
+     */
+    public void disableEntry(String entryId) {
+        removeEntry(entryId);
+    }
+
+    /**
+     * 启用配置条目
+     * <p>
+     * 默认实现：调用 createEntry() 从已保存的配置重新创建并启动设备。
+     * 子类可重写此方法以提供自定义的启用逻辑。
+     *
+     * @param entry 已保存的配置条目
+     */
+    public void enableEntry(ConfigEntry entry) {
+        createEntry(entry);
+    }
+
+    /**
+     * 删除前回调
+     * <p>
+     * 可选实现：子类可重写此方法以进行资源清理。
+     *
+     * @param entryId 配置条目 ID
+     */
+    protected void onPreRemove(String entryId) {
+        // 子类可重写以进行资源清理
     }
 }

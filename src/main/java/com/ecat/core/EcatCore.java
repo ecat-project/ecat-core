@@ -17,6 +17,9 @@
 package com.ecat.core;
 
 import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
+import com.ecat.core.ConfigEntry.YmlConfigEntryPersistence;
+import com.ecat.core.ConfigFlow.ConfigFlowRegistry;
 import com.ecat.core.Device.DeviceRegistry;
 import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.I18n.I18nRegistry;
@@ -59,6 +62,18 @@ public class EcatCore {
     @Getter
     private I18nProxy i18nProxy;
 
+    /**
+     * ConfigEntry 注册器
+     */
+    @Getter
+    private ConfigEntryRegistry configEntryRegistry;
+
+    /**
+     * ConfigFlow 注册器
+     */
+    @Getter
+    private ConfigFlowRegistry configFlowRegistry;
+
     public IntegrationRegistry getIntegrationRegistry() {
         return integrationRegistry;
     }
@@ -95,6 +110,20 @@ public class EcatCore {
         return taskManager;
     }
 
+    /**
+     * 获取 ConfigEntry 注册器（便捷方法名）
+     */
+    public ConfigEntryRegistry getEntryRegistry() {
+        return configEntryRegistry;
+    }
+
+    /**
+     * 获取 ConfigFlow 注册器（便捷方法名）
+     */
+    public ConfigFlowRegistry getFlowRegistry() {
+        return configFlowRegistry;
+    }
+
     // public void setTaskManager(TaskManager taskManager) {
     //     this.taskManager = taskManager;
     // }
@@ -105,10 +134,12 @@ public class EcatCore {
         busRegistry = new BusRegistry();
         stateManager = new StateManager();
         taskManager = new TaskManager();
+        configFlowRegistry = new ConfigFlowRegistry();
+        configEntryRegistry = new ConfigEntryRegistry(this, new YmlConfigEntryPersistence());
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
         deviceRegistry = new DeviceRegistry();
         i18nRegistry = I18nRegistry.getInstance();
-
+        
         // 注册 core 日志缓冲区
         LogManager.getInstance().registerIntegration(Const.CORE_COORDINATE, null);
     }

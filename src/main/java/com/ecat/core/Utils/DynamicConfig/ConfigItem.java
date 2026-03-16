@@ -25,7 +25,7 @@ import java.util.Map;
 
 /**
  * 配置项类，用于定义和验证配置项的结构和约束。
- * 
+ *
  * @author coffee
  */
 public class ConfigItem<T> {
@@ -36,6 +36,56 @@ public class ConfigItem<T> {
     private final List<ConstraintValidator<T>> validators;
     private final Map<String, ConfigItem<?>> nestedConfigItems;
     private ConfigItemBuilder nestedListConfig; // 列表中每个元素的配置项构建器
+
+    /**
+     * 可选值列表 (用于 select/enum 类型)
+     * 当设置此属性时，字段类型会被视为 select
+     */
+    private List<T> options;
+
+    /**
+     * 选项显示名称映射 (value -> displayName)
+     */
+    private Map<T, String> optionLabels;
+
+    /**
+     * 设置可选值列表
+     * @param opts 可选值数组
+     * @return this
+     */
+    @SuppressWarnings("unchecked")
+    public ConfigItem<T> setOptions(T... opts) {
+        this.options = new ArrayList<>();
+        Collections.addAll(this.options, opts);
+        return this;
+    }
+
+    /**
+     * 设置带标签的可选值
+     * @param value 选项值
+     * @param label 显示标签
+     * @return this
+     */
+    public ConfigItem<T> addOption(T value, String label) {
+        if (this.options == null) {
+            this.options = new ArrayList<>();
+        }
+        if (!this.options.contains(value)) {
+            this.options.add(value);
+        }
+        if (this.optionLabels == null) {
+            this.optionLabels = new HashMap<>();
+        }
+        this.optionLabels.put(value, label);
+        return this;
+    }
+
+    /**
+     * 检查是否为 select 类型（有可选值列表）
+     */
+    public boolean isSelectType() {
+        return options != null && !options.isEmpty();
+    }
 
     public ConfigItem(String key, Class<T> type, boolean required, T defaultValue, List<ConstraintValidator<T>> validators) {
         this.key = key;
@@ -172,5 +222,59 @@ public class ConfigItem<T> {
     // 新增：获取列表元素的配置结构
     public ConfigItemBuilder getNestedListConfig() {
         return nestedListConfig;
+    }
+
+    // ========== 选项支持 (用于 select/enum 类型) ==========
+
+    /**
+     * 检查是否有可选项（用于 select 类型字段）
+     */
+    public boolean hasOptions() {
+        return options != null && !options.isEmpty();
+    }
+
+    /**
+     * 获取可选项列表
+     */
+    public List<T> getOptions() {
+        return options;
+    }
+
+    /**
+     * 设置可选项列表
+     */
+    public ConfigItem<T> setOptions(List<T> options) {
+        this.options = options;
+        return this;
+    }
+
+    /**
+     * 设置可选项列表（使用 Map 存储选项和显示名称）
+     * @param options 可选项值列表
+     * @param labels 选项显示名称映射
+     */
+    public ConfigItem<T> setOptions(List<T> options, Map<T, String> labels) {
+        this.options = options;
+        this.optionLabels = labels;
+        return this;
+    }
+
+    /**
+     * 获取选项显示名称
+     * @param optionValue 选项值
+     * @return 显示名称，如果没有定义则返回值的 toString()
+     */
+    public String getOptionLabel(T optionValue) {
+        if (optionLabels != null && optionLabels.containsKey(optionValue)) {
+            return optionLabels.get(optionValue);
+        }
+        return optionValue != null ? optionValue.toString() : "";
+    }
+
+    /**
+     * 获取选项显示名称映射
+     */
+    public Map<T, String> getOptionLabels() {
+        return optionLabels;
     }
 }

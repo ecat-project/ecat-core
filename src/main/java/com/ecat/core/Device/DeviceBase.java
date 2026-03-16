@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicLong;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -86,11 +87,18 @@ public abstract class DeviceBase implements DeviceControl {
     
     private Map<String, AttributeBase<?>> attrs;
 
+    // 原子类保证多线程安全的自增ID生成器
+    private static final AtomicLong OBJECT_ID_GENERATOR = new AtomicLong(1);
+    // 每个设备对象的全局唯一ID
+    @Getter
+    private final long objectId;
+
     protected final I18nProxy i18n = I18nHelper.createProxy(this.getClass());
 
 
     public DeviceBase(Map<String, Object> config) {
         this.log = LogFactory.getLogger(getClass());
+        this.objectId = OBJECT_ID_GENERATOR.getAndIncrement();
 
         this.config = config;
         this.id = (String) config.get("id");
