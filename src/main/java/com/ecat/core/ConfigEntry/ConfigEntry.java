@@ -189,7 +189,7 @@ public class ConfigEntry {
         return new Builder()
                 .entryId(this.entryId)
                 .coordinate(this.coordinate)
-                .uniqueId(this.uniqueId)
+                .uniqueId(newData.uniqueId != null ? newData.uniqueId : this.uniqueId)
                 .title(newData.title != null ? newData.title : this.title)
                 .data(newData.data != null ? newData.data : this.data)
                 .enabled(newData.enabled)

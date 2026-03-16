@@ -224,6 +224,30 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
     }
 
     /**
+     * 禁用配置条目
+     * <p>
+     * 默认实现：调用 removeEntry() 停止并释放设备资源，但配置文件由 Registry 保留。
+     * 子类可重写此方法以提供自定义的禁用逻辑。
+     *
+     * @param entryId 配置条目 ID
+     */
+    public void disableEntry(String entryId) {
+        removeEntry(entryId);
+    }
+
+    /**
+     * 启用配置条目
+     * <p>
+     * 默认实现：调用 createEntry() 从已保存的配置重新创建并启动设备。
+     * 子类可重写此方法以提供自定义的启用逻辑。
+     *
+     * @param entry 已保存的配置条目
+     */
+    public void enableEntry(ConfigEntry entry) {
+        createEntry(entry);
+    }
+
+    /**
      * 删除前回调
      * <p>
      * 可选实现：子类可重写此方法以进行资源清理。

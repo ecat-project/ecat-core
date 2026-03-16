@@ -318,6 +318,19 @@ public class ConfigEntryRegistry {
             throw new EntryNotFoundException(entryId);
         }
 
+        // 状态未变化时跳过通知
+        if (entry.isEnabled() == enabled) {
+            log.debug("Config entry enabled state unchanged: entryId={}, enabled={}", entryId, enabled);
+            return entry;
+        }
+
+        // 先通知集成（禁用：停止设备；启用：从配置重建设备）
+        if (enabled) {
+            notifyIntegrationEnable(entry);
+        } else {
+            notifyIntegrationDisable(entry);
+        }
+
         ConfigEntry updated = new ConfigEntry.Builder()
                 .entryId(entry.getEntryId())
                 .coordinate(entry.getCoordinate())
@@ -417,6 +430,60 @@ public class ConfigEntryRegistry {
             log.debug("Integration {} doesn't support ConfigEntry", coordinate);
         } catch (Exception e) {
             log.error("Failed to notify integration {} to remove entry {}: {}",
+                    coordinate, entry.getEntryId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 通知 integration 禁用 entry
+     */
+    private void notifyIntegrationDisable(ConfigEntry entry) {
+        if (core == null) return;
+
+        String coordinate = entry.getCoordinate();
+        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
+        if (integrationRegistry == null) return;
+
+        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        if (integration == null) {
+            log.debug("Integration not found for coordinate: {}", coordinate);
+            return;
+        }
+
+        try {
+            integration.disableEntry(entry.getEntryId());
+            log.debug("Notified integration {} to disable entry {}", coordinate, entry.getEntryId());
+        } catch (UnsupportedOperationException e) {
+            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+        } catch (Exception e) {
+            log.error("Failed to notify integration {} to disable entry {}: {}",
+                    coordinate, entry.getEntryId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 通知 integration 启用 entry
+     */
+    private void notifyIntegrationEnable(ConfigEntry entry) {
+        if (core == null) return;
+
+        String coordinate = entry.getCoordinate();
+        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
+        if (integrationRegistry == null) return;
+
+        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        if (integration == null) {
+            log.debug("Integration not found for coordinate: {}", coordinate);
+            return;
+        }
+
+        try {
+            integration.enableEntry(entry);
+            log.debug("Notified integration {} to enable entry {}", coordinate, entry.getEntryId());
+        } catch (UnsupportedOperationException e) {
+            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+        } catch (Exception e) {
+            log.error("Failed to notify integration {} to enable entry {}: {}",
                     coordinate, entry.getEntryId(), e.getMessage());
         }
     }
