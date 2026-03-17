@@ -4,6 +4,8 @@ import com.ecat.core.EcatCore;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Utils.Log;
+import com.ecat.core.ConfigEntry.ConfigEntry;
+import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -19,6 +21,7 @@ import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -542,5 +545,133 @@ public class IntegrationManagerTest {
 
         // 验证需要调整（因为 integration-b 需要调整）
         assertTrue(needsChange);
+    }
+
+    // ========== onAllExistEntriesLoaded 钩子相关测试 ==========
+
+    /**
+     * 测试 loadExistingConfigEntriesForCoordinate 在加载完所有 entry 后调用 onAllExistEntriesLoaded 钩子
+     */
+    @Test
+    public void testLoadExistingEntriesCallsOnAllExistEntriesLoaded() throws Exception {
+        // 创建一个追踪钩子调用的 stub IntegrationBase
+        final List<ConfigEntry> capturedEntries = new ArrayList<>();
+        final boolean[] hookCalled = {false};
+
+        IntegrationBase stubIntegration = new IntegrationBase() {
+            @Override
+            public void onInit() { }
+            @Override
+            public void onStart() { }
+            @Override
+            public void onPause() { }
+            @Override
+            public ConfigEntry createEntry(ConfigEntry entry) {
+                return entry;
+            }
+            @Override
+            public void onAllExistEntriesLoaded(List<ConfigEntry> entries) {
+                hookCalled[0] = true;
+                capturedEntries.addAll(entries);
+                super.onAllExistEntriesLoaded(entries);
+            }
+        };
+
+        // Mock entryRegistry
+        ConfigEntryRegistry entryRegistry = mock(ConfigEntryRegistry.class);
+        ConfigEntry testEntry = new ConfigEntry.Builder()
+                .entryId("entry-1")
+                .coordinate("com.test:stub")
+                .enabled(true)
+                .build();
+        when(entryRegistry.listByCoordinate("com.test:stub"))
+                .thenReturn(Arrays.asList(testEntry));
+
+        // 设置 IntegrationManager 内部状态 - 通过 core mock 返回 entryRegistry
+        when(core.getEntryRegistry()).thenReturn(entryRegistry);
+        when(integrationRegistry.getIntegration("com.test:stub")).thenReturn(stubIntegration);
+
+        // 调用目标方法
+        invokePrivateMethod(integrationManager, "loadExistingConfigEntriesForCoordinate", "com.test:stub");
+
+        // 验证钩子被调用
+        assertTrue("onAllExistEntriesLoaded should have been called", hookCalled[0]);
+        assertEquals("Should pass 1 entry to hook", 1, capturedEntries.size());
+        assertEquals("entry-1", capturedEntries.get(0).getEntryId());
+
+        // 验证 ready 被设为 true
+        assertTrue("Integration should be ready after hook", stubIntegration.isReady());
+    }
+
+    /**
+     * 测试一个集成的 onAllExistEntriesLoaded 抛异常不影响其他集成
+     */
+    @Test
+    public void testOnAllExistEntriesLoadedExceptionDoesNotBlockOtherIntegrations() throws Exception {
+        // 第一个集成：钩子抛异常，不调用 super
+        IntegrationBase failingIntegration = new IntegrationBase() {
+            @Override
+            public void onInit() { }
+            @Override
+            public void onStart() { }
+            @Override
+            public void onPause() { }
+            @Override
+            public ConfigEntry createEntry(ConfigEntry entry) {
+                return entry;
+            }
+            @Override
+            public void onAllExistEntriesLoaded(List<ConfigEntry> entries) {
+                throw new RuntimeException("Simulated hook failure");
+            }
+        };
+
+        // 第二个集成：正常调用钩子
+        IntegrationBase normalIntegration = new IntegrationBase() {
+            @Override
+            public void onInit() { }
+            @Override
+            public void onStart() { }
+            @Override
+            public void onPause() { }
+            @Override
+            public ConfigEntry createEntry(ConfigEntry entry) {
+                return entry;
+            }
+        };
+
+        // Mock entryRegistry - 按坐标返回不同的条目列表
+        ConfigEntryRegistry entryRegistry = mock(ConfigEntryRegistry.class);
+        ConfigEntry entry1 = new ConfigEntry.Builder()
+                .entryId("fail-entry-1")
+                .coordinate("com.test:failing")
+                .enabled(true)
+                .build();
+        ConfigEntry entry2 = new ConfigEntry.Builder()
+                .entryId("normal-entry-1")
+                .coordinate("com.test:normal")
+                .enabled(true)
+                .build();
+        when(entryRegistry.listByCoordinate("com.test:failing"))
+                .thenReturn(Arrays.asList(entry1));
+        when(entryRegistry.listByCoordinate("com.test:normal"))
+                .thenReturn(Arrays.asList(entry2));
+
+        // 设置 IntegrationManager
+        when(core.getEntryRegistry()).thenReturn(entryRegistry);
+        when(integrationRegistry.getIntegration("com.test:failing")).thenReturn(failingIntegration);
+        when(integrationRegistry.getIntegration("com.test:normal")).thenReturn(normalIntegration);
+
+        // 调用第一个集成（会抛异常，但被 IntegrationManager 捕获）
+        invokePrivateMethod(integrationManager, "loadExistingConfigEntriesForCoordinate", "com.test:failing");
+
+        // 调用第二个集成（应正常）
+        invokePrivateMethod(integrationManager, "loadExistingConfigEntriesForCoordinate", "com.test:normal");
+
+        // 验证第一个集成 ready 仍为 false（因为钩子没有调用 super）
+        assertFalse("Failing integration should NOT be ready", failingIntegration.isReady());
+
+        // 验证第二个集成 ready 为 true
+        assertTrue("Normal integration should be ready", normalIntegration.isReady());
     }
 }

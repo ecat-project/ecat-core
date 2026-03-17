@@ -223,6 +223,17 @@ public class IntegrationManager {
                 log.error("Failed to load entry {}: {}", entry.getEntryId(), e.getMessage());
             }
         }
+
+        // 4. 通知集成所有已持久化 entry 加载完毕
+        try {
+            integration.onAllExistEntriesLoaded(entries);
+            log.info("All entries loaded for {}, ready={}", coordinate,
+                integration.isReady());
+        } catch (UnsupportedOperationException e) {
+            log.debug("Integration {} doesn't support onAllExistEntriesLoaded", coordinate);
+        } catch (Exception e) {
+            log.error("onAllExistEntriesLoaded failed for {}: {}", coordinate, e.getMessage());
+        }
     }
 
     public void loadIntegrations() {
