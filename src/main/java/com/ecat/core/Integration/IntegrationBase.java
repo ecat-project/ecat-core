@@ -45,6 +45,10 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
 
     protected Log log;
 
+    /** 集成初始化就绪标志。所有已持久化 ConfigEntry 加载完成后由框架设为 true。 */
+    @Getter
+    private volatile boolean ready = false;
+
     protected EcatCore core;
     @Getter
     protected IntegrationLoadOption loadOption;
@@ -256,5 +260,23 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
      */
     protected void onPreRemove(String entryId) {
         // 子类可重写以进行资源清理
+    }
+
+    /**
+     * 所有已持久化的 ConfigEntry 加载完成后的回调。
+     * <p>
+     * 在集成启动时，所有已持久化 ConfigEntry 的 createEntry() 调用完毕后触发。
+     * 默认实现将 ready 设为 true。
+     * <p>
+     * 子集成可覆盖此方法以执行自定义的一致性检查。
+     * 如果需要保留默认的 ready 设置行为，应调用 super.onAllExistEntriesLoaded(entries)。
+     * <p>
+     * 设计理念：幂等配置拉平。集成配置和设备配置在同一平面加载，
+     * 加载顺序不可控。此钩子让集成在所有配置就绪后完成最终状态一致性。
+     *
+     * @param entries 该集成的所有已加载 ConfigEntry（包括 disabled 的）
+     */
+    public void onAllExistEntriesLoaded(List<ConfigEntry> entries) {
+        this.ready = true;
     }
 }
