@@ -40,8 +40,11 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class LogManager {
     private static final LogManager INSTANCE = new LogManager();
+    /** 插件坐标 -> LogBuffer 映射 */
     private final ConcurrentMap<String, LogBuffer> buffers = new ConcurrentHashMap<>();
+    /** 默认缓冲区大小 */
     private static final int DEFAULT_BUFFER_SIZE = 1000;
+    /** 缓冲区大小 */
     private final int bufferSize;
 
     private LogManager() {

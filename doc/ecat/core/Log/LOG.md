@@ -16,7 +16,7 @@ ECAT 日志系统解决插件式架构中的日志分类和上下文传递问题
 | 集成日志混入 core 日志文件 | LogManager 按坐标分离存储 |
 | SSE 广播历史日志重复 | 订阅时间过滤机制 |
 | 并发订阅导致重复广播 | CopyOnWriteArraySet 自动去重 |
-| 动态加载 JAR 日志重定向 | RuoyiClassLoaderTurboFilter 拦截 |
+| 动态加载 JAR 日志重定向 | ClassLoaderCoordinateFilter 拦截 |
 
 ---
 
@@ -181,24 +181,21 @@ private final ConcurrentHashMap<LogSubscriber, Long> subscriberTimestamps;
 - 第三方 JAR 创建的线程（Tomcat 线程池等）无法继承 MDC
 
 **工作原理**：
-1. 在加载动态 JAR 时注册其 ClassLoader 到 Filter
+1. 注册包前缀到 Filter（如 `com.ruoyi`）
 2. Filter 拦截所有日志事件
-3. 检查日志调用者的 ClassLoader 是否已注册
-4. 自动为已注册 ClassLoader 的日志设置 MDC 坐标
+3. 检查日志调用者的类名是否匹配已注册的包前缀
+4. 自动为匹配的日志设置对应的 MDC 坐标
 
 **使用示例**：
 ```java
-// 1. 创建动态 ClassLoader 加载第三方 JAR
-URLClassLoader dynamicLoader = new URLClassLoader(jarUrls, parentClassLoader);
+// 1. 注册包前缀（在调用第三方 JAR 代码之前）
+ClassLoaderCoordinateFilter.registerPackagePrefix("com.ruoyi", "com.ecat:integration-xxx");
 
-// 2. 注册 ClassLoader（在调用 JAR 代码之前）
-ClassLoaderCoordinateFilter.registerClassLoader(dynamicLoader, "com.ecat:integration-xxx");
+// 2. 调用第三方 JAR 的代码
+// 所有来自 com.ruoyi 包的日志都会自动设置 MDC 坐标
 
-// 3. 调用第三方 JAR 的代码
-// 所有来自该 ClassLoader 的日志都会自动设置 MDC 坐标
-
-// 4. 卸载时注销
-ClassLoaderCoordinateFilter.unregisterClassLoader(dynamicLoader);
+// 3. 卸载时注销
+ClassLoaderCoordinateFilter.unregisterPackagePrefix("com.ruoyi");
 ```
 
 **Logback 配置**（已自动配置）：
@@ -307,14 +304,18 @@ String coordinate = IntegrationCoordinateHelper.getCoordinate(MyClass.class);
 | LOG_FIRST | ✅ | ✅ | Log coordinate |
 | LOG_FIRST | ❌ | ✅ | MDC |
 | LOG_FIRST | ✅ | ❌ | Log coordinate |
-| LOG_FIRST | ❌ | ❌ | "core" |
+| LOG_FIRST | ❌ | ❌ | CORE_COORDINATE (`"com.ecat:ecat-core"`) |
 | MDC_FIRST | ✅ | ✅ | MDC |
 | MDC_FIRST | ❌ | ✅ | MDC |
 | MDC_FIRST | ✅ | ❌ | Log coordinate |
+| MDC_FIRST | ❌ | ❌ | CORE_COORDINATE (`"com.ecat:ecat-core"`) |
 | LOG_ONLY | ✅ | ✅ | Log coordinate |
-| LOG_ONLY | ❌ | ✅ | null → "core" |
+| LOG_ONLY | ❌ | ✅ | CORE_COORDINATE (`"com.ecat:ecat-core"`) |
+| LOG_ONLY | ❌ | ❌ | CORE_COORDINATE (`"com.ecat:ecat-core"`) |
 | MDC_ONLY | ✅ | ✅ | MDC |
-| MDC_ONLY | ✅ | ❌ | null → "core" |
+| MDC_ONLY | ❌ | ✅ | MDC |
+| MDC_ONLY | ✅ | ❌ | CORE_COORDINATE (`"com.ecat:ecat-core"`) |
+| MDC_ONLY | ❌ | ❌ | CORE_COORDINATE (`"com.ecat:ecat-core"`) |
 
 ---
 
@@ -365,14 +366,13 @@ A: 调用 `IntegrationCoordinateHelper.clearCache()` 清除坐标缓存（主要
 A: 使用 `ClassLoaderCoordinateFilter`：
 
 ```java
-// 1. 在加载 JAR 时注册 ClassLoader
-URLClassLoader jarLoader = ...; // 动态加载的 ClassLoader
-ClassLoaderCoordinateFilter.registerClassLoader(jarLoader, "com.ecat:integration-xxx");
+// 1. 注册包前缀
+ClassLoaderCoordinateFilter.registerPackagePrefix("com.ruoyi", "com.ecat:integration-xxx");
 
-// 2. JAR 内部的所有日志（包括新线程）都会自动重定向到指定坐标
+// 2. 所有来自 com.ruoyi 包的日志都会自动重定向到指定坐标
 
 // 3. 卸载时注销
-ClassLoaderCoordinateFilter.unregisterClassLoader(jarLoader);
+ClassLoaderCoordinateFilter.unregisterPackagePrefix("com.ruoyi");
 ```
 
 这个方案适用于：

@@ -94,16 +94,12 @@ public abstract class AbstractConfigFlow {
     protected final I18nProxy i18n;
     protected String currentStep;
 
-    // 核心方法
-    public abstract ConfigFlowResult step_user(Map<String, Object> userInput);
-
     // I18n 约定方法
     public String getStepDisplayName(String stepId);
     public String getFieldDisplayName(String stepId, String fieldKey);
     public String getFieldPlaceholder(String stepId, String fieldKey);
     public String getFieldDescription(String stepId, String fieldKey);
     public String getOptionDisplayName(String stepId, String fieldKey, String optionValue);
-    public Map<String, String> getTranslatedOptions(String stepId, String fieldKey, Map<String, String> options);
 
     // 流程控制
     protected ConfigFlowResult show_form(String stepId, DynamicFormSchema schema, Map<String, Object> errors);
@@ -169,8 +165,7 @@ public class MyConfigFlow extends AbstractConfigFlow {
         super(flowId);
     }
 
-    @Override
-    protected ConfigFlowResult step_user(Map<String, Object> userInput) {
+    private ConfigFlowResult handleUserStep(Map<String, Object> userInput) {
         if (userInput == null || userInput.isEmpty()) {
             return show_form("user", this::generateUserSchema, new HashMap<>());
         }
@@ -291,15 +286,15 @@ enumItem("protocol", true, "TCP")         // 带默认值
     .addOption("Serial", "Serial - 串口协议")
     .buildValidator();                     // 必须调用以添加验证器
 
-// 使用 Map 批量添加选项（配合 i18n）
+// 使用 Map 批量添加选项（i18n 由 SchemaConversionService 自动处理）
 enumItem("device_type", true, "PLC")
     .displayName(getFieldDisplayName(stepId, "device_type"))
-    .addOptions(getTranslatedOptions(stepId, "device_type", mapOf(
-        "PLC", "PLC",
-        "SENSOR", "SENSOR",
-        "METER", "METER",
-        "GATEWAY", "GATEWAY"
-    )))
+    .addOptions(mapOf(
+        "PLC", "PLC控制器",
+        "SENSOR", "传感器",
+        "METER", "仪表",
+        "GATEWAY", "网关"
+    ))
     .buildValidator();
 ```
 
@@ -450,10 +445,10 @@ builder.add(text("username", true)
 
 builder.add(enumItem("protocol", true, "TCP")
     .displayName(getFieldDisplayName(stepId, "protocol"))
-    .addOptions(getTranslatedOptions(stepId, "protocol", mapOf(
-        "TCP", "TCP",
-        "UDP", "UDP"
-    )))
+    .addOptions(mapOf(
+        "TCP", "TCP协议",
+        "UDP", "UDP协议"
+    ))
     .buildValidator());
 
 // 常量引用 - 特殊消息
@@ -616,8 +611,7 @@ public class DemoConfigFlow extends AbstractConfigFlow {
 
     // ========== 步骤 1: 用户配置 ==========
 
-    @Override
-    protected ConfigFlowResult step_user(Map<String, Object> userInput) {
+    private ConfigFlowResult handleUserStep(Map<String, Object> userInput) {
         if (userInput == null || userInput.isEmpty()) {
             return show_form("user", this::generateUserSchema, new HashMap<>());
         }
@@ -673,11 +667,11 @@ public class DemoConfigFlow extends AbstractConfigFlow {
 
         builder.add(enumItem("device_type", true, "PLC")
             .displayName(getFieldDisplayName(stepId, "device_type"))
-            .addOptions(getTranslatedOptions(stepId, "device_type", mapOf(
-                "PLC", "PLC",
-                "SENSOR", "SENSOR",
-                "METER", "METER"
-            )))
+            .addOptions(mapOf(
+                "PLC", "PLC控制器",
+                "SENSOR", "传感器",
+                "METER", "仪表"
+            ))
             .buildValidator());
 
         return configDef.defineFlowItems(builder);
@@ -734,7 +728,7 @@ public class DemoConfigFlow extends AbstractConfigFlow {
 
 | 类型 | 规范 | 示例 |
 |------|------|------|
-| 步骤方法 | `step_{stepId}` | `step_user`, `step_network_config` |
+| 步骤方法 | `step{StepId}` | `stepNetworkConfig`, `stepDeviceConfig` |
 | 步骤 ID | snake_case | `device_config`, `network_config` |
 | 字段 Key | snake_case | `device_name`, `serial_port` |
 | 选项值 | 大写或 snake_case | `TCP`, `persistent`, `dev_ttyUSB0` |
@@ -749,7 +743,7 @@ public class DemoConfigFlow extends AbstractConfigFlow {
 ### 11.3 I18n 最佳实践
 
 1. **使用约定方法**: 不要硬编码 displayName
-2. **选项翻译**: 使用 `getTranslatedOptions()` 批量翻译
+2. **选项翻译**: `addOptions()` 中直接传入默认标签，`SchemaConversionService` 会自动通过 i18n 查找翻译，未命中时回退到传入的标签
 3. **特殊消息**: 定义常量类引用
 4. **参数化消息**: 使用 ICU Message Format
 
@@ -835,5 +829,5 @@ I18n 系统会自动根据全局 Locale 加载对应的翻译资源：
 ## 参考资源
 
 - [I18n 系统文档](../I18n/README.md)
-- [集成开发指南](../../INTEGRATION-DEVELOPMENT.md)
+- [集成开发教程](../../../tutorial/README.md)
 - [Config Flow i18n 设计方案](../../../plan/config-flow-i18n.md)

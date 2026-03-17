@@ -75,9 +75,8 @@ public class MyConfigFlow extends AbstractConfigFlow {
         super(flowId);
     }
 
-    // 入口步骤（必须实现，方法名固定为 step_user）
-    @Override
-    protected ConfigFlowResult step_user(Map<String, Object> userInput) {
+    // 入口步骤处理器（通过 registerStepUser 注册）
+    private ConfigFlowResult handleUserStep(Map<String, Object> userInput) {
         if (userInput == null || userInput.isEmpty()) {
             // 首次进入，显示表单
             return show_form("user", this::generateUserSchema, new HashMap<>());
@@ -158,15 +157,14 @@ private ConfigDefinition generateUserSchema(FormContext context) {
 
 | 约定 | 说明 |
 |------|------|
-| 方法名格式 | `step_{stepId}` |
-| 入口步骤 | 必须是 `step_user` |
+| 方法名格式 | `step{StepId}` |
+| 入口步骤 | 通过 `registerStepUser()` 注册 |
 | 参数类型 | `Map<String, Object> userInput` |
 | 返回类型 | `ConfigFlowResult` |
 
 **示例：**
 ```java
 // ✅ 正确
-protected ConfigFlowResult step_user(Map<String, Object> userInput) { }
 protected ConfigFlowResult step_network_config(Map<String, Object> userInput) { }
 protected ConfigFlowResult step_serial_config(Map<String, Object> userInput) { }
 
@@ -178,10 +176,10 @@ protected ConfigFlowResult userConfig(Map<String, Object> userInput) { }
 
 | 场景 | 命名规范 | 示例 |
 |------|---------|------|
-| 用户/登录 | `user` | `step_user` |
-| 设备配置 | `device_config` | `step_device_config` |
-| 网络配置 | `network_config` | `step_network_config` |
-| 串口配置 | `serial_config` | `step_serial_config` |
+| 用户/登录 | `user` | `handleUserStep` |
+| 设备配置 | `device_config` | `handleDeviceConfig` |
+| 网络配置 | `network_config` | `handleNetworkConfig` |
+| 串口配置 | `serial_config` | `handleSerialConfig` |
 | 测试步骤 | `{name}_test` | `step_network_test` |
 | 通道配置 | `channel_{n}_config` | `step_channel_1_config` |
 | 最终确认 | `final_confirm` | `step_final_confirm` |
@@ -249,14 +247,14 @@ builder.add(text("host", true)
 ### 5.3 枚举字段约定
 
 ```java
-// 使用 getTranslatedOptions 批量翻译选项
+// 选项直接传入默认标签，SchemaConversionService 会自动通过 i18n 查找翻译
 builder.add(enumItem("protocol", true, "TCP")
     .displayName(getFieldDisplayName(stepId, "protocol"))
-    .addOptions(getTranslatedOptions(stepId, "protocol", mapOf(
-        "TCP", "TCP",           // value -> label（会被 i18n 覆盖）
-        "UDP", "UDP",
-        "Serial", "Serial"
-    )))
+    .addOptions(mapOf(
+        "TCP", "TCP协议",       // value -> 默认 label（i18n 未命中时使用）
+        "UDP", "UDP协议",
+        "Serial", "串口协议"
+    ))
     .buildValidator());         // 必须调用！
 ```
 
@@ -328,10 +326,10 @@ builder.add(text("username", true)
 // 枚举选项
 builder.add(enumItem("role", true, "user")
     .displayName(getFieldDisplayName(stepId, "role"))
-    .addOptions(getTranslatedOptions(stepId, "role", mapOf(
-        "admin", "admin",
-        "user", "user"
-    )))
+    .addOptions(mapOf(
+        "admin", "管理员",
+        "user", "普通用户"
+    ))
     .buildValidator());
 ```
 
@@ -359,8 +357,7 @@ String error = t(XxxConfigFlowI18n.CHANNEL_TEST_FAILED, channelNum, "超时");
 | `getFieldDisplayName(stepId, fieldKey)` | 字段显示名称 | 翻译或 fieldKey |
 | `getFieldPlaceholder(stepId, fieldKey)` | 字段占位符 | 翻译或 null |
 | `getFieldDescription(stepId, fieldKey)` | 字段描述 | 翻译或 null |
-| `getOptionDisplayName(stepId, fieldKey, value)` | 选项显示名称 | 翻译或 value |
-| `getTranslatedOptions(stepId, fieldKey, map)` | 翻译整个选项 Map | 翻译后的 Map |
+| `getOptionDisplayName(stepId, fieldKey, value)` | 选项显示名称（SchemaConversionService 自动调用） | 翻译或 value |
 | `getStepDisplayName(stepId)` | 步骤显示名称 | 翻译或 stepId |
 | `t(key)` | 特殊消息 | 翻译或 key |
 | `t(key, args...)` | 带参数的特殊消息 | 翻译后替换参数 |
@@ -547,8 +544,8 @@ public class SimpleConfigFlow extends AbstractConfigFlow {
         super(flowId);
     }
 
-    @Override
-    protected ConfigFlowResult step_user(Map<String, Object> userInput) {
+    // 入口步骤处理器
+    private ConfigFlowResult handleUserStep(Map<String, Object> userInput) {
         if (userInput == null || userInput.isEmpty()) {
             return show_form("user", this::generateUserSchema, new HashMap<>());
         }
@@ -591,9 +588,8 @@ public class SimpleConfigFlow extends AbstractConfigFlow {
 
 - [ ] 继承 `AbstractConfigFlow`
 - [ ] 定义 `PROVIDER_COORDINATE` 常量
-- [ ] 实现 `step_user` 入口方法
-- [ ] 其他步骤方法以 `step_` 开头
-- [ ] Schema 生成方法使用 `getFieldDisplayName` 等 i18n 方法
+- [ ] 使用 `registerStepUser()` 注册入口步骤
+- [ ] 其他步骤通过 `registerStep()` 注册
 - [ ] 枚举字段调用 `buildValidator()`
 - [ ] 最终步骤调用 `create_entry()`
 
@@ -617,5 +613,5 @@ public class SimpleConfigFlow extends AbstractConfigFlow {
 ## 参考资源
 
 - [Config Flow 开发指南](ConfigFlow-development.md) - 框架开发文档
-- [集成开发指南](../../INTEGRATION-DEVELOPMENT.md) - 通用集成开发
+- [集成开发教程](../../../tutorial/README.md) - 通用集成开发
 - Demo 示例: `ecat-integrations/demo-config-flow`

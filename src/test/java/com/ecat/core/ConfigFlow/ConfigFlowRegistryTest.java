@@ -20,7 +20,6 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.Assert.*;
 
@@ -235,7 +234,6 @@ public class ConfigFlowRegistryTest {
 
     @Test
     public void testFlowRegistration_HasUserStep() {
-        TestConfigFlowWithSteps flow = new TestConfigFlowWithSteps();
         FlowRegistration registration = new FlowRegistration(
             "com.ecat.integration:demo",
             TestConfigFlowWithSteps.class,
@@ -259,11 +257,6 @@ public class ConfigFlowRegistryTest {
         public TestConfigFlow() {
             super(null);
         }
-
-        @Override
-        protected ConfigFlowResult step_user(Map<String, Object> userInput) {
-            return ConfigFlowResult.abort("test completed");
-        }
     }
 
     /**
@@ -286,11 +279,6 @@ public class ConfigFlowRegistryTest {
             registerStepDiscovery("discovery", "设备发现", (input, context) -> {
                 return ConfigFlowResult.showForm("next", new ConfigSchema(), new java.util.HashMap<>(), context);
             });
-        }
-
-        @Override
-        protected ConfigFlowResult step_user(Map<String, Object> userInput) {
-            return ConfigFlowResult.abort("test completed");
         }
     }
 }
