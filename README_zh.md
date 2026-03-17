@@ -117,11 +117,11 @@ java -jar target/ecat-core-1.0.0.jar
 
 ## 开发插件
 
-详细的插件开发指南请参考：[**ECAT 集成开发指南**](./doc/INTEGRATION-DEVELOPMENT.md)
+详细的插件开发指南请参考：[**ECAT 集成开发教程**](./doc/tutorial/README.md)
 
 ### 开发文档
 
-- [ECAT 集成开发指南](./doc/INTEGRATION-DEVELOPMENT.md) - 完整的开发文档，包括：
+- [ECAT 集成开发教程](./doc/tutorial/README.md) - 完整的开发文档，包括：
   - 项目结构和核心文件说明
   - 设备开发规范和命名规则
   - I18n 国际化系统详解

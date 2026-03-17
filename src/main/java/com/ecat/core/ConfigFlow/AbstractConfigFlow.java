@@ -34,7 +34,6 @@ import java.util.function.Function;
 /**
  * 配置流程基类
  *
- * <p>约定：step_user 入口，step_create_entry 出口
  * <p>使用 registerStep() 注册步骤处理器和显示信息
  * <p>支持入口步骤机制：registerStepUser()、registerStepReconfigure()、registerStepDiscovery()
  *
@@ -824,25 +823,6 @@ public abstract class AbstractConfigFlow {
     }
 
     /**
-     * 获取带翻译的选项 Map
-     *
-     * @param stepId 步骤 ID
-     * @param fieldKey 字段键
-     * @param options 原始选项 Map (value -> label)
-     * @return 翻译后的选项 Map (value -> translated label)
-     */
-    public Map<String, String> getTranslatedOptions(String stepId, String fieldKey, Map<String, String> options) {
-        Map<String, String> translated = new LinkedHashMap<>();
-        if (options == null) {
-            return translated;
-        }
-        for (Map.Entry<String, String> entry : options.entrySet()) {
-            translated.put(entry.getKey(), getOptionDisplayName(stepId, fieldKey, entry.getKey()));
-        }
-        return translated;
-    }
-
-    /**
      * 获取自定义消息
      *
      * @param i18nKey 国际化 key
@@ -868,14 +848,6 @@ public abstract class AbstractConfigFlow {
         }
         return i18nKey;
     }
-
-    /**
-     * 第一步处理方法（抽象方法，保留以兼容旧代码）
-     *
-     * @param userInput 用户输入数据（首次进入时为 null）
-     * @return 配置流程结果
-     */
-    protected abstract ConfigFlowResult step_user(Map<String, Object> userInput);
 
     // ========== 内部类 ==========
 

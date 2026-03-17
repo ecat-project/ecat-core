@@ -16,7 +16,6 @@
 
 package com.ecat.core.ConfigFlow;
 
-import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.SourceType;
 import org.junit.Test;
 
@@ -368,11 +367,6 @@ public class AbstractConfigFlowTest {
 
         public TestConfigFlow() {
             super("test-flow");
-        }
-
-        @Override
-        protected ConfigFlowResult step_user(Map<String, Object> userInput) {
-            return ConfigFlowResult.abort("not implemented");
         }
     }
 }

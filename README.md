@@ -117,11 +117,11 @@ Add ECAT Core dependency to your plugin project:
 
 ## Plugin Development
 
-For detailed plugin development guide, please refer to: [**ECAT Integration Development Guide**](./doc/INTEGRATION-DEVELOPMENT.md)
+For detailed plugin development guide, please refer to: [**ECAT Integration Development Tutorial**](./doc/tutorial/README.md)
 
 ### Documentation
 
-- [ECAT Integration Development Guide](./doc/INTEGRATION-DEVELOPMENT.md) - Complete development documentation, including:
+- [ECAT Integration Development Tutorial](./doc/tutorial/README.md) - Complete development documentation, including:
   - Project structure and core file descriptions
   - Device development standards and naming conventions
   - I18n internationalization system details
