@@ -345,7 +345,8 @@ public abstract class AbstractConfigFlow {
         if (userStep == null) {
             throw new IllegalStateException("User entry step not registered");
         }
-        return userStep.getHandler().apply(userInput, context);
+        String stepId = userStep.getStepId();
+        return handleStep(stepId, userInput);
     }
 
     /**
@@ -362,7 +363,8 @@ public abstract class AbstractConfigFlow {
         }
         this.reconfigureEntryId = entryId;
         this.sourceType = SourceType.RECONFIGURE;
-        return reconfigureStep.getHandler().apply(userInput, context);
+        String stepId = reconfigureStep.getStepId();
+        return handleStep(stepId, userInput);
     }
 
     // ========== 步骤信息获取 ==========

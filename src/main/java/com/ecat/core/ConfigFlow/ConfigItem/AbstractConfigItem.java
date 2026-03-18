@@ -45,6 +45,7 @@ public abstract class AbstractConfigItem<T> {
     protected String description;
     protected String placeholder;
     protected boolean required;
+    protected boolean readOnly;
     protected final List<ConstraintValidator<?>> validators = new ArrayList<>();
     protected T defaultValue;
 
@@ -138,6 +139,17 @@ public abstract class AbstractConfigItem<T> {
      */
     public AbstractConfigItem<T> setDefaultValue(T defaultValue) {
         this.defaultValue = defaultValue;
+        return this;
+    }
+
+    /**
+     * 设置是否只读
+     *
+     * @param readOnly 是否只读
+     * @return this
+     */
+    public AbstractConfigItem<T> readOnly(boolean readOnly) {
+        this.readOnly = readOnly;
         return this;
     }
 
@@ -241,5 +253,9 @@ public abstract class AbstractConfigItem<T> {
 
     public List<ConstraintValidator<?>> getValidators() {
         return new ArrayList<>(validators);
+    }
+
+    public boolean isReadOnly() {
+        return readOnly;
     }
 }

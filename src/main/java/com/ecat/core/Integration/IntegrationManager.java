@@ -190,9 +190,6 @@ public class IntegrationManager {
         }
 
         List<ConfigEntry> entries = entryRegistry.listByCoordinate(coordinate);
-        if (entries.isEmpty()) {
-            return;
-        }
 
         log.info("Loading {} existing entries for {}", entries.size(), coordinate);
 
@@ -224,7 +221,7 @@ public class IntegrationManager {
             }
         }
 
-        // 4. 通知集成所有已持久化 entry 加载完毕
+        // 4. 通知集成所有已持久化 entry 加载完毕（即使 entries 为空也必须调用）
         try {
             integration.onAllExistEntriesLoaded(entries);
             log.info("All entries loaded for {}, ready={}", coordinate,
