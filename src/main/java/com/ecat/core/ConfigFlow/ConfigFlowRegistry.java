@@ -21,7 +21,7 @@ import com.ecat.core.Utils.LogFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
+
 import java.util.stream.Collectors;
 
 /**
@@ -47,9 +47,34 @@ public class ConfigFlowRegistry {
     private final Map<String, FlowRegistration> registrations = new ConcurrentHashMap<>();
 
     /**
-     * Flow 实例缓存（key: className:flowId）- 兼容旧代码
+     * 运行中的 Flow 实例 (key: flowId)
+     * <p>
+     * 所有集成共享的 active flow 管理点。
+     * Flow 存在于此 map 中即视为隐式占位其 uniqueId。
+     * TrackedFlow 包装 Flow 实例和最后更新时间，getActiveFlow() 自动调用 touch()。
      */
-    private final Map<String, AbstractConfigFlow> flowInstances = new ConcurrentHashMap<>();
+    private final Map<String, TrackedFlow> trackedFlows = new ConcurrentHashMap<>();
+
+    /**
+     * 跟踪 Flow 实例及其最后更新时间
+     */
+    static class TrackedFlow {
+        final AbstractConfigFlow flow;
+        volatile long lastUpdateTime;
+
+        TrackedFlow(AbstractConfigFlow flow) {
+            this.flow = flow;
+            this.lastUpdateTime = System.currentTimeMillis();
+        }
+
+        void touch() {
+            this.lastUpdateTime = System.currentTimeMillis();
+        }
+
+        boolean isExpired(long expirationMs) {
+            return System.currentTimeMillis() - lastUpdateTime > expirationMs;
+        }
+    }
 
     // ========== Flow 注册 ==========
 
@@ -104,6 +129,155 @@ public class ConfigFlowRegistry {
             log.error("Failed to create flow instance: {}", coordinate, e);
             return null;
         }
+    }
+
+    // ========== Active Flow 管理 ==========
+
+    /**
+     * 注册运行中的 Flow 实例
+     */
+    public void registerActiveFlow(String flowId, AbstractConfigFlow flow) {
+        trackedFlows.put(flowId, new TrackedFlow(flow));
+        log.info("Registered active flow: flowId={}, class={}", flowId, flow.getClass().getSimpleName());
+    }
+
+    /**
+     * 获取运行中的 Flow 实例（自动 touch 更新活跃时间）
+     */
+    public AbstractConfigFlow getActiveFlow(String flowId) {
+        TrackedFlow tracked = trackedFlows.get(flowId);
+        if (tracked != null) {
+            tracked.touch();  // 自动更新活跃时间，外部无需管理
+            return tracked.flow;
+        }
+        return null;
+    }
+
+    /**
+     * 检查是否有其他 flow 正在使用指定 uniqueId
+     */
+    public boolean hasActiveFlowWithUniqueId(String uniqueId, String excludeFlowId) {
+        return trackedFlows.entrySet().stream()
+                .filter(e -> !e.getKey().equals(excludeFlowId))
+                .anyMatch(e -> uniqueId.equals(e.getValue().flow.getContext().getEntryUniqueId()));
+    }
+
+    /**
+     * 正常完成 flow（CREATE_ENTRY / UPDATE_ENTRY / REMOVE_ENTRY）
+     */
+    public void finishActiveFlow(String flowId) {
+        TrackedFlow tracked = trackedFlows.remove(flowId);
+        if (tracked != null) {
+            tracked.flow.onRelease();
+            log.info("Finished active flow: flowId={}", flowId);
+        }
+    }
+
+    /**
+     * 异常终止 flow（用户取消 / 过期清理 / step 返回 ABORT）
+     */
+    public void abortActiveFlow(String flowId) {
+        TrackedFlow tracked = trackedFlows.remove(flowId);
+        if (tracked != null) {
+            tracked.flow.onRelease();
+            log.info("Aborted active flow: flowId={}", flowId);
+        }
+    }
+
+    /**
+     * 获取所有运行中的 flow ID
+     */
+    public List<String> getActiveFlowIds() {
+        return new ArrayList<>(trackedFlows.keySet());
+    }
+
+    /**
+     * 获取运行中的 flow 数量
+     */
+    public int getActiveFlowCount() {
+        return trackedFlows.size();
+    }
+
+    /**
+     * 清理过期的 flow 实例
+     *
+     * @param expirationMs 过期时间（毫秒）
+     * @return 清理的数量
+     */
+    public int cleanupExpiredFlows(long expirationMs) {
+        int removed = 0;
+        Iterator<Map.Entry<String, TrackedFlow>> it = trackedFlows.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, TrackedFlow> entry = it.next();
+            if (entry.getValue().isExpired(expirationMs)) {
+                String expiredFlowId = entry.getKey();
+                it.remove();
+                entry.getValue().flow.onRelease();
+                removed++;
+                log.info("清理过期流程: flowId={}", expiredFlowId);
+            }
+        }
+        if (removed > 0) {
+            log.info("已清理 {} 个过期流程，剩余 {} 个", removed, trackedFlows.size());
+        }
+        return removed;
+    }
+
+    /**
+     * 中止所有运行中的 flow
+     */
+    public void abortAllActiveFlows() {
+        for (String flowId : new ArrayList<>(trackedFlows.keySet())) {
+            abortActiveFlow(flowId);
+        }
+    }
+
+    /**
+     * 便捷方法：提交步骤（自动 touch）
+     *
+     * @param flowId 流程 ID
+     * @param stepId 步骤 ID
+     * @param userInput 用户输入
+     * @return 步骤执行结果
+     * @throws IllegalArgumentException 如果 flow 不存在
+     */
+    public ConfigFlowResult submitStep(String flowId, String stepId, Map<String, Object> userInput) {
+        AbstractConfigFlow flow = getActiveFlow(flowId);  // 自动 touch
+        if (flow == null) {
+            throw new IllegalArgumentException("Flow not found: " + flowId);
+        }
+        return flow.handleStep(stepId, userInput);
+    }
+
+    /**
+     * 便捷方法：获取流程状态（自动 touch）
+     *
+     * @param flowId 流程 ID
+     * @return 当前步骤的结果
+     * @throws IllegalArgumentException 如果 flow 不存在
+     */
+    public ConfigFlowResult getStatus(String flowId) {
+        AbstractConfigFlow flow = getActiveFlow(flowId);  // 自动 touch
+        if (flow == null) {
+            throw new IllegalArgumentException("Flow not found: " + flowId);
+        }
+        return flow.handleStep(flow.getCurrentStep(), null);
+    }
+
+    /**
+     * 便捷方法：返回上一步（自动 touch）
+     *
+     * @param flowId 流程 ID
+     * @return 上一步的结果
+     * @throws IllegalArgumentException 如果 flow 不存在
+     */
+    public ConfigFlowResult goPrevious(String flowId) {
+        AbstractConfigFlow flow = getActiveFlow(flowId);  // 自动 touch
+        if (flow == null) {
+            throw new IllegalArgumentException("Flow not found: " + flowId);
+        }
+        flow.goToPreviousStep();
+        return flow.handleStep(flow.getCurrentStep(), null);
     }
 
     // ========== 能力查询 (基于缓存) ==========
@@ -193,53 +367,5 @@ public class ConfigFlowRegistry {
                 })
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-    }
-
-    // ========== 兼容旧代码的 Flow 实例管理 ==========
-
-    /**
-     * 获取 Flow 实例（共享上下文）- 兼容旧代码
-     * <p>
-     * 如果实例已存在且上下文匹配，则返回现有实例；
-     * 否则创建新实例并设置共享上下文。
-     *
-     * @param creator        Flow 创建器
-     * @param sharedContext  共享的流程上下文
-     * @param <T>            Flow 类型
-     * @return Flow 实例
-     * @deprecated 使用 createFlow(coordinate) 创建新实例
-     */
-    @Deprecated
-    public <T extends AbstractConfigFlow> T getFlow(
-            Supplier<T> creator,
-            FlowContext sharedContext) {
-
-        String cacheKey = creator.getClass().getName() + ":" + sharedContext.getFlowId();
-
-        @SuppressWarnings("unchecked")
-        T flow = (T) flowInstances.computeIfAbsent(cacheKey, k -> {
-            T f = creator.get();
-            f.setContext(sharedContext);
-            f.setRegistry(this);
-            return f;
-        });
-
-        return flow;
-    }
-
-    /**
-     * 清除指定 Flow 实例 - 兼容旧代码
-     *
-     * @param flowId 流程 ID
-     */
-    public void clearFlow(String flowId) {
-        flowInstances.entrySet().removeIf(entry -> entry.getKey().endsWith(":" + flowId));
-    }
-
-    /**
-     * 清除所有 Flow 实例 - 兼容旧代码
-     */
-    public void clearAll() {
-        flowInstances.clear();
     }
 }

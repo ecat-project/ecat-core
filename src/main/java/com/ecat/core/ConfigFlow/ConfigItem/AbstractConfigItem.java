@@ -125,7 +125,6 @@ public abstract class AbstractConfigItem<T> {
      * @param validator 验证器
      * @return this
      */
-    @SuppressWarnings("unchecked")
     public AbstractConfigItem<T> addValidator(ConstraintValidator<? super T> validator) {
         this.validators.add(validator);
         return this;

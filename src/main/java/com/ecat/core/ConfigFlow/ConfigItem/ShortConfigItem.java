@@ -209,7 +209,6 @@ public class ShortConfigItem extends AbstractConfigItem<Short> {
         }
 
         for (ConstraintValidator<?> validator : validators) {
-            @SuppressWarnings("unchecked")
             ConstraintValidator<Short> shortValidator = (ConstraintValidator<Short>) validator;
             if (!shortValidator.validate(typedValue)) {
                 return displayName != null

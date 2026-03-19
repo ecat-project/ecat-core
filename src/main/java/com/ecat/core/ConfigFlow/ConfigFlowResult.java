@@ -195,24 +195,20 @@ public class ConfigFlowResult {
     }
 
     /**
-     * 获取流程数据
-     * <p>
-     * 统一的数据访问方法，从 FlowContext 获取数据。
+     * 获取步骤输入数据（供前端预填表单）
      *
-     * @return 流程数据
+     * @return 步骤输入映射
      */
-    public Map<String, Object> getData() {
-        return context != null ? context.getData() : Collections.emptyMap();
+    public Map<String, Object> getStepInputs() {
+        return context != null ? context.getStepInputs() : Collections.emptyMap();
     }
 
     /**
-     * 获取流程数据（兼容别名）
+     * 获取 Entry 业务数据（将写入 ConfigEntry.data）
      *
-     * @return 流程数据
-     * @deprecated 使用 {@link #getData()} 代替
+     * @return 业务数据映射
      */
-    @Deprecated
-    public Map<String, Object> getFlowData() {
-        return getData();
+    public Map<String, Object> getEntryData() {
+        return context != null ? context.getEntryData() : Collections.emptyMap();
     }
 }

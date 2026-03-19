@@ -214,13 +214,11 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
     /**
      * 删除配置条目
      * <p>
-     * 默认实现：调用 onPreRemove() 然后从注册器中删除。
      * 子类可重写此方法以提供自定义的删除逻辑。
      *
      * @param entryId 配置条目 ID
      */
     public void removeEntry(String entryId) {
-        onPreRemove(entryId);
         ConfigEntryRegistry registry = getEntryRegistry();
         if (registry != null) {
             registry.removeEntry(entryId);
@@ -249,17 +247,6 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
      */
     public void enableEntry(ConfigEntry entry) {
         createEntry(entry);
-    }
-
-    /**
-     * 删除前回调
-     * <p>
-     * 可选实现：子类可重写此方法以进行资源清理。
-     *
-     * @param entryId 配置条目 ID
-     */
-    protected void onPreRemove(String entryId) {
-        // 子类可重写以进行资源清理
     }
 
     /**

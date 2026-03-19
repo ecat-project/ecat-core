@@ -148,7 +148,6 @@ public class ArrayConfigItem<T> extends AbstractConfigItem<List<T>> {
      * @param options 选项映射 (value -> label)
      * @return this
      */
-    @SuppressWarnings("unchecked")
     public ArrayConfigItem<T> addOptions(Map<T, String> options) {
         if (options != null) {
             for (Map.Entry<T, String> entry : options.entrySet()) {
@@ -230,7 +229,6 @@ public class ArrayConfigItem<T> extends AbstractConfigItem<List<T>> {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     protected String validateType(Object value) {
         if (!(value instanceof List)) {
             return displayName != null
@@ -273,7 +271,6 @@ public class ArrayConfigItem<T> extends AbstractConfigItem<List<T>> {
 
         // 运行其他验证器（如大小验证）
         for (ConstraintValidator<?> validator : validators) {
-            @SuppressWarnings("unchecked")
             ConstraintValidator<List<T>> listValidator = (ConstraintValidator<List<T>>) validator;
             if (!listValidator.validate(typedValue)) {
                 return displayName != null

@@ -175,7 +175,6 @@ public class NumericConfigItem extends AbstractConfigItem<Double> {
         }
 
         for (ConstraintValidator<?> validator : validators) {
-            @SuppressWarnings("unchecked")
             ConstraintValidator<Double> doubleValidator = (ConstraintValidator<Double>) validator;
             if (!doubleValidator.validate(typedValue)) {
                 return displayName != null

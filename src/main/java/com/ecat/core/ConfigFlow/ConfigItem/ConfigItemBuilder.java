@@ -17,7 +17,6 @@
 package com.ecat.core.ConfigFlow.ConfigItem;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 配置项构建器
