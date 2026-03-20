@@ -131,10 +131,10 @@ public class SchemaConfigItem extends AbstractConfigItem<Map<String, Object>> {
 
     @Override
     public String validate(Object value) {
-        // required 验证由父类处理
-        String typeError = validateType(value);
-        if (typeError != null) {
-            return typeError;
+        // 空值检查和 required 验证委托给父类
+        String baseError = super.validate(value);
+        if (baseError != null) {
+            return baseError;
         }
 
         ConfigSchema schema = resolveSchema();
@@ -142,7 +142,7 @@ public class SchemaConfigItem extends AbstractConfigItem<Map<String, Object>> {
             return null;
         }
 
-        // value 为 null 时，已由 required 检查处理
+        // value 为 null 时，required 已在父类检查中处理
         if (value == null) {
             return null;
         }

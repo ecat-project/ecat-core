@@ -83,11 +83,6 @@ public abstract class AbstractConfigFlow {
     protected final Log log = LogFactory.getLogger(getClass());
 
     /**
-     * 流程实例 ID
-     */
-    protected final String flowId;
-
-    /**
      * 流程上下文（唯一数据源）
      */
     protected FlowContext context;
@@ -163,13 +158,12 @@ public abstract class AbstractConfigFlow {
     /**
      * 构造函数
      * <p>
-     * 自动创建 FlowContext，保证 context 永远非 null。
-     *
-     * @param flowId 流程实例 ID
+     * 创建 FlowContext，自动生成默认 flowId。
+     * <p>
+     * flowId 格式：UUID 字符串。
      */
-    protected AbstractConfigFlow(String flowId) {
-        this.flowId = flowId;
-        this.context = new FlowContext(flowId);
+    protected AbstractConfigFlow() {
+        this.context = new FlowContext(UUID.randomUUID().toString());
         this.i18n = I18nHelper.createProxy(this.getClass());
     }
 

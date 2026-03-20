@@ -40,8 +40,8 @@ package com.ecat.core.ConfigFlow;
  *     }
  *
  *     @Override
- *     public AbstractConfigFlow createFlow(String flowId, String targetCoordinate) {
- *         return new DemoConfigFlow(flowId, targetCoordinate);
+ *     public AbstractConfigFlow createFlow() {
+ *         return new DemoConfigFlow();
  *     }
  * }
  * }</pre>
@@ -71,8 +71,7 @@ public interface ConfigFlowProvider {
     /**
      * 创建配置流程实例
      *
-     * @param flowId 流程实例 ID (通常是 UUID)
      * @return 配置流程实例
      */
-    AbstractConfigFlow createFlow(String flowId);
+    AbstractConfigFlow createFlow();
 }

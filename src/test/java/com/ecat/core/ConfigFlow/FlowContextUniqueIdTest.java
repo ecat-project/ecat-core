@@ -160,7 +160,10 @@ public class FlowContextUniqueIdTest {
 
     private static class TestConfigFlow extends AbstractConfigFlow {
         public TestConfigFlow(String flowId) {
-            super(flowId);
+            super();
+            // 框架通过 setContext 注入 flowId
+            FlowContext ctx = new FlowContext(flowId);
+            this.setContext(ctx);
         }
     }
 }

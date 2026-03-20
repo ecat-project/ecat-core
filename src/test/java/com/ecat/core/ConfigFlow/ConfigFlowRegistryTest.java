@@ -528,7 +528,7 @@ public class ConfigFlowRegistryTest {
     private static class TestConfigFlow extends AbstractConfigFlow {
 
         public TestConfigFlow() {
-            super(null);
+            super();
         }
     }
 
@@ -538,7 +538,7 @@ public class ConfigFlowRegistryTest {
     private static class TestConfigFlowWithSteps extends AbstractConfigFlow {
 
         public TestConfigFlowWithSteps() {
-            super(null);
+            super();
 
             // 注册所有入口步骤
             registerStepUser("user", "用户配置", (input, context) -> {
@@ -561,7 +561,8 @@ public class ConfigFlowRegistryTest {
     private static class TestConfigFlowWithId extends AbstractConfigFlow {
 
         public TestConfigFlowWithId(String flowId) {
-            super(flowId);
+            super();
+            this.setContext(new FlowContext(flowId));
         }
     }
 }

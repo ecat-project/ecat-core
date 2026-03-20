@@ -452,7 +452,7 @@ public class AbstractConfigFlowTest {
     private static class TestConfigFlow extends AbstractConfigFlow {
 
         public TestConfigFlow() {
-            super("test-flow");
+            super();
         }
     }
 }
