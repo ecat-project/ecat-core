@@ -75,6 +75,26 @@ public class ConfigEntryRegistry {
         }
     }
 
+    /**
+     * 集成通知异常（条目已持久化，但通知集成创建/重配置设备失败）
+     * <p>
+     * 携带完整的 entry 对象，便于后续扩展输出更多信息。
+     */
+    public static class EntryNotificationException extends RuntimeException {
+        private final ConfigEntry entry;
+        private final String operation;
+
+        public EntryNotificationException(ConfigEntry entry, String coordinate, String operation, Throwable cause) {
+            super(String.format("Integration %s failed for entry %s (%s): %s",
+                    operation, entry.getEntryId(), coordinate, cause.getMessage()), cause);
+            this.entry = entry;
+            this.operation = operation;
+        }
+
+        public ConfigEntry getEntry() { return entry; }
+        public String getOperation() { return operation; }
+    }
+
     // ==================== 构造函数 ====================
 
     /**
@@ -377,6 +397,7 @@ public class ConfigEntryRegistry {
         } catch (Exception e) {
             log.error("Failed to notify integration {} to create entry {}: {}",
                     coordinate, entry.getEntryId(), e.getMessage());
+            throw new EntryNotificationException(entry, coordinate, "create", e);
         }
     }
 
@@ -404,6 +425,7 @@ public class ConfigEntryRegistry {
         } catch (Exception e) {
             log.error("Failed to notify integration {} to reconfigure entry {}: {}",
                     coordinate, entry.getEntryId(), e.getMessage());
+            throw new EntryNotificationException(entry, coordinate, "reconfigure", e);
         }
     }
 

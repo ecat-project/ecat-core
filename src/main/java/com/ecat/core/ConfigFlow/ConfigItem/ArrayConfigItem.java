@@ -240,7 +240,7 @@ public class ArrayConfigItem<T> extends AbstractConfigItem<List<T>> {
 
     @Override
     @SuppressWarnings("unchecked")
-    public String validate(Object value) {
+    public Object validate(Object value) {
         if (value == null) {
             if (required) {
                 return displayName != null

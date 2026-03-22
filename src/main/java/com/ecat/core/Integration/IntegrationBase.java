@@ -197,6 +197,9 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
 
     /**
      * 重新配置条目
+     * <p> [重要]集成自定义的reconfigure flow原则上不要修改设备类型的配置，比如从电源变为空调，因为这会严重改变该设备被其他集成引用的含义作用而导致其他集成错误。
+     * <p> [重要]推荐只修改sn、端口信息等不会
+     * <p> [重要]对于更改设备类型的需求，让用户删除旧entry重新创建新的entry实现
      * <p>
      * 默认实现：抛出异常，表示此集成不支持 ConfigEntry 机制。
      * 需要 ConfigEntry 功能的子类应重写此方法。

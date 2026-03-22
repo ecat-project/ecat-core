@@ -69,8 +69,8 @@ public abstract class DeviceBase implements DeviceControl {
     //   - gas.zero.generate
     //   - gas.span.generate
 
-    @Getter
-    protected String id; // device id
+    @Deprecated
+    protected String id = null; // device id
 
     @Getter
     protected ConfigEntry entry; // 配置条目引用，与设备一对一关系
@@ -111,7 +111,6 @@ public abstract class DeviceBase implements DeviceControl {
         this.objectId = OBJECT_ID_GENERATOR.getAndIncrement();
         this.entry = entry;
         this.config = entry.getData();
-        this.id = entry.getUniqueId();
         initDevice(entry.getData());
     }
 
@@ -126,6 +125,7 @@ public abstract class DeviceBase implements DeviceControl {
         this.log = LogFactory.getLogger(getClass());
         this.objectId = OBJECT_ID_GENERATOR.getAndIncrement();
         this.config = config;
+        this.entry = new ConfigEntry(); // create empty config entry temporary
         this.id = (String) config.get("id");
         initDevice(config);
     }
@@ -153,6 +153,30 @@ public abstract class DeviceBase implements DeviceControl {
 
     public void load(EcatCore core) {
         this.core = core;
+    }
+
+    /**
+     * 获取设备的id标识符
+     * 全局唯一
+     * 全局不会更改，除非entry被删除
+     * 可作为数据库或关联的ID，确保能找到这个配置
+     * 但是因为不同集成的reconfigure entry flow不严谨导致设备类型发生变化，可能存在id没变但是设备类型发生变化
+     * 因此如果业务方要求强一致应当监听core的 on reconfigured 的事件自行判断
+     * 
+     * @return 兼容 旧构建函数方式，后面当旧构建函数删除后可改为返回 entry.getEntryId()
+     */
+    public String getId(){
+        return id == null ? entry.getEntryId() : id;
+    }
+
+    /**
+     * 获取设备的唯一标识符
+     * 全局唯一
+     * 可能会修改：当用户reconfigure entry后极大可能变化，比如SN修改会发生改变，只能作为业务展示
+     * @return
+     */
+    public String getUniqueId(){
+        return entry.getUniqueId();
     }
 
     /**

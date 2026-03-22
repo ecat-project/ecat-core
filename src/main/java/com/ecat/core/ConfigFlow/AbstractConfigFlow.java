@@ -237,6 +237,9 @@ public abstract class AbstractConfigFlow {
 
     /**
      * 注册重配置入口步骤 (每个 Flow 只能注册一个)
+     * <p> [重要]集成自定义的reconfigure flow原则上不要修改设备类型的配置，比如从电源变为空调，因为这会严重改变该设备被其他集成引用的含义作用而导致其他集成错误。
+     * <p> [重要]推荐只修改sn、端口信息等不会
+     * <p> [重要]对于更改设备类型的需求，让用户删除旧entry重新创建新的entry实现
      *
      * @param stepId 步骤 ID
      * @param displayName 显示名称

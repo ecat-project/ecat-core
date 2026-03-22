@@ -36,7 +36,7 @@ public class SchemaConfigItemTest {
     @Test
     public void testRequired_NullValue_ReturnsError() {
         SchemaConfigItem item = new SchemaConfigItem("nested", true, new ConfigSchema());
-        String error = item.validate(null);
+        String error = (String) item.validate(null);
         assertNotNull("required=true, null should return error", error);
         assertTrue("Error should mention field key", error.contains("nested"));
     }
@@ -45,7 +45,7 @@ public class SchemaConfigItemTest {
     public void testRequired_NullValue_WithDisplayName() {
         SchemaConfigItem item = new SchemaConfigItem("nested", true, new ConfigSchema());
         item.displayName("嵌套配置");
-        String error = item.validate(null);
+        String error = (String) item.validate(null);
         assertNotNull("required=true, null should return error", error);
         assertTrue("Error should mention display name", error.contains("嵌套配置"));
     }
@@ -53,16 +53,14 @@ public class SchemaConfigItemTest {
     @Test
     public void testOptional_NullValue_ReturnsNoError() {
         SchemaConfigItem item = new SchemaConfigItem("nested", false, new ConfigSchema());
-        String error = item.validate(null);
-        assertNull("required=false, null should pass", error);
+        assertNull("required=false, null should pass", item.validate(null));
     }
 
     @Test
     public void testRequired_PresentValue_ReturnsNoError() {
         SchemaConfigItem item = new SchemaConfigItem("nested", true, new ConfigSchema());
         Map<String, Object> value = new HashMap<>();
-        String error = item.validate(value);
-        assertNull("required=true, non-null Map should pass", error);
+        assertNull("required=true, non-null Map should pass", item.validate(value));
     }
 
     // ========== 类型检查 ==========
@@ -71,7 +69,7 @@ public class SchemaConfigItemTest {
     public void testValidateType_NonMapValue_ReturnsError() {
         SchemaConfigItem item = new SchemaConfigItem("nested", true, new ConfigSchema());
         item.displayName("嵌套配置");
-        String error = item.validate("not a map");
+        String error = (String) item.validate("not a map");
         assertNotNull("Non-Map value should return type error", error);
         assertTrue("Error should mention display name", error.contains("嵌套配置"));
     }
@@ -79,7 +77,7 @@ public class SchemaConfigItemTest {
     @Test
     public void testValidateType_NonMapValue_NoDisplayName() {
         SchemaConfigItem item = new SchemaConfigItem("nested", true, new ConfigSchema());
-        String error = item.validate("not a map");
+        String error = (String) item.validate("not a map");
         assertNotNull("Non-Map value should return type error", error);
         assertTrue("Error should mention field key", error.contains("nested"));
     }
@@ -89,20 +87,19 @@ public class SchemaConfigItemTest {
     @Test
     public void testProvider_Required_NullValue_ReturnsError() {
         SchemaConfigItem item = new SchemaConfigItem("nested", true, StubSchemaProvider.class);
-        String error = item.validate(null);
-        assertNotNull("required=true, null should return error", error);
+        assertNotNull("required=true, null should return error", item.validate(null));
     }
 
     @Test
     public void testProvider_Optional_NullValue_ReturnsNoError() {
         SchemaConfigItem item = new SchemaConfigItem("nested", false, StubSchemaProvider.class);
-        String error = item.validate(null);
-        assertNull("required=false, null should pass", error);
+        assertNull("required=false, null should pass", item.validate(null));
     }
 
     // ========== 嵌套 Schema 递归验证 ==========
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testNestedSchema_RequiredChildFieldMissing_ReturnsError() {
         ConfigSchema nestedSchema = new ConfigSchema()
                 .addField(new TextConfigItem("child_required", true).displayName("子字段"));
@@ -112,8 +109,12 @@ public class SchemaConfigItemTest {
 
         Map<String, Object> value = new HashMap<>();
         // child_required is missing
-        String error = item.validate(value);
-        assertNotNull("Missing required child field should return error", error);
+        // validate() 返回嵌套 Map 结构（包含子字段错误）
+        Object result = item.validate(value);
+        assertNotNull("validate() should return error for missing child", result);
+        assertTrue("validate() should return Map for nested errors", result instanceof Map);
+        Map<String, Object> nestedErrors = (Map<String, Object>) result;
+        assertTrue("Should contain error for child_required", nestedErrors.containsKey("child_required"));
     }
 
     @Test
@@ -127,8 +128,7 @@ public class SchemaConfigItemTest {
         Map<String, Object> value = new HashMap<>();
         value.put("child_required", "value");
         // child_optional is optional, not provided
-        String error = item.validate(value);
-        assertNull("All required child fields present, should pass", error);
+        assertNull("All required child fields present, should pass", item.validate(value));
     }
 
     @Test
@@ -140,11 +140,11 @@ public class SchemaConfigItemTest {
 
         Map<String, Object> value = new HashMap<>();
         // child_optional is optional, not provided
-        String error = item.validate(value);
-        assertNull("Only optional child field missing, should pass", error);
+        assertNull("Only optional child field missing, should pass", item.validate(value));
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testNestedSchema_InvalidChildValue_ReturnsError() {
         ConfigSchema nestedSchema = new ConfigSchema()
                 .addField(new NumericConfigItem("child_num", true).range(0, 100));
@@ -153,14 +153,18 @@ public class SchemaConfigItemTest {
 
         Map<String, Object> value = new HashMap<>();
         value.put("child_num", "not_a_number");
-        String error = item.validate(value);
-        assertNotNull("Invalid child value should return error", error);
+        // validate() 返回嵌套错误 Map
+        Object result = item.validate(value);
+        assertNotNull("validate() should return error for invalid child", result);
+        assertTrue("validate() should return Map", result instanceof Map);
     }
 
     // ========== 多层嵌套 ==========
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testDeepNested_RequiredMissing_ReturnsError() {
+        // 3 层嵌套：outer -> middle(inner) -> deep_field
         ConfigSchema innerSchema = new ConfigSchema()
                 .addField(new TextConfigItem("deep_field", true).displayName("深层字段"));
 
@@ -172,12 +176,18 @@ public class SchemaConfigItemTest {
 
         Map<String, Object> outerValue = new HashMap<>();
         Map<String, Object> middleValue = new HashMap<>();
-        // inner is missing
-        outerValue.put("middle", middleValue);
+        outerValue.put("inner", middleValue);
 
-        String error = outerItem.validate(outerValue);
-        assertNotNull("Missing required nested field should return error", error);
-        assertTrue("Error should contain inner field info", error.contains("inner") || error.contains("内层"));
+        // validate() 返回多层嵌套 Map 结构
+        Object result = outerItem.validate(outerValue);
+        assertNotNull("validate() should return error for deep nested missing field", result);
+        assertTrue("Should return Map", result instanceof Map);
+        Map<String, Object> outerErrors = (Map<String, Object>) result;
+        assertTrue("Should contain error for inner", outerErrors.containsKey("inner"));
+        Object innerError = outerErrors.get("inner");
+        assertTrue("inner error should be nested Map", innerError instanceof Map);
+        Map<String, Object> innerErrors = (Map<String, Object>) innerError;
+        assertTrue("Should contain error for deep_field", innerErrors.containsKey("deep_field"));
     }
 
     // ========== getFieldType ==========
@@ -283,6 +293,72 @@ public class SchemaConfigItemTest {
         Map<String, Object> commSettings = (Map<String, Object>) config.get("comm_settings");
         assertEquals("Should add default port", "COM1", commSettings.get("port"));
         assertEquals("Should add default baudRate", 9600.0, commSettings.get("baudRate"));
+    }
+
+    // ========== ConfigSchema.validate() ==========
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testConfigSchema_validate_ReturnsNestedMap() {
+        ConfigSchema innerSchema = new ConfigSchema()
+                .addField(new TextConfigItem("deep_field", true).displayName("深层字段"));
+
+        ConfigSchema schema = new ConfigSchema()
+                .addField(new TextConfigItem("name", true).displayName("名称"))
+                .addField(new SchemaConfigItem("comm_settings", true, innerSchema).displayName("通讯设置"));
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("comm_settings", new HashMap<>()); // name missing, deep_field missing
+
+        Map<String, Object> errors = schema.validate(input);
+
+        // name 应该有错误（叶子 String）
+        assertTrue("Should contain error for 'name'", errors.containsKey("name"));
+        assertTrue("name error should be String", errors.get("name") instanceof String);
+
+        // comm_settings 应该有嵌套错误（Map）
+        assertTrue("Should contain error for 'comm_settings'", errors.containsKey("comm_settings"));
+        assertTrue("comm_settings error should be Map", errors.get("comm_settings") instanceof Map);
+        Map<String, Object> commErrors = (Map<String, Object>) errors.get("comm_settings");
+        assertTrue("Should contain error for deep_field", commErrors.containsKey("deep_field"));
+    }
+
+    @Test
+    public void testConfigSchema_validate_NoErrors_ReturnsEmptyMap() {
+        ConfigSchema schema = new ConfigSchema()
+                .addField(new TextConfigItem("name", true).displayName("名称"));
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("name", "test");
+
+        Map<String, Object> errors = schema.validate(input);
+        assertTrue("Should return empty map when no errors", errors.isEmpty());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testConfigSchema_validate_ContainsNestedErrors() {
+        ConfigSchema nestedSchema = new ConfigSchema()
+                .addField(new TextConfigItem("child", true).displayName("子字段"));
+
+        ConfigSchema schema = new ConfigSchema()
+                .addField(new TextConfigItem("name", true).displayName("名称"))
+                .addField(new SchemaConfigItem("nested", true, nestedSchema).displayName("嵌套"));
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("nested", new HashMap<>()); // name missing, child missing
+
+        Map<String, Object> errors = schema.validate(input);
+
+        // name 应该有 String 错误
+        assertTrue("Should contain error for 'name'", errors.containsKey("name"));
+        assertTrue("name error should be String", errors.get("name") instanceof String);
+
+        // nested 应该有嵌套 Map 错误
+        assertTrue("Should contain error for 'nested'", errors.containsKey("nested"));
+        assertTrue("nested error should be Map", errors.get("nested") instanceof Map);
+        Map<String, Object> nestedErrors = (Map<String, Object>) errors.get("nested");
+        assertTrue("Should contain error for child", nestedErrors.containsKey("child"));
     }
 
     // ========== Stub ==========

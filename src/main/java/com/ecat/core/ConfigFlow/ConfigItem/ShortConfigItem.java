@@ -144,7 +144,7 @@ public class ShortConfigItem extends AbstractConfigItem<Short> {
 
     @Override
     @SuppressWarnings("unchecked")
-    public String validate(Object value) {
+    public Object validate(Object value) {
         if (value == null) {
             if (required) {
                 return displayName != null
@@ -181,7 +181,6 @@ public class ShortConfigItem extends AbstractConfigItem<Short> {
             typedValue = (short) longValue.longValue();
         } else if (value instanceof java.math.BigDecimal) {
             java.math.BigDecimal bdValue = (java.math.BigDecimal) value;
-            // 检查是否为整数值
             if (bdValue.scale() > 0 && bdValue.stripTrailingZeros().scale() > 0) {
                 return displayName != null
                     ? displayName + " 必须是整数类型"
