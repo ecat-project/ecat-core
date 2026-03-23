@@ -189,7 +189,7 @@ public class EnumConfigItem extends AbstractConfigItem<String> {
     }
 
     @Override
-    public String validate(Object value) {
+    public Object validate(Object value) {
         // 必填验证
         if (value == null || (value instanceof String && ((String) value).isEmpty())) {
             if (required) {

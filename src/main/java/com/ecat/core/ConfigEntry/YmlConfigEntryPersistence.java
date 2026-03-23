@@ -269,6 +269,12 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
             builder.data((Map<String, Object>) dataObj);
         }
 
+        // 处理 stepInputs 字段
+        Object stepInputsObj = map.get("stepInputs");
+        if (stepInputsObj instanceof Map) {
+            builder.stepInputs((Map<String, Object>) stepInputsObj);
+        }
+
         // 处理布尔字段
         Object enabledObj = map.get("enabled");
         if (enabledObj instanceof Boolean) {
@@ -306,6 +312,7 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         map.put("uniqueId", entry.getUniqueId());
         map.put("title", entry.getTitle());
         map.put("data", deepSerialize(entry.getData()));
+        map.put("stepInputs", deepSerialize(entry.getStepInputs()));
         map.put("enabled", entry.isEnabled());
         map.put("createTime", formatTime(entry.getCreateTime()));
         map.put("updateTime", formatTime(entry.getUpdateTime()));

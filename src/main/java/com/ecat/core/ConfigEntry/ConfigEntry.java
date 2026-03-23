@@ -60,6 +60,12 @@ public class ConfigEntry {
     private Map<String, Object> data;
 
     /**
+     * 各步骤用户输入数据 (stepId → userInput)
+     * 用于重配置时的数据漫游
+     */
+    private Map<String, Object> stepInputs;
+
+    /**
      * 启用状态
      */
     private boolean enabled;
@@ -90,6 +96,7 @@ public class ConfigEntry {
         private String uniqueId;
         private String title;
         private Map<String, Object> data = new HashMap<>();
+        private Map<String, Object> stepInputs = new HashMap<>();
         private boolean enabled = true;
         private ZonedDateTime createTime;
         private ZonedDateTime updateTime;
@@ -120,6 +127,11 @@ public class ConfigEntry {
             return this;
         }
 
+        public Builder stepInputs(Map<String, Object> stepInputs) {
+            this.stepInputs = stepInputs;
+            return this;
+        }
+
         public Builder enabled(boolean enabled) {
             this.enabled = enabled;
             return this;
@@ -147,6 +159,7 @@ public class ConfigEntry {
             entry.uniqueId = uniqueId;
             entry.title = title;
             entry.data = new HashMap<>(data);
+            entry.stepInputs = stepInputs != null ? new HashMap<>(stepInputs) : new HashMap<>();
             entry.enabled = enabled;
             entry.createTime = createTime;
             entry.updateTime = updateTime;
@@ -170,6 +183,7 @@ public class ConfigEntry {
                 .uniqueId(this.uniqueId)
                 .title(newData.title != null ? newData.title : this.title)
                 .data(newData.data != null ? newData.data : this.data)
+                .stepInputs(newData.stepInputs != null ? newData.stepInputs : this.stepInputs)
                 .enabled(newData.enabled)
                 .createTime(this.createTime)
                 .updateTime(DateTimeUtils.now())
@@ -192,6 +206,7 @@ public class ConfigEntry {
                 .uniqueId(newData.uniqueId != null ? newData.uniqueId : this.uniqueId)
                 .title(newData.title != null ? newData.title : this.title)
                 .data(newData.data != null ? newData.data : this.data)
+                .stepInputs(newData.stepInputs != null ? newData.stepInputs : this.stepInputs)
                 .enabled(newData.enabled)
                 .createTime(this.createTime)
                 .updateTime(DateTimeUtils.now())

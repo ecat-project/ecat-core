@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import lombok.Getter;
 import lombok.Setter;
 
+import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.EcatCore;
 import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.I18n.I18nHelper;
@@ -68,8 +69,11 @@ public abstract class DeviceBase implements DeviceControl {
     //   - gas.zero.generate
     //   - gas.span.generate
 
+    @Deprecated
+    protected String id = null; // device id
+
     @Getter
-    protected String id; // device id
+    protected ConfigEntry entry; // 配置条目引用，与设备一对一关系
     @Getter
     protected String name;
     @Getter
@@ -96,14 +100,39 @@ public abstract class DeviceBase implements DeviceControl {
     protected final I18nProxy i18n = I18nHelper.createProxy(this.getClass());
 
 
+    /**
+     * 从 ConfigEntry 构建设备（推荐）
+     * 自动从 entry 中提取 uniqueId 作为 deviceId，保存 entry 引用建立一对一关系
+     *
+     * @param entry 配置条目
+     */
+    public DeviceBase(ConfigEntry entry) {
+        this.log = LogFactory.getLogger(getClass());
+        this.objectId = OBJECT_ID_GENERATOR.getAndIncrement();
+        this.entry = entry;
+        this.config = entry.getData();
+        initDevice(entry.getData());
+    }
+
+    /**
+     * 从 config Map 构建设备（旧式，已废弃）
+     *
+     * @param config 设备配置
+     * @deprecated 使用 {@link #DeviceBase(ConfigEntry)} 替代
+     */
+    @Deprecated
     public DeviceBase(Map<String, Object> config) {
         this.log = LogFactory.getLogger(getClass());
         this.objectId = OBJECT_ID_GENERATOR.getAndIncrement();
-
         this.config = config;
+        this.entry = new ConfigEntry(); // create empty config entry temporary
         this.id = (String) config.get("id");
+        initDevice(config);
+    }
+
+    private void initDevice(Map<String, Object> config) {
         this.name = (String) config.get("name");
-        
+
         // sn is optional , if config not has sn set sn = null
         this.deviceClass = DeviceClasses.getEnum((String) config.getOrDefault("class", null));
         this.deviceStatus = DeviceStatus.UNKNOWN;
@@ -114,7 +143,7 @@ public abstract class DeviceBase implements DeviceControl {
                 this.abilities.add(DeviceAbility.getEnum(ability));
             }
         }
-        
+
         this.sn = (String) config.getOrDefault("sn", null);
         this.vendor = (String) config.getOrDefault("vendor", null);
         this.model = (String) config.getOrDefault("model", null);
@@ -124,6 +153,30 @@ public abstract class DeviceBase implements DeviceControl {
 
     public void load(EcatCore core) {
         this.core = core;
+    }
+
+    /**
+     * 获取设备的id标识符
+     * 全局唯一
+     * 全局不会更改，除非entry被删除
+     * 可作为数据库或关联的ID，确保能找到这个配置
+     * 但是因为不同集成的reconfigure entry flow不严谨导致设备类型发生变化，可能存在id没变但是设备类型发生变化
+     * 因此如果业务方要求强一致应当监听core的 on reconfigured 的事件自行判断
+     * 
+     * @return 兼容 旧构建函数方式，后面当旧构建函数删除后可改为返回 entry.getEntryId()
+     */
+    public String getId(){
+        return id == null ? entry.getEntryId() : id;
+    }
+
+    /**
+     * 获取设备的唯一标识符
+     * 全局唯一
+     * 可能会修改：当用户reconfigure entry后极大可能变化，比如SN修改会发生改变，只能作为业务展示
+     * @return
+     */
+    public String getUniqueId(){
+        return entry.getUniqueId();
     }
 
     /**

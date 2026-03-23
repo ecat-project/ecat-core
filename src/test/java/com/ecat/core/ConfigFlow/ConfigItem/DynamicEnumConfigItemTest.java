@@ -54,7 +54,7 @@ public class DynamicEnumConfigItemTest {
         item.displayName("串口设备");
 
         // 空字符串应该校验失败
-        String error = item.validate("");
+        String error = (String) item.validate("");
         assertNotNull("空字符串应该校验失败", error);
         assertTrue("错误信息应包含'必需'", error.contains("必需"));
     }
@@ -65,7 +65,7 @@ public class DynamicEnumConfigItemTest {
         item.displayName("串口设备");
 
         // null 应该校验失败
-        String error = item.validate(null);
+        String error = (String) item.validate(null);
         assertNotNull("null 应该校验失败", error);
         assertTrue("错误信息应包含'必需'", error.contains("必需"));
     }
@@ -75,7 +75,7 @@ public class DynamicEnumConfigItemTest {
         DynamicEnumConfigItem item = new DynamicEnumConfigItem("port", false, noPortsSupplier);
 
         // 非必填时，空字符串应该通过
-        String error = item.validate("");
+        Object error = item.validate("");
         assertNull("非必填时，空字符串应该通过", error);
     }
 
@@ -85,7 +85,7 @@ public class DynamicEnumConfigItemTest {
         item.displayName("串口设备");
 
         // 选择有效选项应该通过
-        String error = item.validate("/dev/ttyUSB0");
+        Object error = item.validate("/dev/ttyUSB0");
         assertNull("有效选项应该通过校验", error);
     }
 
@@ -95,7 +95,7 @@ public class DynamicEnumConfigItemTest {
         item.displayName("串口设备");
 
         // 选择无效选项应该失败
-        String error = item.validate("/dev/ttyS99");
+        String error = (String) item.validate("/dev/ttyS99");
         assertNotNull("无效选项应该校验失败", error);
         assertTrue("错误信息应包含'无效'", error.contains("无效"));
     }

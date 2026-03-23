@@ -190,9 +190,6 @@ public class IntegrationManager {
         }
 
         List<ConfigEntry> entries = entryRegistry.listByCoordinate(coordinate);
-        if (entries.isEmpty()) {
-            return;
-        }
 
         log.info("Loading {} existing entries for {}", entries.size(), coordinate);
 
@@ -222,6 +219,17 @@ public class IntegrationManager {
             } catch (Exception e) {
                 log.error("Failed to load entry {}: {}", entry.getEntryId(), e.getMessage());
             }
+        }
+
+        // 4. 通知集成所有已持久化 entry 加载完毕（即使 entries 为空也必须调用）
+        try {
+            integration.onAllExistEntriesLoaded(entries);
+            log.info("All entries loaded for {}, ready={}", coordinate,
+                integration.isReady());
+        } catch (UnsupportedOperationException e) {
+            log.debug("Integration {} doesn't support onAllExistEntriesLoaded", coordinate);
+        } catch (Exception e) {
+            log.error("onAllExistEntriesLoaded failed for {}: {}", coordinate, e.getMessage());
         }
     }
 

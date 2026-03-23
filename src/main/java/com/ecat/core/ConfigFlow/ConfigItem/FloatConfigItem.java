@@ -122,7 +122,7 @@ public class FloatConfigItem extends AbstractConfigItem<Float> {
 
     @Override
     @SuppressWarnings("unchecked")
-    public String validate(Object value) {
+    public Object validate(Object value) {
         if (value == null) {
             if (required) {
                 return displayName != null
@@ -164,7 +164,6 @@ public class FloatConfigItem extends AbstractConfigItem<Float> {
         }
 
         for (ConstraintValidator<?> validator : validators) {
-            @SuppressWarnings("unchecked")
             ConstraintValidator<Float> floatValidator = (ConstraintValidator<Float>) validator;
             if (!floatValidator.validate(typedValue)) {
                 return displayName != null

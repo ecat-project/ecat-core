@@ -196,9 +196,9 @@ public class AbstractConfigFlowTest {
         flow.setContext(context);
 
         // 设置数据
-        context.getData().put("title", "Test Entry");
-        context.getData().put("uniqueId", "demo_123");
-        context.getData().put("key", "value");
+        context.getEntryData().put("key", "value");
+        context.setEntryTitle("Test Entry");
+        context.setEntryUniqueId("demo_123");
 
         ConfigFlowResult result = flow.createEntry();
 
@@ -221,7 +221,7 @@ public class AbstractConfigFlowTest {
         flow.setReconfigureEntryId("existing-entry-id");
 
         // 设置数据
-        context.getData().put("title", "Updated Entry");
+        context.setEntryTitle("Updated Entry");
 
         ConfigFlowResult result = flow.createEntry();
 
@@ -331,31 +331,117 @@ public class AbstractConfigFlowTest {
     // ==================== 流程数据测试 ====================
 
     @Test
-    public void testFlowDataManagement() {
+    public void testContextDataManagement() {
         TestConfigFlow flow = new TestConfigFlow();
         FlowContext context = new FlowContext("test-flow");
         flow.setContext(context);
 
-        flow.setFlowData("key1", "value1");
-        flow.setFlowData("key2", 123);
+        context.getEntryData().put("key1", "value1");
+        context.getEntryData().put("key2", 123);
 
-        assertEquals("应该获取到 value1", "value1", flow.getFlowData("key1"));
-        assertEquals("应该获取到 123", 123, flow.getFlowData("key2"));
-        assertNull("不存在的 key 应该返回 null", flow.getFlowData("non-existent"));
+        assertEquals("应该获取到 value1", "value1", context.getEntryData().get("key1"));
+        assertEquals("应该获取到 123", 123, context.getEntryData().get("key2"));
+        assertNull("不存在的 key 应该返回 null", context.getEntryData().get("non-existent"));
     }
 
     @Test
-    public void testGetFlowData_WithDefault() {
+    public void testSetEntryTitleAndUniqueId() {
+        TestConfigFlow flow = new TestConfigFlow();
+        FlowContext context = flow.getContext();
+
+        context.setEntryTitle("My Entry");
+        context.setEntryUniqueId("test_123");
+
+        assertEquals("title 应该被设置", "My Entry", context.getEntryTitle());
+        assertEquals("uniqueId 应该被设置", "test_123", context.getEntryUniqueId());
+    }
+
+    @Test
+    public void testClearStepData() {
+        TestConfigFlow flow = new TestConfigFlow();
+        FlowContext context = flow.getContext();
+
+        Map<String, Object> stepData = new HashMap<>();
+        stepData.put("key", "value");
+        flow.saveStepData("user", stepData);
+
+        assertEquals("应该有 1 个步骤输入", 1, context.getStepInputs().size());
+
+        context.getStepInputs().remove("user");
+        assertEquals("清除后应该为空", 0, context.getStepInputs().size());
+    }
+
+    @Test
+    public void testClearAllStepData() {
+        TestConfigFlow flow = new TestConfigFlow();
+        FlowContext context = flow.getContext();
+
+        Map<String, Object> stepData = new HashMap<>();
+        stepData.put("key", "value");
+        flow.saveStepData("user", stepData);
+        flow.saveStepData("device", stepData);
+
+        assertEquals("应该有 2 个步骤输入", 2, context.getStepInputs().size());
+
+        context.getStepInputs().clear();
+        assertEquals("清除后应该为空", 0, context.getStepInputs().size());
+    }
+
+    @Test
+    public void testCreateEntry_CleanData() {
         TestConfigFlow flow = new TestConfigFlow();
         FlowContext context = new FlowContext("test-flow");
+        context.setCoordinate("com.ecat.integration:demo");
         flow.setContext(context);
 
-        String value = flow.getFlowData("key", String.class, "default");
-        assertEquals("应该返回默认值", "default", value);
+        // 设置业务数据
+        context.getEntryData().put("business_key", "business_value");
+        // 设置 entry 元数据
+        context.setEntryTitle("Clean Entry");
+        context.setEntryUniqueId("clean_123");
+        // 设置步骤输入
+        Map<String, Object> stepData = new HashMap<>();
+        stepData.put("password", "secret");
+        context.getStepInputs().put("user", stepData);
 
-        flow.setFlowData("key", "actual");
-        value = flow.getFlowData("key", String.class, "default");
-        assertEquals("应该返回实际值", "actual", value);
+        ConfigFlowResult result = flow.createEntry();
+
+        // 验证 entry.data 仅包含业务数据
+        assertEquals("entry.data 应该包含业务数据", "business_value", result.getEntry().getData().get("business_key"));
+        assertNull("entry.data 不应包含 title", result.getEntry().getData().get("title"));
+        assertNull("entry.data 不应包含 uniqueId", result.getEntry().getData().get("uniqueId"));
+        assertNull("entry.data 不应包含 step_inputs", result.getEntry().getData().get("step_inputs"));
+
+        // 验证 entry 元数据正确
+        assertEquals("entry.title 应该正确", "Clean Entry", result.getEntry().getTitle());
+        assertEquals("entry.uniqueId 应该正确", "clean_123", result.getEntry().getUniqueId());
+
+        // 验证 stepInputs 已持久化到 entry
+        assertNotNull("entry.stepInputs 不应为 null", result.getEntry().getStepInputs());
+        assertEquals("entry.stepInputs 应该有 1 个步骤", 1, result.getEntry().getStepInputs().size());
+    }
+
+    // ==================== onRelease 生命周期测试 ====================
+
+    @Test
+    public void testOnRelease_DefaultNoOp() {
+        TestConfigFlow flow = new TestConfigFlow();
+        // 默认 onRelease() 不应抛出异常
+        flow.onRelease();
+    }
+
+    @Test
+    public void testOnRelease_CalledBySubclass() {
+        final boolean[] released = {false};
+        TestConfigFlow flow = new TestConfigFlow() {
+            @Override
+            protected void onRelease() {
+                released[0] = true;
+            }
+        };
+        assertFalse("onRelease 尚未被调用", released[0]);
+        flow.onRelease();
+        assertTrue("onRelease 应该被调用", released[0]);
     }
 
     // ==================== 辅助测试类 ====================
@@ -366,7 +452,7 @@ public class AbstractConfigFlowTest {
     private static class TestConfigFlow extends AbstractConfigFlow {
 
         public TestConfigFlow() {
-            super("test-flow");
+            super();
         }
     }
 }

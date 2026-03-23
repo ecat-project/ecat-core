@@ -27,7 +27,6 @@ import lombok.Data;
 import lombok.Getter;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -61,7 +60,7 @@ import java.util.function.Function;
  *         if (userInput == null || userInput.isEmpty()) {
  *             return showForm("user", createUserSchema(), new HashMap<>());
  *         }
- *         getData().putAll(userInput);
+ *         context.getEntryData().putAll(userInput);
  *         return showForm("device_config", createDeviceSchema(), new HashMap<>());
  *     }
  *
@@ -82,11 +81,6 @@ public abstract class AbstractConfigFlow {
      * 日志实例
      */
     protected final Log log = LogFactory.getLogger(getClass());
-
-    /**
-     * 流程实例 ID
-     */
-    protected final String flowId;
 
     /**
      * 流程上下文（唯一数据源）
@@ -114,6 +108,20 @@ public abstract class AbstractConfigFlow {
      * 重配置时的 entryId
      */
     protected String reconfigureEntryId;
+
+    // ========== 生命周期回调 ==========
+
+    /**
+     * 流程结束时的资源释放回调
+     * <p>
+     * 正常完成、用户取消、过期清理均触发。
+     * 由 ConfigFlowRegistry 在 finishActiveFlow() / abortActiveFlow() 时自动调用。
+     * <p>
+     * 子类可覆盖此方法释放资源（如临时文件、网络连接等）。
+     */
+    protected void onRelease() {
+        // 默认空实现
+    }
 
     /**
      * 用户入口步骤 (每类只能注册一个)
@@ -149,23 +157,23 @@ public abstract class AbstractConfigFlow {
 
     /**
      * 构造函数
-     *
-     * @param flowId 流程实例 ID
+     * <p>
+     * 创建 FlowContext，自动生成默认 flowId。
+     * <p>
+     * flowId 格式：UUID 字符串。
      */
-    protected AbstractConfigFlow(String flowId) {
-        this.flowId = flowId;
+    protected AbstractConfigFlow() {
+        this.context = new FlowContext(UUID.randomUUID().toString());
         this.i18n = I18nHelper.createProxy(this.getClass());
     }
 
     /**
      * 获取流程实例 ID
-     * <p>
-     * 优先从 context 获取，如果 context 未设置则返回构造函数传入的 flowId。
      *
      * @return 流程实例 ID
      */
     public String getFlowId() {
-        return context != null ? context.getFlowId() : flowId;
+        return context.getFlowId();
     }
 
     // ========== Step 注册 API ==========
@@ -229,6 +237,9 @@ public abstract class AbstractConfigFlow {
 
     /**
      * 注册重配置入口步骤 (每个 Flow 只能注册一个)
+     * <p> [重要]集成自定义的reconfigure flow原则上不要修改设备类型的配置，比如从电源变为空调，因为这会严重改变该设备被其他集成引用的含义作用而导致其他集成错误。
+     * <p> [重要]推荐只修改sn、端口信息等不会
+     * <p> [重要]对于更改设备类型的需求，让用户删除旧entry重新创建新的entry实现
      *
      * @param stepId 步骤 ID
      * @param displayName 显示名称
@@ -345,7 +356,8 @@ public abstract class AbstractConfigFlow {
         if (userStep == null) {
             throw new IllegalStateException("User entry step not registered");
         }
-        return userStep.getHandler().apply(userInput, context);
+        String stepId = userStep.getStepId();
+        return handleStep(stepId, userInput);
     }
 
     /**
@@ -362,7 +374,8 @@ public abstract class AbstractConfigFlow {
         }
         this.reconfigureEntryId = entryId;
         this.sourceType = SourceType.RECONFIGURE;
-        return reconfigureStep.getHandler().apply(userInput, context);
+        String stepId = reconfigureStep.getStepId();
+        return handleStep(stepId, userInput);
     }
 
     // ========== 步骤信息获取 ==========
@@ -416,12 +429,13 @@ public abstract class AbstractConfigFlow {
     // ========== 上下文管理 ==========
 
     /**
-     * 设置流程上下文
+     * 设置流程上下文（替换构造函数创建的默认 context）
      *
-     * @param context 流程上下文
+     * @param context 流程上下文，不能为 null
+     * @throws NullPointerException 如果 context 为 null
      */
     public void setContext(FlowContext context) {
-        this.context = context;
+        this.context = Objects.requireNonNull(context, "context must not be null");
     }
 
     /**
@@ -442,27 +456,14 @@ public abstract class AbstractConfigFlow {
         this.registry = registry;
     }
 
-    /**
-     * 获取流程数据（便捷方法）
-     *
-     * @return 流程数据映射
-     */
-    protected Map<String, Object> getData() {
-        if (context != null) {
-            return context.getData();
-        }
-        // 兼容旧代码：如果没有 context，返回空 Map
-        return new HashMap<>();
-    }
-
-    // ========== 辅助方法 ==========
+    // ========== 步骤数据操作（含 copy 逻辑，保留在 Flow 层） ==========
 
     /**
      * 显示表单（使用新版 ConfigSchema）
      *
      * <p>框架自动处理步骤数据持久化：
      * <ul>
-     *   <li>context.getData() 已包含 step_inputs 中的步骤数据</li>
+     *   <li>context.stepInputs 已包含各步骤数据</li>
      *   <li>前端从 data.step_inputs[stepId] 读取已填写内容</li>
      *   <li>支持步骤漫游时数据不丢失</li>
      * </ul>
@@ -474,8 +475,8 @@ public abstract class AbstractConfigFlow {
      */
     protected ConfigFlowResult showForm(String stepId, com.ecat.core.ConfigFlow.ConfigSchema schema,
                                          Map<String, Object> errors) {
-        // context.getData() 已包含 step_inputs，前端从 step_inputs[stepId] 读取
-        // 框架自动在 handleStep() 中保存数据到 step_inputs
+        // context.stepInputs 已包含各步骤数据，前端从 step_inputs[stepId] 读取
+        // 框架自动在 handleStep() 中保存数据到 stepInputs
         return ConfigFlowResult.showForm(stepId, schema, errors, context);
     }
 
@@ -483,6 +484,8 @@ public abstract class AbstractConfigFlow {
      * 创建配置条目 (根据 sourceType 决定行为)
      * <p>
      * 从 context 获取 coordinate 和数据，根据 sourceType 决定创建或更新模式。
+     * entry.data 仅包含业务数据（不含 step_inputs/title/uniqueId）。
+     * stepInputs 作为 ConfigEntry 的独立字段持久化。
      *
      * @return CREATE_ENTRY 类型结果
      */
@@ -490,18 +493,23 @@ public abstract class AbstractConfigFlow {
         // 从 context 获取 coordinate (由 ConfigFlowRegistry 设置)
         String coordinate = context.getCoordinate();
 
-        // 构建 entry 数据
+        // 构建干净的 entry data（仅业务数据，不含 step_inputs/title/uniqueId）
+        Map<String, Object> entryData = new HashMap<>(context.getEntryData());
+
         ConfigEntry.Builder builder = new ConfigEntry.Builder()
                 .coordinate(coordinate)
-                .data(new HashMap<>(getData()));
+                .data(entryData);
 
-        // 从 data 中获取 title 和 uniqueId
-        if (getData().containsKey("title")) {
-            builder.title((String) getData().get("title"));
+        // 从 context 专用字段获取 title 和 uniqueId
+        if (context.getEntryTitle() != null) {
+            builder.title(context.getEntryTitle());
         }
-        if (getData().containsKey("uniqueId")) {
-            builder.uniqueId((String) getData().get("uniqueId"));
+        if (context.getEntryUniqueId() != null) {
+            builder.uniqueId(context.getEntryUniqueId());
         }
+
+        // 持久化 stepInputs（用于重配置数据漫游）
+        builder.stepInputs(context.getStepInputs());
 
         if (sourceType == SourceType.RECONFIGURE && reconfigureEntryId != null) {
             // 更新模式: 需要保留原 entryId
@@ -535,9 +543,7 @@ public abstract class AbstractConfigFlow {
             stepHistory.add(stepId);
         }
         this.currentStep = stepId;
-        if (context != null) {
-            context.setCurrentStep(stepId);
-        }
+        context.setCurrentStep(stepId);
 
         // 框架自动保存步骤数据（用户提交时）
         // 注意：在处理器调用前保存，确保即使验证失败，数据也不丢失
@@ -558,9 +564,7 @@ public abstract class AbstractConfigFlow {
             String displayStepId = result.getStepId();
             if (displayStepId != null && !displayStepId.equals(this.currentStep)) {
                 this.currentStep = displayStepId;
-                if (context != null) {
-                    context.setCurrentStep(displayStepId);
-                }
+                context.setCurrentStep(displayStepId);
                 if (!stepHistory.contains(displayStepId)) {
                     stepHistory.add(displayStepId);
                 }
@@ -568,26 +572,6 @@ public abstract class AbstractConfigFlow {
         }
 
         return result;
-    }
-
-    /**
-     * 获取 Flow 实例（共享上下文）
-     *
-     * @param flowClass Flow 类
-     * @param <T> Flow 类型
-     * @return Flow 实例
-     */
-    protected <T extends AbstractConfigFlow> T getFlow(Class<T> flowClass) {
-        if (registry == null) {
-            throw new IllegalStateException("Registry not set");
-        }
-        return registry.getFlow(() -> {
-            try {
-                return flowClass.getDeclaredConstructor(String.class).newInstance(flowId);
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to create flow: " + flowClass, e);
-            }
-        }, context);
     }
 
     // ========== 兼容旧方法（保留以不破坏现有代码） ==========
@@ -603,38 +587,28 @@ public abstract class AbstractConfigFlow {
     }
 
     /**
-     * 保存步骤数据到独立命名空间
+     * 保存步骤数据到 context.stepInputs
      *
      * @param stepId 步骤 ID
      * @param userInput 用户输入数据
      */
     protected void saveStepData(String stepId, Map<String, Object> userInput) {
-        Map<String, Object> flowData = getFlowDataMap();
-        synchronized (flowData) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> stepInputs = (Map<String, Object>)
-                flowData.computeIfAbsent("step_inputs", k -> new HashMap<>());
-
-            stepInputs.put(stepId, new HashMap<>(userInput));
-        }
+        context.getStepInputs().put(stepId, new HashMap<>(userInput));
     }
 
     /**
-     * 获取特定步骤的用户输入
+     * 获取特定步骤的用户输入（从 context.stepInputs 读取）
      *
      * @param stepId 步骤 ID
      * @return 该步骤的用户输入数据副本
      */
     @SuppressWarnings("unchecked")
     protected Map<String, Object> getStepData(String stepId) {
-        Map<String, Object> flowData = getFlowDataMap();
-        synchronized (flowData) {
-            Map<String, Object> stepInputs = (Map<String, Object>) flowData.get("step_inputs");
-            if (stepInputs != null && stepInputs.containsKey(stepId)) {
-                return new HashMap<>((Map<String, Object>) stepInputs.get(stepId));
-            }
-            return new HashMap<>();
+        Map<String, Object> stepInputs = context.getStepInputs();
+        if (stepInputs.containsKey(stepId)) {
+            return new HashMap<>((Map<String, Object>) stepInputs.get(stepId));
         }
+        return new HashMap<>();
     }
 
     /**
@@ -671,9 +645,7 @@ public abstract class AbstractConfigFlow {
         }
 
         this.currentStep = previousStepId;
-        if (context != null) {
-            context.setCurrentStep(previousStepId);
-        }
+        context.setCurrentStep(previousStepId);
 
         int currentIndex = stepHistory.indexOf(previousStepId);
         if (currentIndex >= 0 && currentIndex < stepHistory.size() - 1) {
@@ -689,60 +661,6 @@ public abstract class AbstractConfigFlow {
     public List<String> getStepHistory() {
         return new ArrayList<>(stepHistory);
     }
-
-    /**
-     * 获取流程数据中的值
-     *
-     * @param key 键
-     * @return 值，不存在时返回 null
-     */
-    protected Object getFlowData(String key) {
-        return getFlowDataMap().get(key);
-    }
-
-    /**
-     * 设置流程数据
-     *
-     * @param key 键
-     * @param value 值
-     */
-    protected void setFlowData(String key, Object value) {
-        getFlowDataMap().put(key, value);
-    }
-
-    /**
-     * 获取流程数据中的值（带类型和默认值）
-     *
-     * @param key 键
-     * @param type 期望的类型
-     * @param defaultValue 默认值
-     * @param <T> 值的类型
-     * @return 值，不存在或类型不匹配时返回默认值
-     */
-    protected <T> T getFlowData(String key, Class<T> type, T defaultValue) {
-        Object value = getFlowDataMap().get(key);
-        return value != null && type.isInstance(value) ? type.cast(value) : defaultValue;
-    }
-
-    /**
-     * 获取流程数据映射（兼容旧代码）
-     *
-     * @return 流程数据映射
-     */
-    private Map<String, Object> getFlowDataMap() {
-        if (context != null) {
-            return context.getData();
-        }
-        // 兼容旧代码：如果没有 context，返回临时的 Map
-        // 注意：这里使用线程本地存储以保证并发安全
-        return flowDataHolder.get();
-    }
-
-    /**
-     * 临时流程数据存储（兼容旧代码）
-     */
-    private static final ThreadLocal<Map<String, Object>> flowDataHolder =
-            ThreadLocal.withInitial(() -> new ConcurrentHashMap<>());
 
     // ========== I18n 约定方法 ==========
 

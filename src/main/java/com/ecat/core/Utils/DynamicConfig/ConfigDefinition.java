@@ -78,9 +78,9 @@ public class ConfigDefinition {
         for (AbstractConfigItem<?> item : flowConfigItems.values()) {
             item.addDefaultValue(config);
             Object value = config.get(item.getKey());
-            String errorMessage = item.validate(value);
-            if (errorMessage != null) {
-                invalidFlowConfigItems.put(item, errorMessage);
+            Object validationResult = item.validate(value);
+            if (validationResult != null) {
+                invalidFlowConfigItems.put(item, String.valueOf(validationResult));
                 isValid = false;
             }
         }

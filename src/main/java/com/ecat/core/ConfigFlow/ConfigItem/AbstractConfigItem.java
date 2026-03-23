@@ -45,6 +45,7 @@ public abstract class AbstractConfigItem<T> {
     protected String description;
     protected String placeholder;
     protected boolean required;
+    protected boolean readOnly;
     protected final List<ConstraintValidator<?>> validators = new ArrayList<>();
     protected T defaultValue;
 
@@ -124,7 +125,6 @@ public abstract class AbstractConfigItem<T> {
      * @param validator 验证器
      * @return this
      */
-    @SuppressWarnings("unchecked")
     public AbstractConfigItem<T> addValidator(ConstraintValidator<? super T> validator) {
         this.validators.add(validator);
         return this;
@@ -141,17 +141,29 @@ public abstract class AbstractConfigItem<T> {
         return this;
     }
 
+    /**
+     * 设置是否只读
+     *
+     * @param readOnly 是否只读
+     * @return this
+     */
+    public AbstractConfigItem<T> readOnly(boolean readOnly) {
+        this.readOnly = readOnly;
+        return this;
+    }
+
     // ========== 验证方法 ==========
 
     /**
      * 验证配置项的值
      * <p>
-     * 首先检查是否为空，然后调用子类的类型验证，最后执行所有验证器。
+     * 默认实现返回 String（叶子字段错误），子类可覆写返回 Map（嵌套 Schema 错误）。
+     * 支持无限级嵌套。
      *
      * @param value 待验证的值
-     * @return 验证错误信息，验证通过返回 null
+     * @return 验证错误信息（String）或嵌套错误（Map），验证通过返回 null
      */
-    public String validate(Object value) {
+    public Object validate(Object value) {
         // 空值检查
         if (value == null) {
             if (required) {
@@ -241,5 +253,9 @@ public abstract class AbstractConfigItem<T> {
 
     public List<ConstraintValidator<?>> getValidators() {
         return new ArrayList<>(validators);
+    }
+
+    public boolean isReadOnly() {
+        return readOnly;
     }
 }

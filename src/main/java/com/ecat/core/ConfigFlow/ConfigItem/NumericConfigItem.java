@@ -133,7 +133,7 @@ public class NumericConfigItem extends AbstractConfigItem<Double> {
 
     @Override
     @SuppressWarnings("unchecked")
-    public String validate(Object value) {
+    public Object validate(Object value) {
         if (value == null) {
             if (required) {
                 return displayName != null
@@ -148,7 +148,7 @@ public class NumericConfigItem extends AbstractConfigItem<Double> {
             return typeError;
         }
 
-        // 转换为 Double 进行验证
+        // 转换为 Double 进行验证（与 validate() 保持一致的类型转换逻辑）
         Double typedValue;
         if (value instanceof Double) {
             typedValue = (Double) value;
@@ -175,7 +175,6 @@ public class NumericConfigItem extends AbstractConfigItem<Double> {
         }
 
         for (ConstraintValidator<?> validator : validators) {
-            @SuppressWarnings("unchecked")
             ConstraintValidator<Double> doubleValidator = (ConstraintValidator<Double>) validator;
             if (!doubleValidator.validate(typedValue)) {
                 return displayName != null

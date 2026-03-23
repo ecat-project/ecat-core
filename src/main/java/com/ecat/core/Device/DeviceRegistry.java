@@ -39,8 +39,16 @@ public class DeviceRegistry {
     // @param integration 设备对象
     // @return void
     public void register(String deviceID, DeviceBase integration) {
-        
         registry.put(deviceID, integration);
+    }
+
+    /**
+     * 注销设备
+     *
+     * @param deviceID 设备ID
+     */
+    public void unregister(String deviceID) {
+        registry.remove(deviceID);
     }
 
     /**

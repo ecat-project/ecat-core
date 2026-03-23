@@ -45,6 +45,10 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
 
     protected Log log;
 
+    /** 集成初始化就绪标志。所有已持久化 ConfigEntry 加载完成后由框架设为 true。 */
+    @Getter
+    private volatile boolean ready = false;
+
     protected EcatCore core;
     @Getter
     protected IntegrationLoadOption loadOption;
@@ -193,6 +197,9 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
 
     /**
      * 重新配置条目
+     * <p> [重要]集成自定义的reconfigure flow原则上不要修改设备类型的配置，比如从电源变为空调，因为这会严重改变该设备被其他集成引用的含义作用而导致其他集成错误。
+     * <p> [重要]推荐只修改sn、端口信息等不会
+     * <p> [重要]对于更改设备类型的需求，让用户删除旧entry重新创建新的entry实现
      * <p>
      * 默认实现：抛出异常，表示此集成不支持 ConfigEntry 机制。
      * 需要 ConfigEntry 功能的子类应重写此方法。
@@ -210,13 +217,11 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
     /**
      * 删除配置条目
      * <p>
-     * 默认实现：调用 onPreRemove() 然后从注册器中删除。
      * 子类可重写此方法以提供自定义的删除逻辑。
      *
      * @param entryId 配置条目 ID
      */
     public void removeEntry(String entryId) {
-        onPreRemove(entryId);
         ConfigEntryRegistry registry = getEntryRegistry();
         if (registry != null) {
             registry.removeEntry(entryId);
@@ -248,13 +253,20 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
     }
 
     /**
-     * 删除前回调
+     * 所有已持久化的 ConfigEntry 加载完成后的回调。
      * <p>
-     * 可选实现：子类可重写此方法以进行资源清理。
+     * 在集成启动时，所有已持久化 ConfigEntry 的 createEntry() 调用完毕后触发。
+     * 默认实现将 ready 设为 true。
+     * <p>
+     * 子集成可覆盖此方法以执行自定义的一致性检查。
+     * 如果需要保留默认的 ready 设置行为，应调用 super.onAllExistEntriesLoaded(entries)。
+     * <p>
+     * 设计理念：幂等配置拉平。集成配置和设备配置在同一平面加载，
+     * 加载顺序不可控。此钩子让集成在所有配置就绪后完成最终状态一致性。
      *
-     * @param entryId 配置条目 ID
+     * @param entries 该集成的所有已加载 ConfigEntry（包括 disabled 的）
      */
-    protected void onPreRemove(String entryId) {
-        // 子类可重写以进行资源清理
+    public void onAllExistEntriesLoaded(List<ConfigEntry> entries) {
+        this.ready = true;
     }
 }

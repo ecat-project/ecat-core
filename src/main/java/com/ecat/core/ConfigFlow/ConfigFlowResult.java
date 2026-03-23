@@ -26,11 +26,12 @@ import java.util.Map;
 /**
  * 配置流程结果容器（新版，仅支持 ConfigSchema）
  *
- * <p>封装配置流程执行的三种结果类型：
+ * <p>封装配置流程执行的四种结果类型：
  * <ul>
  *   <li>{@link ResultType#SHOW_FORM} - 显示表单</li>
  *   <li>{@link ResultType#CREATE_ENTRY} - 创建配置条目（流程完成）</li>
  *   <li>{@link ResultType#ABORT} - 中止流程</li>
+ *   <li>{@link ResultType#REMOVE_ENTRY} - 删除已有配置条目</li>
  * </ul>
  *
  * <p>数据存储： 所有数据通过 {@link FlowContext} 统一管理，避免数据复制。
@@ -49,7 +50,9 @@ public class ConfigFlowResult {
         /** 创建配置条目（流程完成） */
         CREATE_ENTRY,
         /** 中止流程 */
-        ABORT
+        ABORT,
+        /** 删除已有配置条目 */
+        REMOVE_ENTRY
     }
 
     /**
@@ -166,24 +169,46 @@ public class ConfigFlowResult {
     }
 
     /**
-     * 获取流程数据
-     * <p>
-     * 统一的数据访问方法，从 FlowContext 获取数据。
+     * 创建删除配置条目的结果
      *
-     * @return 流程数据
+     * <p>此结果表示需要删除一个已有的配置条目。
+     *
+     * @param context 流程上下文
+     * @return REMOVE_ENTRY 类型的结果
      */
-    public Map<String, Object> getData() {
-        return context != null ? context.getData() : Collections.emptyMap();
+    public static ConfigFlowResult removeEntry(FlowContext context) {
+        return new ConfigFlowResult(ResultType.REMOVE_ENTRY, null, null, null, context, null, null);
     }
 
     /**
-     * 获取流程数据（兼容别名）
+     * 创建删除配置条目的结果（包含 ConfigEntry）
      *
-     * @return 流程数据
-     * @deprecated 使用 {@link #getData()} 代替
+     * <p>此结果表示需要删除一个已有的配置条目。
+     * 提供的 entry 至少需要包含 uniqueId 以便控制器定位要删除的条目。
+     *
+     * @param entry 配置条目（至少包含 uniqueId）
+     * @param context 流程上下文
+     * @return REMOVE_ENTRY 类型的结果
      */
-    @Deprecated
-    public Map<String, Object> getFlowData() {
-        return getData();
+    public static ConfigFlowResult removeEntry(ConfigEntry entry, FlowContext context) {
+        return new ConfigFlowResult(ResultType.REMOVE_ENTRY, null, null, null, context, null, entry);
+    }
+
+    /**
+     * 获取步骤输入数据（供前端预填表单）
+     *
+     * @return 步骤输入映射
+     */
+    public Map<String, Object> getStepInputs() {
+        return context != null ? context.getStepInputs() : Collections.emptyMap();
+    }
+
+    /**
+     * 获取 Entry 业务数据（将写入 ConfigEntry.data）
+     *
+     * @return 业务数据映射
+     */
+    public Map<String, Object> getEntryData() {
+        return context != null ? context.getEntryData() : Collections.emptyMap();
     }
 }

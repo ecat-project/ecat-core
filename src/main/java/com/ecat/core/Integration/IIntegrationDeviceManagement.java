@@ -36,6 +36,13 @@ public interface IIntegrationDeviceManagement {
     boolean addDevice(DeviceBase device);
 
     /**
+     * removeDevice from Integration
+     * @param device 设备对象
+     * @return true if device was found and removed
+     */
+    boolean removeDevice(DeviceBase device);
+
+    /**
      * createDevice to Integration from config
      * @param config
      * @return

@@ -130,11 +130,12 @@ public class SchemaConfigItem extends AbstractConfigItem<Map<String, Object>> {
     }
 
     @Override
-    public String validate(Object value) {
-        // required 验证由父类处理
-        String typeError = validateType(value);
-        if (typeError != null) {
-            return typeError;
+    @SuppressWarnings("unchecked")
+    public Object validate(Object value) {
+        // 空值检查和 required 验证委托给父类
+        Object baseError = super.validate(value);
+        if (baseError != null) {
+            return baseError;  // String 类型：自身 required 或类型错误
         }
 
         ConfigSchema schema = resolveSchema();
@@ -142,18 +143,17 @@ public class SchemaConfigItem extends AbstractConfigItem<Map<String, Object>> {
             return null;
         }
 
-        // value 为 null 时，已由 required 检查处理
+        // value 为 null 时，required 已在父类检查中处理
         if (value == null) {
             return null;
         }
 
-        @SuppressWarnings("unchecked")
         Map<String, Object> mapValue = (Map<String, Object>) value;
 
-        // 递归验证嵌套字段（每个子字段有自己的 required 定义）
-        Map<String, String> errors = schema.validate(mapValue);
+        // 递归验证嵌套字段，返回嵌套 Map 结构（支持无限级嵌套）
+        Map<String, Object> errors = schema.validate(mapValue);
         if (!errors.isEmpty()) {
-            return errors.toString();
+            return errors;  // Map 类型：子字段错误，保持嵌套结构
         }
         return null;
     }

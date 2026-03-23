@@ -82,6 +82,18 @@ public class TextConfigItem extends AbstractConfigItem<String> {
     }
 
     /**
+     * 设置是否只读
+     *
+     * @param readOnly 是否只读
+     * @return this
+     */
+    @Override
+    public TextConfigItem readOnly(boolean readOnly) {
+        this.readOnly = readOnly;
+        return this;
+    }
+
+    /**
      * 设置文本长度约束
      * <p>
      * 创建并添加 {@link TextLengthValidator}。

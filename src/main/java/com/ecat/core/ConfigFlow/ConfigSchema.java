@@ -65,17 +65,20 @@ public class ConfigSchema {
 
     /**
      * 验证输入数据
+     * <p>
+     * 返回的 Map 中，叶子字段的值为 String，嵌套 Schema 字段的值为 Map（递归结构）。
+     * 支持无限级嵌套。
      *
      * @param input 输入数据
-     * @return 错误映射，key 为字段名，value 为错误信息；无错误返回空 Map
+     * @return 错误映射，key 为字段名，value 为 String（叶子错误）或 Map（嵌套错误）；无错误返回空 Map
      */
-    public Map<String, String> validate(Map<String, Object> input) {
-        Map<String, String> errors = new HashMap<>();
+    public Map<String, Object> validate(Map<String, Object> input) {
+        Map<String, Object> errors = new HashMap<>();
 
         for (AbstractConfigItem<?> field : fields) {
-            String error = field.validate(input.get(field.getKey()));
-            if (error != null) {
-                errors.put(field.getKey(), error);
+            Object validationResult = field.validate(input.get(field.getKey()));
+            if (validationResult != null) {
+                errors.put(field.getKey(), validationResult);
             }
         }
 
