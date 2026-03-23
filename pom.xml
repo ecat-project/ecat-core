@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.ecat</groupId>
   <artifactId>ecat-core</artifactId>
-  <version>1.0.1</version>
+  <version>1.0.2</version>
   <name>ECAT Core</name>
   <packaging>jar</packaging>
   <url>http://maven.apache.org</url>
