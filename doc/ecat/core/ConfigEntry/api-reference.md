@@ -424,16 +424,16 @@ new SchemaConfigItem("serial", true, SerialCommConfigSchema.class).extend()
 
 ### ConfigEntry 端点
 
-**基础路径**：`/api/config-flow/entries`
+**基础路径**：`/core-api/config-flow/entries`
 
 | 方法 | 路径 | 请求体 | 说明 |
 |------|------|--------|------|
-| GET | `/api/config-flow/entries` | — | 列出所有条目（可选 `?coordinate=` 过滤） |
-| GET | `/api/config-flow/entries/{entryId}` | — | 获取单个条目 |
-| DELETE | `/api/config-flow/entries/{entryId}` | — | 删除条目 |
-| POST | `/api/config-flow/entries/enable` | `{"entryId":"..."}` | 启用条目 |
-| POST | `/api/config-flow/entries/disable` | `{"entryId":"..."}` | 禁用条目 |
-| POST | `/api/config-flow/entries/reconfigure` | `{"entryId":"..."}` | 启动重配置 Flow |
+| GET | `/core-api/config-flow/entries` | — | 列出所有条目（可选 `?coordinate=` 过滤） |
+| GET | `/core-api/config-flow/entries/{entryId}` | — | 获取单个条目 |
+| DELETE | `/core-api/config-flow/entries/{entryId}` | — | 删除条目 |
+| POST | `/core-api/config-flow/entries/enable` | `{"entryId":"..."}` | 启用条目 |
+| POST | `/core-api/config-flow/entries/disable` | `{"entryId":"..."}` | 禁用条目 |
+| POST | `/core-api/config-flow/entries/reconfigure` | `{"entryId":"..."}` | 启动重配置 Flow |
 
 ### 统一响应格式
 

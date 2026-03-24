@@ -307,16 +307,16 @@ IntegrationBase 提供的 ConfigEntry 生命周期方法：
 
 ### ConfigEntryController
 
-基础路径：`/api/config-flow/entries`
+基础路径：`/core-api/config-flow/entries`
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/config-flow/entries` | 列出所有条目（可选 `?coordinate=` 过滤） |
-| GET | `/api/config-flow/entries/{entryId}` | 获取单个条目 |
-| DELETE | `/api/config-flow/entries/{entryId}` | 删除条目 |
-| POST | `/api/config-flow/entries/enable` | 启用条目 |
-| POST | `/api/config-flow/entries/disable` | 禁用条目 |
-| POST | `/api/config-flow/entries/reconfigure` | 启动重配置流程 |
+| GET | `/core-api/config-flow/entries` | 列出所有条目（可选 `?coordinate=` 过滤） |
+| GET | `/core-api/config-flow/entries/{entryId}` | 获取单个条目 |
+| DELETE | `/core-api/config-flow/entries/{entryId}` | 删除条目 |
+| POST | `/core-api/config-flow/entries/enable` | 启用条目 |
+| POST | `/core-api/config-flow/entries/disable` | 禁用条目 |
+| POST | `/core-api/config-flow/entries/reconfigure` | 启动重配置流程 |
 
 响应格式：`{"code": 200, "msg": "success", "data": {...}}`
 
