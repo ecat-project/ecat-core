@@ -20,27 +20,23 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 日志缓冲区
  *
- * <p>使用环形缓冲区存储日志条目，支持 SSE 订阅广播。
+ * <p>使用缓冲区存储最近 N 条日志条目，支持 SSE 订阅推送。
  *
- * <p>功能：
+ * <p>设计原则：
  * <ul>
- *   <li>存储最近 N 条日志（超出自动淘汰旧日志）</li>
- *   <li>支持多个 SSE 订阅者</li>
- *   <li>定时批量广播（减少网络开销）</li>
+ *   <li>LogEntry 只存储一份（单一引用），避免内存泄漏</li>
+ *   <li>超出容量时自动淘汰旧日志</li>
+ *   <li>支持 SSE 订阅者，put() 时直接同步推送</li>
  * </ul>
- * 
+ *
  * @author coffee
  */
 public class LogBuffer implements AutoCloseable {
@@ -48,31 +44,17 @@ public class LogBuffer implements AutoCloseable {
     private final int maxCapacity;
     private final CopyOnWriteArraySet<LogSubscriber> subscribers;
     private final ConcurrentHashMap<LogSubscriber, Long> subscriberTimestamps;
-    private final PriorityQueue<LogEntry> broadcastQueue;
-    private ScheduledExecutorService broadcastScheduler;
     private final AtomicBoolean closed = new AtomicBoolean(false);
-    private static final long BROADCAST_DELAY_MS = 50L;
 
     public LogBuffer(int maxCapacity) {
         this.maxCapacity = maxCapacity;
         this.buffer = new ConcurrentLinkedQueue<>();
         this.subscribers = new CopyOnWriteArraySet<>();
         this.subscriberTimestamps = new ConcurrentHashMap<>();
-        this.broadcastQueue = new PriorityQueue<>(Comparator.comparingLong(LogEntry::getTimestamp));
-        startBroadcastScheduler();
-    }
-
-    private void startBroadcastScheduler() {
-        broadcastScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "LogBuffer-Broadcast");
-            t.setDaemon(true);
-            return t;
-        });
-        broadcastScheduler.scheduleWithFixedDelay(this::flushBroadcastQueue, BROADCAST_DELAY_MS, BROADCAST_DELAY_MS, TimeUnit.MILLISECONDS);
     }
 
     /**
-     * 添加日志条目到缓冲区
+     * 添加日志条目到缓冲区，并直接推送给 SSE 订阅者
      *
      * @param entry 日志条目
      */
@@ -81,44 +63,22 @@ public class LogBuffer implements AutoCloseable {
             return;
         }
         buffer.add(entry);
-        synchronized (broadcastQueue) {
-            broadcastQueue.offer(entry);
-        }
         // 超出容量时移除旧日志
         while (buffer.size() > maxCapacity) {
             buffer.poll();
         }
-    }
-
-    /**
-     * 刷新广播队列
-     */
-    private void flushBroadcastQueue() {
-        if (closed.get() || subscribers.isEmpty()) {
-            return;
-        }
-        List<LogEntry> toBroadcast = new ArrayList<>();
-        synchronized (broadcastQueue) {
-            while (!broadcastQueue.isEmpty()) {
-                toBroadcast.add(broadcastQueue.poll());
-            }
-        }
-        if (toBroadcast.isEmpty()) {
-            return;
-        }
-        // 按时间戳排序
-        toBroadcast.sort(Comparator.comparingLong(LogEntry::getTimestamp));
-        for (LogEntry entry : toBroadcast) {
-            broadcastToSubscribers(entry);
+        // 直接推送给 SSE 订阅者
+        if (!subscribers.isEmpty()) {
+            pushToSubscribers(entry);
         }
     }
 
     /**
-     * 广播日志到所有订阅者
+     * 推送日志到所有 SSE 订阅者
      *
      * @param entry 日志条目
      */
-    private void broadcastToSubscribers(LogEntry entry) {
+    private void pushToSubscribers(LogEntry entry) {
         if (subscribers.isEmpty() || closed.get()) {
             return;
         }
@@ -167,9 +127,6 @@ public class LogBuffer implements AutoCloseable {
      */
     public void clear() {
         buffer.clear();
-        synchronized (broadcastQueue) {
-            broadcastQueue.clear();
-        }
     }
 
     /**
@@ -217,15 +174,6 @@ public class LogBuffer implements AutoCloseable {
     @Override
     public void close() {
         if (closed.compareAndSet(false, true)) {
-            flushBroadcastQueue();
-            if (broadcastScheduler != null) {
-                broadcastScheduler.shutdown();
-                try {
-                    broadcastScheduler.awaitTermination(1L, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
             for (LogSubscriber subscriber : subscribers) {
                 try {
                     subscriber.close();
@@ -234,6 +182,7 @@ public class LogBuffer implements AutoCloseable {
                 }
             }
             subscribers.clear();
+            subscriberTimestamps.clear();
         }
     }
 }

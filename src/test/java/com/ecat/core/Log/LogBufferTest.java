@@ -21,6 +21,8 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.Assert.*;
@@ -141,16 +143,145 @@ public class LogBufferTest {
         assertEquals(0, buffer.getSubscriberCount());
     }
 
+    // ========== 内存泄漏相关测试 ==========
+
+    @Test
+    public void testNoMemoryLeakWithoutSubscribers() {
+        // 模拟 env-data-handle 场景：无 SSE 订阅者，持续写入大量日志
+        // 验证 buffer 大小始终不超过容量，不会无限增长
+        for (int i = 1; i <= 10000; i++) {
+            buffer.put(createEntry(i, "data-point-" + i + " value:0.123 unit:ug/m3"));
+        }
+        assertEquals("buffer 应严格限制在容量内", 10, buffer.size());
+
+        List<LogEntry> all = buffer.getAll();
+        assertEquals("data-point-9991 value:0.123 unit:ug/m3", all.get(0).getMessage());
+        assertEquals("data-point-10000 value:0.123 unit:ug/m3", all.get(all.size() - 1).getMessage());
+    }
+
+    @Test
+    public void testNoMemoryLeakWithSubscriber() {
+        // 有订阅者时同样不应泄漏
+        TestSubscriber sub = new TestSubscriber();
+        buffer.subscribe(sub);
+
+        long now = System.currentTimeMillis();
+        for (int i = 1; i <= 10000; i++) {
+            buffer.put(createEntry(now + i, "data-point-" + i));
+        }
+
+        assertEquals("buffer 仍应限制在容量内", 10, buffer.size());
+        assertTrue("订阅者应收到日志推送", sub.receivedCount >= 10);
+
+        buffer.unsubscribe(sub);
+    }
+
+    @Test
+    public void testEvictedEntriesAreGcEligible() {
+        // 验证被淘汰的 LogEntry 可以被 GC 回收（单引用保证）
+        List<WeakReference<LogEntry>> weakRefs = new ArrayList<>();
+
+        // 填满 buffer，保留弱引用
+        for (int i = 1; i <= 10; i++) {
+            LogEntry entry = createEntry(i, "msg" + i);
+            weakRefs.add(new WeakReference<>(entry));
+            buffer.put(entry);
+        }
+
+        // 再写入 10 条，前 10 条被淘汰
+        for (int i = 11; i <= 20; i++) {
+            buffer.put(createEntry(i, "msg" + i));
+        }
+
+        // 手动触发 GC 并等待
+        System.gc();
+        System.runFinalization();
+        try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+
+        // 被淘汰的前 10 条应该可被 GC（弱引用应被清除）
+        // 注意：WeakReference 清除不保证立即发生，但大多数 JVM 会立即清除
+        int gcCleared = 0;
+        for (int i = 0; i < 10; i++) {
+            if (weakRefs.get(i).get() == null) {
+                gcCleared++;
+            }
+        }
+        assertTrue("被淘汰的条目应可被 GC（清除 " + gcCleared + "/10）", gcCleared > 7);
+    }
+
+    @Test
+    public void testNoBroadcastQueueField() {
+        // 验证重构后不存在 broadcastQueue 字段（双引用已消除）
+        try {
+            java.lang.reflect.Field broadcastQueue = LogBuffer.class.getDeclaredField("broadcastQueue");
+            fail("broadcastQueue 字段应已被删除");
+        } catch (NoSuchFieldException e) {
+            // 预期行为：字段不存在
+        }
+
+        try {
+            java.lang.reflect.Field broadcastScheduler = LogBuffer.class.getDeclaredField("broadcastScheduler");
+            fail("broadcastScheduler 字段应已被删除");
+        } catch (NoSuchFieldException e) {
+            // 预期行为：字段不存在
+        }
+    }
+
+    @Test
+    public void testDefaultBufferSizeIs200() {
+        // 验证 LogManager 默认缓冲区大小为 200
+        assertEquals(200, com.ecat.core.Log.LogManager.getInstance().getBufferSize());
+    }
+
+    @Test
+    public void testMemoryStaysBoundedUnderSustainedLoad() {
+        // 模拟真实场景：每秒 120 条日志（env-data-handle 实际速率）
+        // 持续写入 5000 条（约 40 秒的数据量），验证内存始终有界
+        int capacity = 200;
+        LogBuffer bigBuffer = new LogBuffer(capacity);
+
+        try {
+            for (int i = 1; i <= 5000; i++) {
+                LogEntry entry = new LogEntry(
+                    System.currentTimeMillis(), "trace-" + i,
+                    "com.ecat:integration-env-data-handle", "DEBUG",
+                    "DataHandleConsumer", "pool-1-thread-1",
+                    "Event received: DEVICE_DATA_UPDATE Device:PM-001 attrDisplatName:PM2.5 attrClass:数值, DisplayValue:35.2, DisplayUnit: ug/m3",
+                    null
+                );
+                bigBuffer.put(entry);
+            }
+
+            assertEquals("持续高负载后 buffer 大小应为 200", 200, bigBuffer.size());
+            assertEquals("getRecent(50) 应返回 50 条", 50, bigBuffer.getRecent(50).size());
+            assertEquals("getRecent(300) 应截断为 200", 200, bigBuffer.getRecent(300).size());
+        } finally {
+            bigBuffer.close();
+        }
+    }
+
     private LogEntry createEntry(long timestamp, String message) {
         return new LogEntry(timestamp, "trace1", "test", "DEBUG", "TestLogger", "main", message, null);
     }
 
     /**
-     * 测试用订阅者
+     * 测试用订阅者（支持统计接收数量）
      */
     private static class TestSubscriber extends LogSubscriber {
+        private int receivedCount = 0;
+
         TestSubscriber() {
             super(new ByteArrayOutputStream());
+        }
+
+        @Override
+        public void send(LogEntry entry) throws java.io.IOException {
+            receivedCount++;
+            super.send(entry);
+        }
+
+        int getReceivedCount() {
+            return receivedCount;
         }
     }
 }
