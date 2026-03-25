@@ -152,7 +152,7 @@ public class LogManagerTest {
 
     @Test
     public void testGetBufferSize() {
-        assertEquals(1000, logManager.getBufferSize());
+        assertEquals(200, logManager.getBufferSize());
     }
 
     @Test

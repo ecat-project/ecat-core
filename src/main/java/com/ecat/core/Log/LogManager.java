@@ -43,7 +43,7 @@ public class LogManager {
     /** 插件坐标 -> LogBuffer 映射 */
     private final ConcurrentMap<String, LogBuffer> buffers = new ConcurrentHashMap<>();
     /** 默认缓冲区大小 */
-    private static final int DEFAULT_BUFFER_SIZE = 1000;
+    private static final int DEFAULT_BUFFER_SIZE = 200;
     /** 缓冲区大小 */
     private final int bufferSize;
 
