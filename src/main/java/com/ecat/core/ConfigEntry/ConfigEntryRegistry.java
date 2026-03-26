@@ -360,7 +360,7 @@ public class ConfigEntryRegistry {
                 .enabled(enabled)
                 .createTime(entry.getCreateTime())
                 .updateTime(DateTimeUtils.now())
-                .version(entry.getVersion() + 1)
+                .version(entry.getVersion()) // 启用/禁用不增加版本号
                 .build();
 
         persistence.update(updated);
