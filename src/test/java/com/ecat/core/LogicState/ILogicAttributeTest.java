@@ -85,6 +85,11 @@ public class ILogicAttributeTest {
         }
 
         @Override
+        public void initDisplayUnit(UnitInfo displayUnit) {
+            this.displayUnit = displayUnit;
+        }
+
+        @Override
         public boolean publicState() {
             return true;
         }

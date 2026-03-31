@@ -116,6 +116,19 @@ public abstract class LogicDevice extends DeviceBase {
     }
 
     /**
+     * 返回逻辑设备的唯一标识（uniqueId），作为业务设备对外标识。
+     *
+     * <p>覆盖 DeviceBase 默认实现（返回 entryId），使 uniqueId 作为
+     * LogicDeviceRegistry 的注册/注销 key，保持语义一致。
+     *
+     * @return ConfigEntry 的 uniqueId
+     */
+    @Override
+    public String getId() {
+        return getUniqueId();
+    }
+
+    /**
      * 初始化逻辑设备，创建逻辑属性映射。
      *
      * <p>此方法在框架的生命周期中被调用（在 load 之后），

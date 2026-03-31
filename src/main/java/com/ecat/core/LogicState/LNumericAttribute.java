@@ -163,6 +163,14 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
     }
 
     /**
+     * 初始化显示单位（直接赋值，不受 unitChangeable 限制）。
+     */
+    @Override
+    public void initDisplayUnit(UnitInfo displayUnit) {
+        this.displayUnit = displayUnit;
+    }
+
+    /**
      * Sets whether the logic attribute's value can be changed externally.
      * Directly sets the protected field inherited from AttributeBase.
      *

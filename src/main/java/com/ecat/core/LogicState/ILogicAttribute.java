@@ -84,6 +84,14 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
     void initValueChangeable(boolean valueChangeable);
 
     /**
+     * 初始化逻辑属性的显示单位。
+     * 与 {@link #initNativeUnit} 类似，直接赋值，不受 unitChangeable 限制。
+     *
+     * @param displayUnit 显示单位，允许为null
+     */
+    void initDisplayUnit(UnitInfo displayUnit);
+
+    /**
      * 从 LogicAttributeDefine 定义对象初始化逻辑属性。
      * <p>
      * 此 default 方法依次调用各 init 方法完成初始化：
@@ -91,7 +99,7 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
      *   <li>{@link #initAttributeID(String)} - 设置属性ID</li>
      *   <li>{@link #initNativeUnit(UnitInfo)} - 设置原始单位</li>
      *   <li>{@link #initValueChangeable(boolean)} - 设置是否可修改</li>
-     *   <li>{@link #changeDisplayUnit(UnitInfo)} - 设置显示单位（仅当displayUnit不为null时）</li>
+     *   <li>{@link #initDisplayUnit(UnitInfo)} - 设置显示单位（仅当displayUnit不为null时）</li>
      *   <li>{@link #changeDisplayPrecision(int)} - 设置显示精度</li>
      * </ol>
      *
@@ -102,7 +110,7 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
         initNativeUnit(def.getNativeUnit());
         initValueChangeable(def.isValueChangeable());
         if (def.getDisplayUnit() != null) {
-            changeDisplayUnit(def.getDisplayUnit());
+            initDisplayUnit(def.getDisplayUnit());
         }
         changeDisplayPrecision(def.getDisplayPrecision());
     }

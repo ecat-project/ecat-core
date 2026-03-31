@@ -117,6 +117,9 @@ public class LogicDeviceRegistryTest {
         public void initValueChangeable(boolean valueChangeable) {}
 
         @Override
+        public void initDisplayUnit(UnitInfo displayUnit) {}
+
+        @Override
         public boolean publicState() { return true; }
 
         // --- AttributeAbility 最小化实现 ---
