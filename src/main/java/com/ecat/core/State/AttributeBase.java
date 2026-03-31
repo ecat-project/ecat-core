@@ -360,6 +360,11 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
         }
     }
 
+    /**
+     * dulplicate of {@link #getAttributeID()} for backward compatibility
+     * @deprecated see {@link #getAttributeID()}
+     */
+    @Deprecated
     public String getAttrID(){
         return attributeID;
     }

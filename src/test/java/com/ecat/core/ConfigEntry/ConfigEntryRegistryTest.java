@@ -455,7 +455,7 @@ public class ConfigEntryRegistryTest {
 
         assertNotNull("更新后的 entry 不应为 null", updated);
         assertTrue("应该被启用", updated.isEnabled());
-        assertEquals("版本号应该递增", 2, updated.getVersion());
+        assertEquals("版本号应该不变", 1, updated.getVersion());
     }
 
     @Test

@@ -24,12 +24,14 @@ import java.util.concurrent.CompletableFuture;
  * @author coffee
  */
 public interface AttributeAbility<T>{
+    String getAttributeID(); //获取属性ID
     boolean canUnitChange(); //是否可修改单位
     boolean changeDisplayUnit(UnitInfo newDisplayUnit); //修改单位
     boolean changeDisplayPrecision(int newPrecision); //修改小数位
     int getDisplayPrecision(); //获取小数位
     boolean canValueChange(); //是否允许外部修改值
     boolean setStatus(AttributeStatus newStatus); //设置数据状态
+    boolean publicState(); // 发布状态到总线
     /**
      * 获取数据状态
      * @return

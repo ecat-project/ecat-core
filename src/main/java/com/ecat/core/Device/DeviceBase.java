@@ -70,7 +70,7 @@ public abstract class DeviceBase implements DeviceControl {
     //   - gas.span.generate
 
     @Deprecated
-    protected String id = null; // device id
+    protected String id = null; // 旧yml中device id， 使用config flow后改用entry.getEntryId()，旧可删除此字段
 
     @Getter
     protected ConfigEntry entry; // 配置条目引用，与设备一对一关系
@@ -170,9 +170,9 @@ public abstract class DeviceBase implements DeviceControl {
     }
 
     /**
-     * 获取设备的唯一标识符
+     * 获取设备的唯一业务标识符，具有业务含义的
      * 全局唯一
-     * 可能会修改：当用户reconfigure entry后极大可能变化，比如SN修改会发生改变，只能作为业务展示
+     * 可能会修改：当用户reconfigure entry后部分支持同类型多设备的集成的entry极大可能变化，比如SN修改会发生改变，只能作为业务展示
      * @return
      */
     public String getUniqueId(){
@@ -198,7 +198,7 @@ public abstract class DeviceBase implements DeviceControl {
             return false;
         }
         attr.setDevice(this); // 绑定属性与设备的关系以及使用device所在集成的i18n资源
-        attrs.put(attr.getAttrID(), attr);
+        attrs.put(attr.getAttributeID(), attr);
         return true;
     }
 
