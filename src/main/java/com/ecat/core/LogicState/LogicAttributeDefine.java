@@ -61,4 +61,29 @@ public class LogicAttributeDefine {
     private boolean valueChangeable;
     /** 属性值的具体类型（如 AQAttribute.class、NumericAttribute.class、TextAttribute.class） */
     private Class<?> attrClassType;
+    /** 显示名称，由 IDeviceMapping.getAttrDefs() 实现通过 i18n 设置 */
+    private String displayName;
+
+    /**
+     * 7 参数构造函数，保持向后兼容。
+     * 新代码请使用 8 参数构造函数或通过 setDisplayName() 设置显示名称。
+     */
+    public LogicAttributeDefine(String attrId, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision,
+            boolean valueChangeable, Class<?> attrClassType) {
+        this.attrId = attrId;
+        this.attrClass = attrClass;
+        this.nativeUnit = nativeUnit;
+        this.displayUnit = displayUnit;
+        this.displayPrecision = displayPrecision;
+        this.valueChangeable = valueChangeable;
+        this.attrClassType = attrClassType;
+    }
+
+    /**
+     * 获取显示名称，如果未设置则返回 attrId。
+     */
+    public String getDisplayName() {
+        return displayName != null ? displayName : attrId;
+    }
 }

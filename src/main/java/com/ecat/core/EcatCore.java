@@ -26,6 +26,8 @@ import com.ecat.core.I18n.I18nRegistry;
 import com.ecat.core.Integration.IntegrationManager;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.Log.LogManager;
+import com.ecat.core.LogicDevice.LogicDeviceRegistry;
+import com.ecat.core.LogicMapping.LogicMappingManager;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
 
@@ -73,6 +75,18 @@ public class EcatCore {
      */
     @Getter
     private ConfigFlowRegistry configFlowRegistry;
+
+    /**
+     * 逻辑设备注册器
+     */
+    @Getter
+    private LogicDeviceRegistry logicDeviceRegistry;
+
+    /**
+     * 逻辑映射管理器
+     */
+    @Getter
+    private LogicMappingManager logicMappingManager;
 
     public IntegrationRegistry getIntegrationRegistry() {
         return integrationRegistry;
@@ -138,6 +152,8 @@ public class EcatCore {
         configEntryRegistry = new ConfigEntryRegistry(this, new YmlConfigEntryPersistence());
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
         deviceRegistry = new DeviceRegistry();
+        logicDeviceRegistry = new LogicDeviceRegistry();
+        logicMappingManager = new LogicMappingManager();
         i18nRegistry = I18nRegistry.getInstance();
         
         // 注册 core 日志缓冲区
