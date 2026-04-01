@@ -63,10 +63,14 @@ public class LogicAttributeDefine {
     private Class<?> attrClassType;
     /** 显示名称，由 IDeviceMapping.getAttrDefs() 实现通过 i18n 设置 */
     private String displayName;
+    /** 是否在ConfigFlow中让用户配置物理设备映射，默认true */
+    private boolean mapable = true;
+    /** 是否在前端展示，默认true */
+    private boolean displayable = true;
 
     /**
      * 7 参数构造函数，保持向后兼容。
-     * 新代码请使用 8 参数构造函数或通过 setDisplayName() 设置显示名称。
+     * 新代码请使用全参数构造函数或通过 setDisplayName()/setMapable()/setDisplayable() 设置。
      */
     public LogicAttributeDefine(String attrId, AttributeClass attrClass,
             UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision,
@@ -78,6 +82,8 @@ public class LogicAttributeDefine {
         this.displayPrecision = displayPrecision;
         this.valueChangeable = valueChangeable;
         this.attrClassType = attrClassType;
+        this.mapable = true;
+        this.displayable = true;
     }
 
     /**

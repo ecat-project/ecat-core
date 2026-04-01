@@ -110,4 +110,75 @@ public class LogicAttributeDefineTest {
         assertTrue(def.isValueChangeable());
         assertEquals(com.ecat.core.State.NumericAttribute.class, def.getAttrClassType());
     }
+
+    @Test
+    public void testDefaultMapableAndDisplayable() {
+        // 无参构造后，mapable 和 displayable 默认值为 true
+        LogicAttributeDefine def = new LogicAttributeDefine();
+        assertTrue("mapable should default to true", def.isMapable());
+        assertTrue("displayable should default to true", def.isDisplayable());
+    }
+
+    @Test
+    public void testSevenParamConstructorDefaultsMapableAndDisplayable() {
+        // 7参数构造函数（向后兼容）也应设置 mapable=true, displayable=true
+        LogicAttributeDefine def = new LogicAttributeDefine(
+                "so2",
+                AttributeClass.SO2,
+                AirMassUnit.UGM3,
+                AirMassUnit.MGM3,
+                2,
+                false,
+                com.ecat.core.State.AQAttribute.class
+        );
+        assertTrue("mapable should default to true via 7-param constructor", def.isMapable());
+        assertTrue("displayable should default to true via 7-param constructor", def.isDisplayable());
+    }
+
+    @Test
+    public void testSetMapableFalse() {
+        // 测试将 mapable 设为 false
+        LogicAttributeDefine def = new LogicAttributeDefine();
+        def.setMapable(false);
+        assertFalse(def.isMapable());
+        // displayable 不受影响
+        assertTrue(def.isDisplayable());
+    }
+
+    @Test
+    public void testSetDisplayableFalse() {
+        // 测试将 displayable 设为 false
+        LogicAttributeDefine def = new LogicAttributeDefine();
+        def.setDisplayable(false);
+        assertFalse(def.isDisplayable());
+        // mapable 不受影响
+        assertTrue(def.isMapable());
+    }
+
+    @Test
+    public void testAllArgsConstructorWithTenParams() {
+        // 全参数构造函数包含 displayName, mapable, displayable 共10个参数
+        LogicAttributeDefine def = new LogicAttributeDefine(
+                "so2",                                          // attrId
+                AttributeClass.SO2,                            // attrClass
+                AirMassUnit.UGM3,                              // nativeUnit
+                AirMassUnit.MGM3,                              // displayUnit
+                2,                                             // displayPrecision
+                false,                                         // valueChangeable
+                com.ecat.core.State.AQAttribute.class,         // attrClassType
+                "二氧化硫",                                      // displayName
+                false,                                         // mapable
+                false                                          // displayable
+        );
+        assertEquals("so2", def.getAttrId());
+        assertEquals(AttributeClass.SO2, def.getAttrClass());
+        assertEquals(AirMassUnit.UGM3, def.getNativeUnit());
+        assertEquals(AirMassUnit.MGM3, def.getDisplayUnit());
+        assertEquals(2, def.getDisplayPrecision());
+        assertFalse(def.isValueChangeable());
+        assertEquals(com.ecat.core.State.AQAttribute.class, def.getAttrClassType());
+        assertEquals("二氧化硫", def.getDisplayName());
+        assertFalse("mapable should be false", def.isMapable());
+        assertFalse("displayable should be false", def.isDisplayable());
+    }
 }
