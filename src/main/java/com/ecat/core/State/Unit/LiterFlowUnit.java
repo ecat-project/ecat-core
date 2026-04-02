@@ -22,10 +22,11 @@ package com.ecat.core.State.Unit;
  * @author coffee
  */
 public enum LiterFlowUnit implements InternationalizedUnit {
-    L_PER_SECOND("L/s", 1.0), // 升每秒
-    ML_PER_MINUTE("ml/min", 1.0 / 1000 * 60), // 毫升每分钟
+
+    L_PER_HOUR("L/h", 1.0), // 升每小时
     L_PER_MINUTE("L/min", 1.0 * 60), // 升每分钟
-    L_PER_HOUR("L/h", 1.0 * 60 * 60); // 升每小时
+    ML_PER_MINUTE("ml/min", 1.0 / 1000 * 60), // 毫升每分钟
+    L_PER_SECOND("L/s", 1.0 * 60 * 60); // 升每秒
 
     private final String name;
     private final Double ratio;

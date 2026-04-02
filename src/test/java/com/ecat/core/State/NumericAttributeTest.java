@@ -13,6 +13,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import com.ecat.core.State.Unit.PressureUnit;
+import com.ecat.core.State.Unit.LiterFlowUnit;
 
 /**
  * 测试 NumericAttribute 类的功能
@@ -302,5 +303,94 @@ public class NumericAttributeTest {
 
         Double result = pressureAttr.convertValueToUnit(5.0, PressureUnit.KPA, PressureUnit.PA);
         assertEquals(5000.0, result, 0.001);
+    }
+
+    // ========== 使用 LiterFlowUnit 真实流量单位测试 ==========
+
+    @Test
+    public void testConvertValueToUnit_Flow_LPerHourToLPerMinute() {
+        // 测试流量单位转换：L/h → L/min（TJ SO2/CO/O3 sam_flow 场景）
+        NumericAttribute flowAttr = new NumericAttribute(
+                "sample_flow", mockAttrClass,
+                LiterFlowUnit.L_PER_HOUR,
+                LiterFlowUnit.L_PER_MINUTE,
+                2, true, true, null);
+
+        // 0.97 L/h ÷ 60 = 0.01617 L/min
+        Double result = flowAttr.convertValueToUnit(0.97, LiterFlowUnit.L_PER_HOUR, LiterFlowUnit.L_PER_MINUTE);
+        assertEquals(0.01617, result, 1e-4);
+    }
+
+    @Test
+    public void testConvertValueToUnit_Flow_MlPerMinuteToLPerMinute() {
+        // 测试流量单位转换：ml/min → L/min（Sailhero PM standard_flow 场景）
+        NumericAttribute flowAttr = new NumericAttribute(
+                "sample_flow", mockAttrClass,
+                LiterFlowUnit.ML_PER_MINUTE,
+                LiterFlowUnit.L_PER_MINUTE,
+                2, true, true, null);
+
+        // 500 ml/min ÷ 1000 = 0.5 L/min
+        Double result = flowAttr.convertValueToUnit(500.0, LiterFlowUnit.ML_PER_MINUTE, LiterFlowUnit.L_PER_MINUTE);
+        assertEquals(0.5, result, 1e-6);
+    }
+
+    @Test
+    public void testConvertValueToUnit_Flow_LPerMinuteToLPerHour() {
+        // 测试流量单位转换：L/min → L/h
+        NumericAttribute flowAttr = new NumericAttribute(
+                "sample_flow", mockAttrClass,
+                LiterFlowUnit.L_PER_MINUTE,
+                LiterFlowUnit.L_PER_HOUR,
+                2, true, true, null);
+
+        // 16.7 L/min × 60 = 1002 L/h
+        Double result = flowAttr.convertValueToUnit(16.7, LiterFlowUnit.L_PER_MINUTE, LiterFlowUnit.L_PER_HOUR);
+        assertEquals(1002.0, result, 0.01);
+    }
+
+    @Test
+    public void testConvertValueToUnit_Flow_LPerHourToLPerMinute_RoundTrip() {
+        // 测试流量单位往返转换：L/h → L/min → L/h
+        NumericAttribute flowAttr = new NumericAttribute(
+                "sample_flow", mockAttrClass,
+                LiterFlowUnit.L_PER_HOUR,
+                LiterFlowUnit.L_PER_MINUTE,
+                2, true, true, null);
+
+        double original = 0.97;
+        Double toMin = flowAttr.convertValueToUnit(original, LiterFlowUnit.L_PER_HOUR, LiterFlowUnit.L_PER_MINUTE);
+        Double back = flowAttr.convertValueToUnit(toMin, LiterFlowUnit.L_PER_MINUTE, LiterFlowUnit.L_PER_HOUR);
+        assertEquals(original, back, 1e-10);
+    }
+
+    // ========== 使用 PressureUnit MMHG 真实压力单位测试 ==========
+
+    @Test
+    public void testConvertValueToUnit_Pressure_MmhgToKpa() {
+        // 测试压力单位转换：mmHg → kPa（ThermoFisher 5030iq baro_pres 场景）
+        NumericAttribute pressureAttr = new NumericAttribute(
+                "ambient_pressure", mockAttrClass,
+                PressureUnit.MMHG,
+                PressureUnit.KPA,
+                1, true, true, null);
+
+        // 760 mmHg ≈ 101.325 kPa（标准大气压）
+        Double result = pressureAttr.convertValueToUnit(760.0, PressureUnit.MMHG, PressureUnit.KPA);
+        assertEquals(101.325, result, 0.01);
+    }
+
+    @Test
+    public void testConvertValueToUnit_Pressure_HpaToKpa() {
+        // 测试压力单位转换：hPa → kPa（TJ/Sailhero PM ambient_pressure 场景）
+        NumericAttribute pressureAttr = new NumericAttribute(
+                "ambient_pressure", mockAttrClass,
+                PressureUnit.HPA,
+                PressureUnit.KPA,
+                1, true, true, null);
+
+        // 1013 hPa = 101.3 kPa
+        Double result = pressureAttr.convertValueToUnit(1013.0, PressureUnit.HPA, PressureUnit.KPA);
+        assertEquals(101.3, result, 0.01);
     }
 }

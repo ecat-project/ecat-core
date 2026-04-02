@@ -193,7 +193,9 @@ public abstract class LogicDevice extends DeviceBase {
             if (attrConfig == null) continue;
 
             String deviceId = (String) attrConfig.get("device_id");
-            if (deviceId == null || deviceId.isEmpty()) continue;
+            if (deviceId == null || deviceId.isEmpty()) {
+                continue;
+            }
 
             // 查找物理设备：通过 core 的 DeviceRegistry
             if (this.core == null) {

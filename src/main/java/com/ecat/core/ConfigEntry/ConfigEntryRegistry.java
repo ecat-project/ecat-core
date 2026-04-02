@@ -393,10 +393,10 @@ public class ConfigEntryRegistry {
             integration.createEntry(entry);
             log.debug("Notified integration {} to create entry {}", coordinate, entry.getEntryId());
         } catch (UnsupportedOperationException e) {
-            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to notify integration {} to create entry {}: {}",
-                    coordinate, entry.getEntryId(), e.getMessage());
+                    coordinate, entry.getEntryId(), e.getMessage(), e);
             throw new EntryNotificationException(entry, coordinate, "create", e);
         }
     }
@@ -421,10 +421,10 @@ public class ConfigEntryRegistry {
             integration.reconfigureEntry(entry.getEntryId(), entry);
             log.debug("Notified integration {} to reconfigure entry {}", coordinate, entry.getEntryId());
         } catch (UnsupportedOperationException e) {
-            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to notify integration {} to reconfigure entry {}: {}",
-                    coordinate, entry.getEntryId(), e.getMessage());
+                    coordinate, entry.getEntryId(), e.getMessage(), e);
             throw new EntryNotificationException(entry, coordinate, "reconfigure", e);
         }
     }
@@ -449,7 +449,7 @@ public class ConfigEntryRegistry {
             integration.removeEntry(entry.getEntryId());
             log.debug("Notified integration {} to remove entry {}", coordinate, entry.getEntryId());
         } catch (UnsupportedOperationException e) {
-            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to notify integration {} to remove entry {}: {}",
                     coordinate, entry.getEntryId(), e.getMessage());
@@ -476,7 +476,7 @@ public class ConfigEntryRegistry {
             integration.disableEntry(entry.getEntryId());
             log.debug("Notified integration {} to disable entry {}", coordinate, entry.getEntryId());
         } catch (UnsupportedOperationException e) {
-            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to notify integration {} to disable entry {}: {}",
                     coordinate, entry.getEntryId(), e.getMessage());
@@ -503,7 +503,7 @@ public class ConfigEntryRegistry {
             integration.enableEntry(entry);
             log.debug("Notified integration {} to enable entry {}", coordinate, entry.getEntryId());
         } catch (UnsupportedOperationException e) {
-            log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to notify integration {} to enable entry {}: {}",
                     coordinate, entry.getEntryId(), e.getMessage());
