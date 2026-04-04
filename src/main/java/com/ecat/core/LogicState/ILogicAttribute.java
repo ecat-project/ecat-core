@@ -109,9 +109,7 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
         initAttributeID(def.getAttrId());
         initNativeUnit(def.getNativeUnit());
         initValueChangeable(def.isValueChangeable());
-        if (def.getDisplayUnit() != null) {
-            initDisplayUnit(def.getDisplayUnit());
-        }
+        initDisplayUnit(def.getDisplayUnit());
         changeDisplayPrecision(def.getDisplayPrecision());
     }
 }
