@@ -17,6 +17,7 @@
 package com.ecat.core.LogicMapping;
 
 import com.ecat.core.Device.DeviceBase;
+import com.ecat.core.LogicDevice.LogicDevice;
 import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
 
@@ -52,7 +53,7 @@ public interface IDeviceMapping {
     String getMappingType();
 
     /**
-     * 根据逻辑属性ID和物理设备，获取对应的逻辑属性。
+     * 根据逻辑属性ID、物理设备和逻辑设备，获取对应的逻辑属性。
      *
      * <p>此方法是映射的核心：给定一个物理设备和逻辑属性ID，
      * 返回该逻辑属性的实例。映射实现类负责：
@@ -60,13 +61,15 @@ public interface IDeviceMapping {
      *   <li>找到物理设备上对应的物理属性</li>
      *   <li>创建或返回已绑定的逻辑属性</li>
      *   <li>建立物理属性到逻辑属性的绑定关系</li>
+     *   <li>对于多实例设备类型，通过 logicDevice.getId() 判断当前实例</li>
      * </ol>
      *
      * @param logicAttrId 逻辑属性ID
      * @param phyDevice 物理设备实例
+     * @param logicDevice 逻辑设备实例，用于多实例设备的实例判断
      * @return 逻辑属性实例，如果映射关系不存在则返回null
      */
-    ILogicAttribute<?> getAttr(String logicAttrId, DeviceBase phyDevice);
+    ILogicAttribute<?> getAttr(String logicAttrId, DeviceBase phyDevice, LogicDevice logicDevice) throws Exception;
 
     /**
      * 获取设备所属集成的坐标。

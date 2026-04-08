@@ -21,6 +21,8 @@ import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.LogicMapping.IDeviceMapping;
 import com.ecat.core.LogicMapping.LogicMappingManager;
 import com.ecat.core.LogicState.ILogicAttribute;
+import com.ecat.core.LogicState.LogicAttributeFactory;
+import com.ecat.core.LogicState.LNumericAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
 import com.ecat.core.State.AttributeBase;
 
@@ -141,7 +143,12 @@ public abstract class LogicDevice extends DeviceBase {
      */
     @Override
     public void init() {
-        attrMap = genAttrMap(getEntry());
+        try {
+            attrMap = genAttrMap(getEntry());
+        } catch (Exception e) {
+            log.error("LogicDevice [{}] genAttrMap failed: {}", getId(), e.getMessage(), e);
+            throw new RuntimeException("LogicDevice creation failed: " + getId(), e);
+        }
         createAttrs();
     }
 
@@ -179,78 +186,78 @@ public abstract class LogicDevice extends DeviceBase {
      * @return 逻辑属性映射表，key 为逻辑属性ID
      */
     @SuppressWarnings("unchecked")
-    private Map<String, ILogicAttribute<?>> genAttrMap(ConfigEntry entry) {
+    private Map<String, ILogicAttribute<?>> genAttrMap(ConfigEntry entry) throws Exception {
         Map<String, ILogicAttribute<?>> result = new LinkedHashMap<>();
+
+        // 读取 entry 中的 mappings 配置（物理设备绑定信息）
         Map<String, Object> data = entry.getData();
-        if (data == null) return result;
+        Map<String, Object> mappings = null;
+        if (data != null) {
+            mappings = (Map<String, Object>) data.get("mappings");
+        }
 
-        Map<String, Object> mappings = (Map<String, Object>) data.get("mappings");
-        if (mappings == null) return result;
+        // 记录第一个成功解析的 mapping 和 phyDevice，供 unmapped 属性（standalone/alarm）使用
+        // alarm 属性需要 phyDevice 来绑定物理源属性，以便 reverseIndex 正确路由总线事件
+        IDeviceMapping resolvedMapping = null;
+        DeviceBase firstPhyDevice = null;
 
-        for (Map.Entry<String, Object> mappingEntry : mappings.entrySet()) {
-            String attrId = mappingEntry.getKey();
-            Map<String, Object> attrConfig = (Map<String, Object>) mappingEntry.getValue();
-            if (attrConfig == null) continue;
+        // 以 getAttrDefs() 为属性创建的唯一来源（mapping-driven）
+        for (LogicAttributeDefine def : getAttrDefs()) {
+            String attrId = def.getAttrId();
+            ILogicAttribute<?> attr = null;
 
-            String deviceId = (String) attrConfig.get("device_id");
-            if (deviceId == null || deviceId.isEmpty()) {
-                continue;
+            if (mappings != null && mappings.containsKey(attrId)) {
+                // YAML 配置了映射 → 用 YAML 指定的物理设备
+                Map<String, Object> attrConfig = (Map<String, Object>) mappings.get(attrId);
+                String deviceId = attrConfig != null ? (String) attrConfig.get("device_id") : null;
+
+                if (deviceId != null && !deviceId.isEmpty()) {
+                    if (this.core == null) {
+                        throw new RuntimeException("LogicDevice [" + getId() + "] attr '" + attrId
+                            + "' mapped to device '" + deviceId + "' but core is null");
+                    }
+                    DeviceBase phyDevice = this.core.getDeviceRegistry().getDeviceByID(deviceId);
+                    if (phyDevice == null) {
+                        throw new RuntimeException("LogicDevice [" + getId() + "] attr '" + attrId
+                            + "' mapped to device '" + deviceId + "' but device not found");
+                    }
+
+                    String coordinate = phyDevice.getEntry().getCoordinate();
+                    String model = phyDevice.getModel();
+                    String mappingType = getMappingType();
+
+                    if (logicMappingManager == null) {
+                        throw new RuntimeException("LogicMappingManager is null, cannot find mapping for type=" + mappingType);
+                    }
+
+                    IDeviceMapping mapping = logicMappingManager.getMapping(mappingType, coordinate, model);
+                    if (mapping != null) {
+                        // 记录第一个成功解析的 mapping 和 phyDevice
+                        if (resolvedMapping == null) {
+                            resolvedMapping = mapping;
+                            firstPhyDevice = phyDevice;
+                        }
+                        attr = mapping.getAttr(attrId, phyDevice, this);
+                    }
+                }
+            } else {
+                // YAML 未配置映射的属性，根据类型分别处理：
+                // - standalone 属性（!mapable, changeable）：直接从 define 创建，不需要 mapping
+                // - alarm 属性（!mapable, !changeable）：委托 mapping 创建（需绑定物理源属性）
+                if (!def.isMapable() && def.isValueChangeable()) {
+                    attr = LogicAttributeFactory.create(
+                        (Class<? extends ILogicAttribute<?>>) def.getAttrClassType(), def);
+                } else if (resolvedMapping != null) {
+                    attr = resolvedMapping.getAttr(attrId, firstPhyDevice, this);
+                }
             }
 
-            // 查找物理设备：通过 core 的 DeviceRegistry
-            if (this.core == null) {
-                log.warn("LogicDevice core is null, cannot find physical device: {}", deviceId);
-                continue;
+            if (attr != null) {
+                attr.initFromDefinition(def);
+                result.put(attrId, attr);
             }
-
-            DeviceBase phyDevice = this.core.getDeviceRegistry().getDeviceByID(deviceId);
-            if (phyDevice == null) {
-                log.warn("Physical device not found: {}", deviceId);
-                continue;
-            }
-
-            // 获取物理设备的 coordinate 和 model
-            String coordinate = phyDevice.getEntry().getCoordinate();
-            String model = phyDevice.getModel();
-
-            // 查找映射
-            String mappingType = getMappingType();
-            if (logicMappingManager == null) {
-                log.warn("LogicMappingManager is null, cannot find mapping for type={}", mappingType);
-                continue;
-            }
-
-            IDeviceMapping mapping = logicMappingManager.getMapping(mappingType, coordinate, model);
-            if (mapping == null) {
-                log.warn("No mapping found for type={}, coord={}, model={}", mappingType, coordinate, model);
-                continue;
-            }
-
-            // 创建逻辑属性
-            ILogicAttribute<?> lAttr = mapping.getAttr(attrId, phyDevice);
-            if (lAttr == null) continue;
-
-            // 查找匹配的 LogicAttributeDefine 并应用元数据
-            LogicAttributeDefine ladef = findAttrDef(attrId);
-            if (ladef != null) {
-                lAttr.initFromDefinition(ladef);
-            }
-            result.put(attrId, lAttr);
         }
         return result;
-    }
-
-    /**
-     * 在 getAttrDefs() 列表中查找指定 attrId 的定义。
-     *
-     * @param attrId 逻辑属性ID
-     * @return 匹配的定义，未找到则返回 null
-     */
-    private LogicAttributeDefine findAttrDef(String attrId) {
-        for (LogicAttributeDefine def : getAttrDefs()) {
-            if (def.getAttrId().equals(attrId)) return def;
-        }
-        return null;
     }
 
     /**

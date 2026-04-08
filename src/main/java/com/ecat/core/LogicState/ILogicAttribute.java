@@ -18,6 +18,7 @@ package com.ecat.core.LogicState;
 
 import com.ecat.core.State.AttributeAbility;
 import com.ecat.core.State.AttributeBase;
+import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.UnitInfo;
 
 import java.util.List;
@@ -92,6 +93,14 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
     void initDisplayUnit(UnitInfo displayUnit);
 
     /**
+     * 初始化逻辑属性的属性类型（如 TEMPERATURE、ALARM_STATUS 等）。
+     * 由 {@link #initFromDefinition(LogicAttributeDefine)} 调用。
+     *
+     * @param attrClass 属性类型，允许为null
+     */
+    void initAttrClass(AttributeClass attrClass);
+
+    /**
      * 从 LogicAttributeDefine 定义对象初始化逻辑属性。
      * <p>
      * 此 default 方法依次调用各 init 方法完成初始化：
@@ -101,6 +110,7 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
      *   <li>{@link #initValueChangeable(boolean)} - 设置是否可修改</li>
      *   <li>{@link #initDisplayUnit(UnitInfo)} - 设置显示单位（仅当displayUnit不为null时）</li>
      *   <li>{@link #changeDisplayPrecision(int)} - 设置显示精度</li>
+     *   <li>{@link #initAttrClass(AttributeClass)} - 设置属性类型</li>
      * </ol>
      *
      * @param def 逻辑属性定义对象，提供初始化所需的元数据
@@ -111,5 +121,6 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
         initValueChangeable(def.isValueChangeable());
         initDisplayUnit(def.getDisplayUnit());
         changeDisplayPrecision(def.getDisplayPrecision());
+        initAttrClass(def.getAttrClass());
     }
 }

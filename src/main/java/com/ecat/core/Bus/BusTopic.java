@@ -16,8 +16,9 @@
 
 package com.ecat.core.Bus;
 
-import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.State.AttributeBase;
+
+import java.time.Instant;
 
 /**
  * Enum for topic management
@@ -25,7 +26,20 @@ import com.ecat.core.State.AttributeBase;
  * @author coffee
  */
 public enum BusTopic {
-    DEVICE_DATA_UPDATE("device.data.update", AttributeBase.class);
+    DEVICE_DATA_UPDATE("device.data.update", AttributeBase.class),
+    INTEGRATIONS_ALL_LOADED("integration.all_loaded", Instant.class),
+    LOGIC_DEVICES_ALL_LOADED("logic_device.all_loaded", Instant.class);
+
+    /**
+     * Dispatch mode for bus events.
+     * SYNC events block the publisher until all subscribers finish.
+     * ASYNC events are dispatched to subscribers without blocking.
+     */
+    public enum DispatchMode {
+        SYNC,
+        ASYNC
+    }
+
     private final String topicName;   // 名称，英文
     private final Class<?> dataClass; // 信息的数据类型
     BusTopic(String topicName, Class<?> dataClass) {
@@ -38,5 +52,23 @@ public enum BusTopic {
     public Class<?> getDataClass() {
         return dataClass;
     }
-    
+
+    /**
+     * Resolve the dispatch mode for a given topic string.
+     * <p>
+     * Returns SYNC for lifecycle topics that require all subscribers to complete
+     * before the publisher continues (e.g. integration.all_loaded, logic_device.all_loaded).
+     * Returns ASYNC for all other topics.
+     *
+     * @param topic the topic name string
+     * @return the dispatch mode for the topic
+     */
+    public static DispatchMode resolveMode(String topic) {
+        if (INTEGRATIONS_ALL_LOADED.getTopicName().equals(topic)
+                || LOGIC_DEVICES_ALL_LOADED.getTopicName().equals(topic)) {
+            return DispatchMode.SYNC;
+        }
+        return DispatchMode.ASYNC;
+    }
+
 }

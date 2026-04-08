@@ -46,6 +46,14 @@ public class NumericAttribute extends NumberAttribute<Double> {
     }
 
     /**
+     * 仅 attributeID 的构造函数，用于 LogicAttributeFactory "先 new 再 init" 模式。
+     * 不要滥用，仅在此模式下使用。
+     */
+    protected NumericAttribute(String attributeID) {
+        super(attributeID);
+    }
+
+    /**
      * 同时支持用户设置显示名称displayName和I18n的构造函数，displayName优先级高
      */
     public NumericAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,

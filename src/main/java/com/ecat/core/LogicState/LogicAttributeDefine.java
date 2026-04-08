@@ -28,7 +28,16 @@ import lombok.Setter;
  *
  * <p>由 IDeviceMapping.getAttrDefs() 返回，用于 LogicDevice 创建逻辑属性时提供初始化信息。
  * LogicAttributeDefine 是不可变的配置元数据，描述逻辑属性的"蓝图"，
- * 实际的逻辑属性实例由 L系列类（如 LAQAttribute、LNumericAttribute）创建。
+ * 实际的逻辑属性实例由 {@link LogicAttributeFactory} 通过 {@link ILogicAttribute}
+ * 子类的 0-arg 构造函数 + {@link ILogicAttribute#initFromDefinition} 创建。
+ *
+ * <h3>子类化约定</h3>
+ * <p>当某种 L*Attribute 类型的 standalone 创建需要额外参数时，
+ * 应创建对应的 Define 子类。基类字段已覆盖数值型属性的需求。
+ * <ul>
+ *   <li>{@link NumericAttrDef} — 数值型 standalone 属性（阈值、浓度等）</li>
+ *   <li>未来可扩展：BinaryAttrDef、StringSelectAttrDef（需带 options 字段时创建）</li>
+ * </ul>
  *
  * <p>示例用法（在 IDeviceMapping 实现中）：
  * <pre>
@@ -36,13 +45,22 @@ import lombok.Setter;
  *       return Arrays.asList(
  *           new LogicAttributeDefine("so2", AttributeClass.SO2,
  *               AirMassUnit.UGM3, AirMassUnit.MGM3, 2, false, AQAttribute.class),
- *           new LogicAttributeDefine("status", AttributeClass.STATUS,
- *               null, null, 0, false, TextAttribute.class)
+ *           new NumericAttrDef() {{ // standalone 阈值属性
+ *               setAttrId("temp_upper_threshold");
+ *               setAttrClass(AttributeClass.TEMPERATURE);
+ *               setNativeUnit(TemperatureUnit.CELSIUS);
+ *               setDisplayUnit(TemperatureUnit.CELSIUS);
+ *               setDisplayPrecision(1);
+ *               setValueChangeable(true);
+ *               setAttrClassType(LNumericAttribute.class);
+ *               setMapable(false);
+ *           }}
  *       );
  *   }
  * </pre>
  *
- * @see com.ecat.core.LogicState.ILogicAttribute#initFromDefinition(LogicAttributeDefine)
+ * @see LogicAttributeFactory
+ * @see ILogicAttribute#initFromDefinition(LogicAttributeDefine)
  * @author coffee
  */
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor

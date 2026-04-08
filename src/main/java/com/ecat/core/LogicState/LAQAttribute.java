@@ -18,6 +18,7 @@ package com.ecat.core.LogicState;
 
 import com.ecat.core.State.AQAttribute;
 import com.ecat.core.State.AttributeBase;
+import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.UnitInfo;
 
 import java.util.Arrays;
@@ -228,6 +229,16 @@ public class LAQAttribute extends AQAttribute implements ILogicAttribute<Double>
     @Override
     public void initValueChangeable(boolean valueChangeable) {
         this.valueChangeable = valueChangeable;
+    }
+
+    /**
+     * 初始化逻辑属性的属性类型。
+     *
+     * @param attrClass 属性类型，允许为null
+     */
+    @Override
+    public void initAttrClass(AttributeClass attrClass) {
+        this.attrClass = attrClass;
     }
 
     /**

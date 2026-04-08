@@ -162,7 +162,7 @@ public class LogicDeviceTest {
         public String getDeviceModel() { return model; }
 
         @Override
-        public ILogicAttribute<?> getAttr(String logicAttrId, DeviceBase phyDevice) {
+        public ILogicAttribute<?> getAttr(String logicAttrId, DeviceBase phyDevice, com.ecat.core.LogicDevice.LogicDevice logicDevice) {
             // Return cached attribute if available
             ILogicAttribute<?> cached = attrCache.get(logicAttrId);
             if (cached != null) {
@@ -321,7 +321,8 @@ public class LogicDeviceTest {
 
     @Test
     public void testInitCreatesAttributesFromMapping() {
-        // This test verifies the full init() flow with a mocked physical device
+        // 验证：配置了 device_id 但物理设备不存在时，init() 应抛出异常，
+        // 确保配置错误能被立即暴露而不是静默跳过。
         String phyDeviceId = "phy-001";
         String coordinate = "com.ecat:test-integration";
         String model = "TestModel";
@@ -336,20 +337,19 @@ public class LogicDeviceTest {
         Map<String, Object> mappings = new LinkedHashMap<>();
         mappings.put("test_attr", mappingConfig);
 
-        // Create a physical device (simulated via a mock EcatCore with DeviceRegistry)
-        // Since we can't easily mock EcatCore, this test verifies that when
-        // the physical device is not found (no core loaded), genAttrMap handles it gracefully
+        // core 为 null，物理设备无法找到
         ConfigEntry entry = createEntryWithMappings("test-001", mappings);
-
         TestLogicDevice device = createTestLogicDevice(entry);
-        // init() should not throw even when physical device not found
-        device.init();
 
-        // The physical device won't be found because core is null,
-        // so attrMap should be empty
-        Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
-        assertNotNull(attrMap);
-        assertTrue("Should be empty when physical device not found (no core)", attrMap.isEmpty());
+        try {
+            device.init();
+            fail("Should throw when mapped device_id cannot be resolved (core is null)");
+        } catch (RuntimeException e) {
+            // init() wraps the original exception
+            String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+            assertTrue("Exception should mention core is null",
+                msg.contains("core is null"));
+        }
     }
 
     @Test

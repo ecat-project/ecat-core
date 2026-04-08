@@ -31,7 +31,8 @@ public enum AttrValueType {
     FLOAT("float"), // float类型存储
     SHORT("short"), // short类型存储
     LONG("long"), // long类型存储
-    BYTE("byte"); // byte类型存储
+    BYTE("byte"), // byte类型存储
+    INSTANT("instant"); // java.time.Instant 时间戳类型存储
 
 
     private final String valueTypeName;
@@ -66,6 +67,8 @@ public enum AttrValueType {
             return LONG;
         } else if (clazz == Byte.class || clazz == byte.class) {
             return BYTE;
+        } else if (clazz == java.time.Instant.class) {
+            return INSTANT;
         } else {
             throw new IllegalArgumentException("Unsupported class type: " + clazz.getName());
         }

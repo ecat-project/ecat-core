@@ -21,9 +21,12 @@ import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.State.AttributeBase;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -61,6 +64,16 @@ public class LogicDeviceRegistry {
      * key 格式为 "physicalDeviceID:physicalAttrID"
      */
     private final Map<String, List<LogicDeviceAttrRef>> reverseIndex = new ConcurrentHashMap<>();
+
+    /**
+     * DAG 依赖边：用于检测逻辑设备间的循环依赖。
+     * key = "sourceDeviceID:sourceAttrID"（被依赖方）
+     * value = "targetDeviceID:targetAttrID"（依赖方）
+     *
+     * <p>只有逻辑设备→逻辑设备的绑定关系会记录到此处，
+     * 物理设备→逻辑设备的绑定不可能产生环路，无需记录。
+     */
+    private final Map<String, Set<String>> dependencyEdges = new HashMap<>();
 
     /**
      * 注册逻辑设备到注册表。
@@ -101,6 +114,9 @@ public class LogicDeviceRegistry {
                 reverseIndex.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>()).add(ref);
             }
         }
+
+        // 校验逻辑设备间的依赖关系是否为 DAG（无环路）
+        validateDAG();
     }
 
     /**
@@ -165,5 +181,90 @@ public class LogicDeviceRegistry {
      */
     public List<LogicDeviceAttrRef> findByPhysicalAttr(String deviceID, String attrID) {
         return reverseIndex.get(deviceID + ":" + attrID);
+    }
+
+    // ========== DAG 依赖图校验 ==========
+
+    /**
+     * 添加一条依赖边（from -> to），用于构建逻辑设备间的依赖关系图。
+     *
+     * @param from 被依赖方节点标识（格式："deviceID:attrID"）
+     * @param to   依赖方节点标识（格式："deviceID:attrID"）
+     */
+    void addDependencyEdge(String from, String to) {
+        dependencyEdges.computeIfAbsent(from, k -> new HashSet<>()).add(to);
+    }
+
+    /**
+     * 使用 DFS 检测依赖图是否存在环路。
+     *
+     * @return true 如果存在环路，false 如果无环路
+     */
+    boolean hasCycle() {
+        Set<String> visited = new HashSet<>();
+        Set<String> visiting = new HashSet<>();
+
+        for (String node : dependencyEdges.keySet()) {
+            if (!visited.contains(node)) {
+                if (hasCycleDFS(node, visited, visiting)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * DFS 环路检测递归方法。
+     *
+     * @param node    当前节点
+     * @param visited 已完成访问的节点集合
+     * @param visiting 正在访问路径上的节点集合（用于检测回边）
+     * @return true 如果从 node 出发能找到环路
+     */
+    private boolean hasCycleDFS(String node, Set<String> visited, Set<String> visiting) {
+        visiting.add(node);
+        Set<String> neighbors = dependencyEdges.get(node);
+        if (neighbors != null) {
+            for (String neighbor : neighbors) {
+                if (visiting.contains(neighbor)) {
+                    return true; // 发现回边 → 环路
+                }
+                if (!visited.contains(neighbor)) {
+                    if (hasCycleDFS(neighbor, visited, visiting)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        visiting.remove(node);
+        visited.add(node);
+        return false;
+    }
+
+    /**
+     * 校验依赖图是否为 DAG（无环路）。
+     * 如果存在环路，抛出 {@link IllegalStateException}。
+     *
+     * <p>在每次 {@link #buildReverseIndex(String, Map)} 末尾调用，
+     * 确保逻辑设备间的绑定关系不会形成循环依赖。
+     *
+     * @throws IllegalStateException 如果检测到循环依赖
+     */
+    void validateDAG() {
+        if (dependencyEdges.isEmpty()) {
+            return;
+        }
+        Set<String> visited = new HashSet<>();
+        Set<String> visiting = new HashSet<>();
+
+        for (String node : dependencyEdges.keySet()) {
+            if (!visited.contains(node)) {
+                if (hasCycleDFS(node, visited, visiting)) {
+                    throw new IllegalStateException(
+                        "Dependency cycle detected in logic device bindings. Nodes in cycle: " + visiting);
+                }
+            }
+        }
     }
 }

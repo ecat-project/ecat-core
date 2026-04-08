@@ -531,6 +531,15 @@ public class IntegrationManager {
             // 加载所有已加载集成的现有 ConfigEntries
             loadExistingConfigEntries();
 
+            // 发布所有集成加载完成事件（同步），通知逻辑设备子集成可以创建逻辑设备
+            if (core != null && core.getBusRegistry() != null) {
+                core.getBusRegistry().publishSync(
+                    com.ecat.core.Bus.BusTopic.INTEGRATIONS_ALL_LOADED.getTopicName(),
+                    java.time.Instant.now()
+                );
+                log.info("Published INTEGRATIONS_ALL_LOADED event");
+            }
+
         } catch (InterruptedException e) {
             log.error("等待集成加载完成被中断", e);
             Thread.currentThread().interrupt();

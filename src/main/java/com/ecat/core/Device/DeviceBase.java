@@ -89,6 +89,9 @@ public abstract class DeviceBase implements DeviceControl {
     @Getter
     private List<DeviceAbility> abilities;
     
+    /**
+     * 物理测点映射表，物理测点ID -> 属性
+     */
     private Map<String, AttributeBase<?>> attrs;
 
     // 原子类保证多线程安全的自增ID生成器

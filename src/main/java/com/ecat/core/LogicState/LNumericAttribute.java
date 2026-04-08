@@ -84,6 +84,37 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
     }
 
     /**
+     * Protected constructor for {@link LogicAttributeFactory}.
+     * Creates a template with attributeID set (for i18n initialization);
+     * remaining fields are set by {@link #initFromDefinition(LogicAttributeDefine)}.
+     *
+     * @param attributeID the logic attribute ID (must not be null, required for i18n)
+     */
+    protected LNumericAttribute(String attributeID) {
+        super(attributeID);
+        this.bindAttr = null;
+    }
+
+    /**
+     * Create a standalone (unbound) numeric attribute for business parameters
+     * like thresholds, configuration values, etc.
+     *
+     * <p>Standalone attributes have no physical binding and manage their own value.
+     * Use {@link #initValueChangeable(boolean)} to allow external value changes.
+     *
+     * @param attributeID the logic attribute ID
+     * @param attrClass the attribute class
+     * @param nativeUnit the native unit (may be null)
+     * @param displayUnit the display unit (may be null)
+     * @param displayPrecision the number of decimal places to display
+     * @return a new standalone LNumericAttribute
+     */
+    public static LNumericAttribute standalone(String attributeID, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision) {
+        return new LNumericAttribute(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision);
+    }
+
+    /**
      * When the bound physical attribute value is updated, update this logic attribute's value.
      *
      * <p>Passthrough: reads the bindAttr's display value in this logic attribute's
@@ -95,7 +126,15 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
     public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
         if (bindAttr == null) return;
 
-        String displayVal = bindAttr.getDisplayValue(nativeUnit);
+        String displayVal;
+        try {
+            displayVal = bindAttr.getDisplayValue(nativeUnit);
+        } catch (RuntimeException e) {
+            // Unit conversion failed (e.g., logic attr's nativeUnit is a different
+            // UnitInfo subclass than the physical attr's nativeUnit). Fall back to
+            // reading the raw value using the physical attr's own nativeUnit.
+            displayVal = bindAttr.getDisplayValue(bindAttr.getNativeUnit());
+        }
         if (displayVal == null) {
             updateValue(null, updatedAttr.getStatus());
         } else {
@@ -122,7 +161,9 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
     @Override
     public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
         if (bindAttr == null) {
-            return CompletableFuture.completedFuture(false);
+            // Standalone mode: delegate to parent for proper unit conversion
+            // Caller must pass numeric string as newDisplayValue (e.g. "35.5")
+            return super.setDisplayValue(newDisplayValue, fromUnit);
         }
         return bindAttr.setDisplayValue(newDisplayValue, bindAttr.getNativeUnit());
     }
@@ -179,6 +220,16 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
     @Override
     public void initValueChangeable(boolean valueChangeable) {
         this.valueChangeable = valueChangeable;
+    }
+
+    /**
+     * 初始化逻辑属性的属性类型。
+     *
+     * @param attrClass 属性类型，允许为null
+     */
+    @Override
+    public void initAttrClass(AttributeClass attrClass) {
+        this.attrClass = attrClass;
     }
 
     /**

@@ -65,7 +65,7 @@ public class LogicMappingManagerTest {
         }
 
         @Override
-        public ILogicAttribute<?> getAttr(String logicAttrId, DeviceBase phyDevice) {
+        public ILogicAttribute<?> getAttr(String logicAttrId, DeviceBase phyDevice, com.ecat.core.LogicDevice.LogicDevice logicDevice) {
             return null; // test stub, no real mapping
         }
 

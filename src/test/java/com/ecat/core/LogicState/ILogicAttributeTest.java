@@ -90,6 +90,11 @@ public class ILogicAttributeTest {
         }
 
         @Override
+        public void initAttrClass(AttributeClass attrClass) {
+            // no-op for test mock
+        }
+
+        @Override
         public boolean publicState() {
             return true;
         }

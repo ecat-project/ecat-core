@@ -93,6 +93,18 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     }
 
     /**
+     * Protected constructor for {@link LogicAttributeFactory}.
+     * Creates a template with attributeID set (for i18n initialization);
+     * remaining fields are set by {@link #initFromDefinition(LogicAttributeDefine)}.
+     *
+     * @param attributeID the logic attribute ID (must not be null, required for i18n)
+     */
+    protected LStringSelectAttribute(String attributeID) {
+        super(attributeID);
+        this.bindAttr = null;
+    }
+
+    /**
      * Factory method to create a standalone LStringSelectAttribute with no physical binding.
      *
      * <p>Standalone mode is used for attributes that maintain their own value
@@ -119,13 +131,22 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
         if (bindAttr == null) return;
 
+        // Try displayValue first
         String displayVal = bindAttr.getDisplayValue(bindAttr.getNativeUnit());
-        if (displayVal == null) {
-            // If physical attr returns null, do not update (keep current value)
-            return;
+        String matchedOption = null;
+        if (displayVal != null) {
+            matchedOption = findOption(displayVal);
         }
-        // Try to find matching option (case-sensitive match)
-        String matchedOption = findOption(displayVal);
+
+        // If displayValue didn't match, try raw value as string
+        // (handles numeric physical attrs where displayValue is "0.0" but option is "0")
+        if (matchedOption == null) {
+            Object rawValue = bindAttr.getValue();
+            if (rawValue != null) {
+                matchedOption = findOption(rawValue.toString());
+            }
+        }
+
         if (matchedOption != null) {
             updateValue(matchedOption, updatedAttr.getStatus());
         }
@@ -146,13 +167,9 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
         if (bindAttr != null) {
             return bindAttr.setDisplayValue(newDisplayValue, bindAttr.getNativeUnit());
         }
-        // Standalone mode: update value locally (avoid selectOption which calls publicState/getDevice)
-        String matchedOption = findOption(newDisplayValue);
-        if (matchedOption != null) {
-            updateValue(matchedOption);
-            return CompletableFuture.completedFuture(true);
-        }
-        return CompletableFuture.completedFuture(false);
+        // Standalone mode: delegate to parent (valueChangeable check + selectOption)
+        // Caller must pass an exact option string as newDisplayValue
+        return super.setDisplayValue(newDisplayValue, fromUnit);
     }
 
     /**
@@ -207,6 +224,16 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     @Override
     public void initValueChangeable(boolean valueChangeable) {
         this.valueChangeable = valueChangeable;
+    }
+
+    /**
+     * 初始化逻辑属性的属性类型。
+     *
+     * @param attrClass 属性类型，允许为null
+     */
+    @Override
+    public void initAttrClass(AttributeClass attrClass) {
+        this.attrClass = attrClass;
     }
 
     /**

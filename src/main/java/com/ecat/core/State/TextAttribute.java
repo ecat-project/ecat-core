@@ -74,6 +74,14 @@ public class TextAttribute extends AttributeBase<String> {
                 valueChangeable, onChangedCallback);
     }
 
+    /**
+     * 仅 attributeID 的构造函数，用于 LogicAttributeFactory "先 new 再 init" 模式。
+     * 不要滥用，仅在此模式下使用。
+     */
+    protected TextAttribute(String attributeID) {
+        super(attributeID);
+    }
+
     @Override
     public boolean updateValue(String value) {
         return super.updateValue(value);

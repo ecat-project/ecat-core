@@ -58,12 +58,39 @@ public class BusRegistry {
     }
 
     public void publish(String topic, Object eventData) {
+        dispatchToMatching(topic, eventData, true);
+    }
+
+    /**
+     * 同步发布事件：在当前线程中调用所有匹配的订阅者，不经过线程池。
+     * 适用于需要确保事件处理完成后再继续的场景。
+     *
+     * @param topic     事件主题
+     * @param eventData 事件数据
+     */
+    public void publishSync(String topic, Object eventData) {
+        dispatchToMatching(topic, eventData, false);
+    }
+
+    /**
+     * 核心分发逻辑：查找所有匹配主题的订阅者并调用。
+     *
+     * @param topic     事件主题
+     * @param eventData 事件数据
+     * @param async     true=通过线程池异步调用，false=在当前线程同步调用
+     */
+    private void dispatchToMatching(String topic, Object eventData, boolean async) {
         for (Map.Entry<String, List<EventSubscriber>> entry : subscribers.entrySet()) {
             String pattern = entry.getKey().replace("*", ".*");
             if (Pattern.matches(pattern, topic)) {
                 for (EventSubscriber subscriber : entry.getValue()) {
-                    // 将事件处理任务提交到线程池进行异步处理
-                    executorService.submit(() -> subscriber.handleEvent(topic, eventData));
+                    if (async) {
+                        // 将事件处理任务提交到线程池进行异步处理
+                        executorService.submit(() -> subscriber.handleEvent(topic, eventData));
+                    } else {
+                        // 在当前线程同步调用
+                        subscriber.handleEvent(topic, eventData);
+                    }
                 }
             }
         }

@@ -21,6 +21,7 @@ import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.StringCommandAttribute;
 import com.ecat.core.State.UnitInfo;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -105,13 +106,27 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
     }
 
     /**
-     * Private constructor for standalone mode.
+     * Protected constructor for {@link LogicAttributeFactory}.
+     * Creates a template with attributeID set (for i18n initialization);
+     * remaining fields are set by {@link #initFromDefinition(LogicAttributeDefine)}.
+     *
+     * @param attributeID the logic attribute ID (must not be null, required for i18n)
+     */
+    protected LCommandAttribute(String attributeID) {
+        super(attributeID, (AttributeClass) null);
+        this.bindAttr = null;
+        this.standardCommands = new ArrayList<>();
+        this.commandMapping = new HashMap<>();
+    }
+
+    /**
+     * Protected constructor for standalone mode.
      *
      * @param attributeID the logic attribute ID
      * @param attrClass the attribute class
      * @param standardCommands the list of standard commands
      */
-    private LCommandAttribute(String attributeID, AttributeClass attrClass, List<String> standardCommands) {
+    protected LCommandAttribute(String attributeID, AttributeClass attrClass, List<String> standardCommands) {
         super(attributeID, attrClass, standardCommands, null);
         this.bindAttr = null;
         this.standardCommands = standardCommands;
@@ -285,6 +300,16 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
     @Override
     public void initValueChangeable(boolean valueChangeable) {
         this.valueChangeable = valueChangeable;
+    }
+
+    /**
+     * 初始化逻辑属性的属性类型。
+     *
+     * @param attrClass 属性类型，允许为null
+     */
+    @Override
+    public void initAttrClass(AttributeClass attrClass) {
+        this.attrClass = attrClass;
     }
 
     /**

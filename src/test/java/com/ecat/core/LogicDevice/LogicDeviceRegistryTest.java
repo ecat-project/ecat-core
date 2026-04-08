@@ -120,6 +120,9 @@ public class LogicDeviceRegistryTest {
         public void initDisplayUnit(UnitInfo displayUnit) {}
 
         @Override
+        public void initAttrClass(AttributeClass attrClass) {}
+
+        @Override
         public boolean publicState() { return true; }
 
         // --- AttributeAbility 最小化实现 ---

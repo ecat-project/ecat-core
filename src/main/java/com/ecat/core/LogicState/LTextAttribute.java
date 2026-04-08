@@ -18,7 +18,7 @@ package com.ecat.core.LogicState;
 
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
-import com.ecat.core.State.BinaryAttribute;
+import com.ecat.core.State.TextAttribute;
 import com.ecat.core.State.UnitInfo;
 
 import java.util.Arrays;
@@ -26,11 +26,11 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Logic Binary Attribute - thin wrapper extending BinaryAttribute implementing ILogicAttribute.
+ * Logic Text Attribute - thin wrapper extending TextAttribute implementing ILogicAttribute.
  *
- * <p>LBinaryAttribute wraps a physical {@link BinaryAttribute} (or any AttributeBase)
- * and provides logic-level attribute management for binary-type attributes
- * (e.g., online_status, alarm_status).
+ * <p>LTextAttribute wraps a physical {@link TextAttribute} (or any AttributeBase)
+ * and provides logic-level attribute management for free-text attributes
+ * (e.g., replace_timed_cron: cron expression, cylinder_id: cylinder identification).
  *
  * <p>Two modes:
  * <ul>
@@ -38,41 +38,34 @@ import java.util.concurrent.CompletableFuture;
  *   <li><b>Standalone mode</b>: self-maintained, no physical binding</li>
  * </ul>
  *
- * <p>Subclasses override {@link #updateBindAttrValue(AttributeBase)} to provide
- * domain-specific value derivation logic (e.g., online detection from update timestamp).
- *
  * @see ILogicAttribute
- * @see BinaryAttribute
+ * @see TextAttribute
  * @see LNumericAttribute
  * @author coffee
  */
-public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute<Boolean> {
+public class LTextAttribute extends TextAttribute implements ILogicAttribute<String> {
 
     /** Bound physical attribute that this logic attribute delegates to; null for standalone mode */
     private final AttributeBase<?> bindAttr;
 
     /**
-     * Bound constructor - creates a logic binary attribute bound to a physical attribute.
-     *
-     * <p>Uses bindAttr's metadata as initial values. All logic-level metadata
-     * (attributeID, nativeUnit, displayUnit) will be overridden by
-     * {@link #initFromDefinition(LogicAttributeDefine)} after construction.
+     * Bound constructor - creates a logic text attribute bound to a physical attribute.
      *
      * @param bindAttr the physical attribute to bind to
      */
-    public LBinaryAttribute(AttributeBase<?> bindAttr) {
-        super(bindAttr.getAttributeID(), bindAttr.getAttrClass(), false);
+    public LTextAttribute(AttributeBase<?> bindAttr) {
+        super(bindAttr.getAttributeID(), bindAttr.getAttrClass(), null, null, false);
         this.bindAttr = bindAttr;
     }
 
     /**
-     * Protected constructor for subclasses that manage their own binding independently.
+     * Protected constructor for standalone mode.
      *
      * @param attributeID the logic attribute ID
      * @param attrClass the attribute class
      */
-    protected LBinaryAttribute(String attributeID, AttributeClass attrClass) {
-        super(attributeID, attrClass, false);
+    protected LTextAttribute(String attributeID, AttributeClass attrClass) {
+        super(attributeID, attrClass, null, null, false);
         this.bindAttr = null;
     }
 
@@ -83,53 +76,43 @@ public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute
      *
      * @param attributeID the logic attribute ID (must not be null, required for i18n)
      */
-    protected LBinaryAttribute(String attributeID) {
+    protected LTextAttribute(String attributeID) {
         super(attributeID);
         this.bindAttr = null;
     }
 
     /**
+     * Factory method to create a standalone LTextAttribute with no physical binding.
+     *
+     * @param attrId the logic attribute ID
+     * @param attrClass the attribute class
+     * @return a new standalone LTextAttribute
+     */
+    public static LTextAttribute standalone(String attrId, AttributeClass attrClass) {
+        return new LTextAttribute(attrId, attrClass);
+    }
+
+    /**
      * When the bound physical attribute value is updated, update this logic attribute's value.
      *
-     * <p>Default implementation does nothing. Subclasses should override to provide
-     * domain-specific logic (e.g., derive online status from update timestamp).
+     * <p>Bound mode: reads the bindAttr's display value as string and calls updateValue().
+     * Standalone mode: no-op.
      *
      * @param updatedAttr the physical attribute whose value has been updated
      */
     @Override
     public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
-        // Default: convert numeric physical value to Boolean.
-        // Non-zero numeric -> true (on), zero -> false (off).
-        // Subclasses can override with domain-specific logic.
         if (bindAttr == null) return;
 
-        Object rawValue = bindAttr.getValue();
-        if (rawValue == null) return;
-
-        boolean boolValue;
-        if (rawValue instanceof Number) {
-            boolValue = ((Number) rawValue).doubleValue() != 0.0;
-        } else if (rawValue instanceof Boolean) {
-            boolValue = (Boolean) rawValue;
-        } else if (rawValue instanceof String) {
-            String s = ((String) rawValue).trim().toLowerCase();
-            boolValue = s.equals("on") || s.equals("1") || s.equals("true");
-        } else {
-            return; // Unsupported type, skip
-        }
-
-        if (boolValue) {
-            turnOn();
-        } else {
-            turnOff();
-        }
+        String displayVal = bindAttr.getDisplayValue(bindAttr.getNativeUnit());
+        updateValue(displayVal, updatedAttr.getStatus());
     }
 
     /**
      * Sets the display value on this logic attribute.
      *
      * <p>Bound mode: delegates to bindAttr.setDisplayValue().
-     * Standalone mode: calls turnOn()/turnOff() locally.
+     * Standalone mode: calls super.setDisplayValue() locally.
      *
      * @param newDisplayValue the display value to set
      * @param fromUnit the unit of the display value
@@ -140,8 +123,7 @@ public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute
         if (bindAttr != null) {
             return bindAttr.setDisplayValue(newDisplayValue, bindAttr.getNativeUnit());
         }
-        // Standalone mode: delegate to parent (convertStringToBoolean → setDisplayValueImp → turnOn/turnOff)
-        // Caller must pass "on" or "off" as newDisplayValue
+        // Standalone mode: delegate to parent
         return super.setDisplayValue(newDisplayValue, fromUnit);
     }
 
@@ -160,6 +142,7 @@ public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute
 
     /**
      * Sets the logic attribute's attributeID.
+     * Directly sets the protected field inherited from AttributeBase.
      *
      * @param attrID the logic attribute ID
      */
@@ -170,6 +153,7 @@ public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute
 
     /**
      * Sets the logic attribute's native unit.
+     * Directly sets the protected field inherited from AttributeBase.
      *
      * @param nativeUnit the native unit for this logic attribute
      */
@@ -188,6 +172,7 @@ public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute
 
     /**
      * Sets whether the logic attribute's value can be changed externally.
+     * Directly sets the protected field inherited from AttributeBase.
      *
      * @param valueChangeable true if the value can be changed by users/API
      */

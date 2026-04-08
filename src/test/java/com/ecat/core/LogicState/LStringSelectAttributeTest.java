@@ -20,13 +20,18 @@ import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.AttributeType;
 import com.ecat.core.State.UnitInfo;
+import com.ecat.core.Device.DeviceBase;
+import org.junit.Before;
 import org.junit.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.when;
 
 /**
  * LStringSelectAttribute 单元测试
@@ -34,6 +39,15 @@ import static org.junit.Assert.*;
  * @author coffee
  */
 public class LStringSelectAttributeTest {
+
+    @Mock
+    private DeviceBase mockDevice;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.openMocks(this);
+        when(mockDevice.getId()).thenReturn("testDeviceId");
+    }
 
     // ========== Bound mode tests ==========
 
@@ -110,6 +124,7 @@ public class LStringSelectAttributeTest {
             "manual_status", AttributeClass.MODE, Arrays.asList("Normal", "Maintenance"));
         logicAttr.initAttributeID("manual_status");
         logicAttr.initValueChangeable(true);
+        logicAttr.setDevice(mockDevice);
 
         logicAttr.setDisplayValue("Maintenance", null).join();
         assertEquals("Maintenance", logicAttr.getValue());

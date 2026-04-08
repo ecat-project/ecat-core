@@ -85,14 +85,29 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     /**
      * 支持I18n的构造函数，属性i18n名称规则见i18nDispNamePath
      * 适合参数固定名称的设备的国际化支持，比如气象仪、监测仪等
-     * 
+     *
      * @param attributeID 属性ID, 推荐使用小写，以便对应i18n的key
-     * 
+     *
      * @see i18nDispNamePath
      */
     protected AttributeBase(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
         UnitInfo displayUnit, int displayPrecision, boolean unitChangeable, boolean valueChangeable){
         this(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable, valueChangeable, null);
+    }
+
+    /**
+     * 仅 attributeID 的构造函数，用于先创建属性实例再通过 init 方法完成初始化的场景。
+     *
+     * <p>适用场景：{@link LogicAttributeFactory} 通过反射创建 standalone 逻辑属性时，
+     * 需要 attributeID 来正确初始化 i18n 路径，其余字段由 {@code initFromDefinition} 设置。
+     *
+     * <p><b>不要滥用</b>：常规属性创建应使用完整参数的构造函数，
+     * 仅在"先 new 再 init"模式下使用此构造函数。
+     *
+     * @param attributeID 属性ID，不能为 null（i18n 路径依赖此值）
+     */
+    protected AttributeBase(String attributeID) {
+        this(attributeID, null, null, null, 0, false, false, null);
     }
 
     /**
