@@ -18,8 +18,13 @@ package com.ecat.core.LogicState;
 
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
+import com.ecat.core.State.UnitInfo;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Logic Online Status Attribute - derives online status from bound physical attribute's update time.
@@ -28,17 +33,20 @@ import java.time.LocalDateTime;
  * whether the physical attribute's {@link AttributeBase#getUpdateTime()} is within the last minute.
  *
  * <ul>
- *   <li>{@code bindAttr.getUpdateTime()}距今 &lt; 1分钟 → {@code true} (online)</li>
- *   <li>{@code bindAttr.getUpdateTime()}距今 ≥ 1分钟 → {@code false} (offline)</li>
+ *   <li>{@code bindAttr.getUpdateTime()}距今 &lt; 1分钟 → {@code "online"}</li>
+ *   <li>{@code bindAttr.getUpdateTime()}距今 ≥ 1分钟 → {@code "offline"}</li>
  *   <li>{@code bindAttr} 为 null → 不更新</li>
  * </ul>
  *
- * <p>Read-only: {@link #setDisplayValue(String, com.ecat.core.State.UnitInfo)} returns false.
+ * <p>Read-only: {@link #setDisplayValue(String, UnitInfo)} always returns false.
  *
- * @see LBinaryAttribute
+ * @see LStringSelectAttribute
  * @author coffee
  */
-public class LOnlineStatusAttribute extends LBinaryAttribute {
+public class LOnlineStatusAttribute extends LStringSelectAttribute {
+
+    /** Online status options */
+    private static final List<String> ONLINE_OPTIONS = Arrays.asList("online", "offline");
 
     /**
      * Bound constructor - binds to a core concentration physical attribute.
@@ -46,14 +54,14 @@ public class LOnlineStatusAttribute extends LBinaryAttribute {
      * @param bindAttr the physical attribute to monitor for online status
      */
     public LOnlineStatusAttribute(AttributeBase<?> bindAttr) {
-        super(bindAttr);
+        super(bindAttr, ONLINE_OPTIONS, Collections.emptyMap());
     }
 
     /**
      * Derives online status from the bound physical attribute's update time.
      *
-     * <p>If the physical attribute was updated within the last minute, sets value to true (online).
-     * Otherwise, sets value to false (offline).
+     * <p>If the physical attribute was updated within the last minute, sets value to "online".
+     * Otherwise, sets value to "offline".
      *
      * @param updatedAttr the physical attribute whose value has been updated
      */
@@ -65,10 +73,22 @@ public class LOnlineStatusAttribute extends LBinaryAttribute {
         AttributeStatus phyStatus = bindAttr.getStatus();
         LocalDateTime updateTime = bindAttr.getUpdateTime();
         if (updateTime == null) {
-            updateValue(false, phyStatus != null ? phyStatus : AttributeStatus.EMPTY);
+            updateValue("offline", phyStatus != null ? phyStatus : AttributeStatus.EMPTY);
             return;
         }
         long elapsedSeconds = java.time.Duration.between(updateTime, java.time.LocalDateTime.now()).getSeconds();
-        updateValue(elapsedSeconds < 60, phyStatus);
+        updateValue(elapsedSeconds < 60 ? "online" : "offline", phyStatus);
+    }
+
+    /**
+     * Read-only: online status cannot be set externally.
+     *
+     * @param newDisplayValue ignored
+     * @param fromUnit ignored
+     * @return CompletableFuture with false (always fails)
+     */
+    @Override
+    public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
+        return CompletableFuture.completedFuture(false);
     }
 }

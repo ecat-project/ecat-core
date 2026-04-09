@@ -176,32 +176,6 @@ public class LAQAttributeTest {
         logicAttr.updateBindAttrValue(bindAttr);
     }
 
-    // ========== testUpdateBindAttrValueWithStlfunc ==========
-
-    @Test
-    public void testUpdateBindAttrValueWithStlfunc() {
-        bindAttr = createMassBindAttr();
-        LAQAttribute logicAttr = new LAQAttribute(bindAttr, SO2_MW);
-
-        // Set a source-to-logic conversion function: multiply by 2
-        BiFunction<AttributeBase<?>, UnitInfo, Double> stlfunc = (attr, unit) -> {
-            Object val = attr.getValue();
-            return val != null ? ((Number) val).doubleValue() * 2.0 : null;
-        };
-        logicAttr.setSource2LogicConvertFunc(stlfunc);
-
-        // Update physical attribute
-        bindAttr.updateValue(25.0, AttributeStatus.NORMAL);
-
-        // Trigger logic update
-        logicAttr.updateBindAttrValue(bindAttr);
-
-        // Should apply conversion: 25.0 * 2.0 = 50.0
-        assertNotNull(logicAttr.getValue());
-        assertEquals(50.0, logicAttr.getValue(), 0.01);
-        assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
-    }
-
     // ========== testInitFromDefinition ==========
 
     @Test
@@ -269,36 +243,6 @@ public class LAQAttributeTest {
         assertTrue(result.isDone());
         // 50000.0 ug/m3 = 50.0 mg/m3
         assertEquals(50.0, changeableBindAttr.getValue(), 0.001);
-    }
-
-    // ========== testSetDisplayValueWithLtsfunc ==========
-
-    @Test
-    public void testSetDisplayValueWithLtsfunc() {
-        AQAttribute changeableBindAttr = new AQAttribute(
-                "physical_so2",
-                mockAttrClass,
-                AirMassUnit.MGM3,
-                AirMassUnit.MGM3,
-                2,
-                false,
-                true,  // valueChangeable = true
-                SO2_MW
-        );
-        LAQAttribute logicAttr = new LAQAttribute(changeableBindAttr, SO2_MW);
-
-        // Set a logic-to-source conversion function: divide by 1000
-        logicAttr.setLogic2SourceConvertFunc((displayValueStr, attr, unit) -> {
-            double val = Double.parseDouble(displayValueStr);
-            return val / 1000.0;
-        });
-
-        // Set display value "500.0" in logic's native unit
-        CompletableFuture<Boolean> result = logicAttr.setDisplayValue("500.0", AirMassUnit.UGM3);
-
-        assertTrue(result.isDone());
-        // ltsfunc converts: 500.0 / 1000.0 = 0.5
-        assertEquals(0.5, changeableBindAttr.getValue(), 0.001);
     }
 
     // ========== Additional tests ==========

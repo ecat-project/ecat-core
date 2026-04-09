@@ -45,7 +45,11 @@ import java.util.concurrent.CompletableFuture;
  * @see BinaryAttribute
  * @see LNumericAttribute
  * @author coffee
+ * @deprecated Use {@link LStringSelectAttribute} for new logic attributes. Existing subclasses
+ *             (LRunningStatusAttribute) have been migrated. LOnlineStatusAttribute and
+ *             LAlarmStatusAttribute are also migrated to extend LStringSelectAttribute.
  */
+@Deprecated
 public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute<Boolean> {
 
     /** Bound physical attribute that this logic attribute delegates to; null for standalone mode */

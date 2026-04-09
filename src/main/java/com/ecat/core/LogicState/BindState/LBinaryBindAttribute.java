@@ -49,7 +49,10 @@ import java.util.concurrent.CompletableFuture;
  * @see ILogicBindAttribute
  * @see LBinaryAttribute
  * @author coffee
+ * @deprecated Use {@link com.ecat.core.LogicState.LStringSelectAttribute} with value mapping
+ *             for new logic-to-logic binding attributes. This class will be removed in a future version.
  */
+@Deprecated
 public class LBinaryBindAttribute extends LBinaryAttribute
         implements ILogicBindAttribute<Boolean> {
 

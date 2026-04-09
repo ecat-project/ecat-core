@@ -20,6 +20,7 @@ import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -53,7 +54,7 @@ public class LRunningStatusAttribute extends LStringSelectAttribute {
      * @param bindAttr the physical attribute to monitor for running status
      */
     public LRunningStatusAttribute(AttributeBase<?> bindAttr) {
-        super(bindAttr, RUNNING_STATUS_OPTIONS);
+        super(bindAttr, RUNNING_STATUS_OPTIONS, Collections.emptyMap());
     }
 
     /**

@@ -27,7 +27,10 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.Assert.*;
@@ -56,7 +59,7 @@ public class LStringSelectAttributeTest {
         AttributeBase<String> phyAttr = createStringSelectAttr("test_mode",
             Arrays.asList("Normal", "Maintenance"), "Normal");
         LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
-            Arrays.asList("Normal", "Maintenance", "Calibration"));
+            Arrays.asList("Normal", "Maintenance", "Calibration"), Collections.emptyMap());
         logicAttr.initAttributeID("manual_status");
         logicAttr.initValueChangeable(true);
 
@@ -71,7 +74,7 @@ public class LStringSelectAttributeTest {
             Arrays.asList("Normal", "Maintenance"), "Normal");
 
         LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
-            Arrays.asList("Normal", "Maintenance", "Calibration"));
+            Arrays.asList("Normal", "Maintenance", "Calibration"), Collections.emptyMap());
         logicAttr.initAttributeID("manual_status");
         logicAttr.initValueChangeable(true);
 
@@ -143,7 +146,7 @@ public class LStringSelectAttributeTest {
         AttributeBase<String> phyAttr = createStringSelectAttr("test_mode",
             Arrays.asList("Normal"), "Normal");
         LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
-            Arrays.asList("Normal", "Maintenance"));
+            Arrays.asList("Normal", "Maintenance"), Collections.emptyMap());
         assertFalse(logicAttr.isStandalone());
         assertNotNull(logicAttr.getBindAttr());
     }
@@ -157,6 +160,110 @@ public class LStringSelectAttributeTest {
         assertTrue(logicAttr instanceof ILogicAttribute);
     }
 
+    // ========== valueMapping tests ==========
+
+    @Test
+    public void getValueMappingReturnsDefensiveCopy() {
+        Map<String, String> mapping = new HashMap<>();
+        mapping.put("cooling", "1");
+        mapping.put("heating", "2");
+        TestStringSelectAttr phyAttr = createStringSelectAttr("test_mode",
+            Arrays.asList("cooling", "heating"), "1");
+        LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
+            Arrays.asList("cooling", "heating"), mapping);
+
+        Map<String, String> retrieved = logicAttr.getValueMapping();
+        assertEquals(2, retrieved.size());
+        assertEquals("1", retrieved.get("cooling"));
+
+        // 修改返回的 map 不应影响内部状态
+        retrieved.put("cooling", "99");
+        assertEquals("1", logicAttr.getValueMapping().get("cooling"));
+    }
+
+    @Test
+    public void valueMappingTranslatesPhysicalToStandardOnUpdate() {
+        // 物理值 "1" 应映射到标准 key "cooling"
+        Map<String, String> mapping = new HashMap<>();
+        mapping.put("cooling", "1");
+        mapping.put("heating", "2");
+        TestStringSelectAttr phyAttr = createStringSelectAttr("fan_mode",
+            Arrays.asList("1", "2"), "1");
+
+        LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
+            Arrays.asList("cooling", "heating"), mapping);
+        logicAttr.initAttributeID("fan_status");
+        logicAttr.initValueChangeable(true);
+
+        // 物理值为 "1" → 逻辑值应为 "cooling"
+        logicAttr.updateBindAttrValue(phyAttr);
+        assertEquals("cooling", logicAttr.getValue());
+    }
+
+    @Test
+    public void valueMappingDirectMatchFallsBackToFindOption() {
+        // 空映射 + 物理值直接等于选项字符串 → 应通过 findOption 兜底匹配
+        TestStringSelectAttr phyAttr = createStringSelectAttr("test_mode",
+            Arrays.asList("Normal", "Maintenance"), "Maintenance");
+
+        LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
+            Arrays.asList("Normal", "Maintenance"), Collections.emptyMap());
+        logicAttr.initAttributeID("manual_status");
+        logicAttr.initValueChangeable(true);
+
+        logicAttr.updateBindAttrValue(phyAttr);
+        assertEquals("Maintenance", logicAttr.getValue());
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void updateBindAttrValueThrowsWhenPhysicalValueNotMapped() {
+        // 物理值 "99" 不在映射中，也不是选项字符串 → 应抛异常
+        Map<String, String> mapping = new HashMap<>();
+        mapping.put("cooling", "1");
+        mapping.put("heating", "2");
+        TestStringSelectAttr phyAttr = createStringSelectAttr("fan_mode",
+            Arrays.asList("1", "2"), "99");
+
+        LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
+            Arrays.asList("cooling", "heating"), mapping);
+        logicAttr.initAttributeID("fan_status");
+
+        logicAttr.updateBindAttrValue(phyAttr);
+    }
+
+    @Test
+    public void setDisplayValueTranslatesStandardToPhysical() {
+        // 标准 key "cooling" 应转换为物理值 "1" 写入 bindAttr
+        Map<String, String> mapping = new HashMap<>();
+        mapping.put("cooling", "1");
+        mapping.put("heating", "2");
+        TestStringSelectAttr phyAttr = createStringSelectAttr("fan_mode",
+            Arrays.asList("1", "2"), "2");
+
+        LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
+            Arrays.asList("cooling", "heating"), mapping);
+        logicAttr.initAttributeID("fan_status");
+        logicAttr.initValueChangeable(true);
+
+        logicAttr.setDisplayValue("cooling", null).join();
+        assertEquals("1", phyAttr.getLastSetDisplayValue());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void setDisplayValueThrowsWhenStandardKeyNotMapped() {
+        // "unknown_key" 不在映射中 → 应抛异常
+        Map<String, String> mapping = new HashMap<>();
+        mapping.put("cooling", "1");
+        TestStringSelectAttr phyAttr = createStringSelectAttr("fan_mode",
+            Arrays.asList("1"), "1");
+
+        LStringSelectAttribute logicAttr = new LStringSelectAttribute(phyAttr,
+            Arrays.asList("cooling"), mapping);
+        logicAttr.initAttributeID("fan_status");
+
+        logicAttr.setDisplayValue("unknown_key", null).join();
+    }
+
     // ========== Local test helpers ==========
 
     private static TestStringSelectAttr createStringSelectAttr(String attrId,
@@ -167,6 +274,7 @@ public class LStringSelectAttributeTest {
     private static class TestStringSelectAttr extends AttributeBase<String> {
         private final List<String> options;
         private String value;
+        private String lastSetDisplayValue;
 
         TestStringSelectAttr(String attributeID, List<String> options, String initialValue) {
             super(attributeID, AttributeClass.MODE, null, null, 0, false, false);
@@ -184,6 +292,14 @@ public class LStringSelectAttributeTest {
         @Override public AttributeType getAttributeType() { return AttributeType.STRING_SELECT; }
         @Override public String getValue() { return value; }
 
+        @Override
+        public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
+            this.lastSetDisplayValue = newDisplayValue;
+            this.value = newDisplayValue;
+            return CompletableFuture.completedFuture(true);
+        }
+
         public void setTestValue(String val) { this.value = val; }
+        public String getLastSetDisplayValue() { return lastSetDisplayValue; }
     }
 }

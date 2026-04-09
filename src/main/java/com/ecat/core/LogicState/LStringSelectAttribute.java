@@ -22,7 +22,9 @@ import com.ecat.core.State.StringSelectAttribute;
 import com.ecat.core.State.UnitInfo;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -63,21 +65,33 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     /** Bound physical attribute that this logic attribute delegates to; null for standalone mode */
     private final AttributeBase<?> bindAttr;
 
+    /** Mapping from standard option key to physical value; empty map means no mapping (direct match) */
+    private final Map<String, String> valueMapping;
+
     /**
-     * Bound constructor - creates a logic string select attribute bound to a physical attribute.
+     * Bound constructor with valueMapping - creates a logic string select attribute bound to a physical attribute.
      *
      * <p>Uses bindAttr's metadata as initial values. All logic-level metadata
      * (attributeID, nativeUnit, displayUnit) will be overridden by
      * {@link #initFromDefinition(LogicAttributeDefine)} after construction.
      *
+     * <p>The valueMapping maps standard option keys to physical attribute values.
+     * For example: {"cooling" -> "1", "heating" -> "2"} means when the physical
+     * attribute value is "1", the logic attribute will show "cooling", and vice versa.
+     *
      * @param bindAttr the physical attribute to bind to
-     * @param options the list of valid options for this select attribute
+     * @param standardOptions the list of standard options for this select attribute
+     * @param valueMapping mapping from standard option key to physical value, may be null or empty
      */
-    public LStringSelectAttribute(AttributeBase<?> bindAttr, List<String> options) {
+    public LStringSelectAttribute(AttributeBase<?> bindAttr, List<String> standardOptions,
+                                   Map<String, String> valueMapping) {
         super(bindAttr.getAttributeID(), bindAttr.getAttrClass(),
               bindAttr.getNativeUnit(), bindAttr.getNativeUnit(),
-              false, options, null);
+              false, standardOptions, null);
         this.bindAttr = bindAttr;
+        this.valueMapping = valueMapping != null
+                ? new HashMap<>(valueMapping)
+                : new HashMap<>();
     }
 
     /**
@@ -90,6 +104,7 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     protected LStringSelectAttribute(String attributeID, AttributeClass attrClass, List<String> options) {
         super(attributeID, attrClass, null, null, false, options, null);
         this.bindAttr = null;
+        this.valueMapping = new HashMap<>();
     }
 
     /**
@@ -102,6 +117,7 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     protected LStringSelectAttribute(String attributeID) {
         super(attributeID);
         this.bindAttr = null;
+        this.valueMapping = new HashMap<>();
     }
 
     /**
@@ -122,50 +138,62 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     /**
      * When the bound physical attribute value is updated, update this logic attribute's value.
      *
-     * <p>Bound mode: reads the bindAttr's display value and calls updateValue().
+     * <p>Bound mode: reads the bindAttr's display value, reverse-looks up via valueMapping
+     * (or falls back to direct option match), and calls updateValue().
+     * <b>Strict mode</b>: throws IllegalStateException if the physical value cannot be mapped
+     * to any standard option.
      * Standalone mode: no-op.
      *
      * @param updatedAttr the physical attribute whose value has been updated
+     * @throws IllegalStateException if physical value cannot be mapped to any standard option
      */
     @Override
     public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
         if (bindAttr == null) return;
 
-        // Try displayValue first
         String displayVal = bindAttr.getDisplayValue(bindAttr.getNativeUnit());
-        String matchedOption = null;
-        if (displayVal != null) {
+        if (displayVal == null) {
+            throw new IllegalStateException("bindAttr displayValue is null, attrId=" + attributeID);
+        }
+
+        // 反向查找：物理值 → 标准 key
+        String matchedOption = reverseLookupMapping(displayVal);
+        if (matchedOption == null) {
+            // 兜底：物理值直接匹配选项字符串（无需映射的场景）
             matchedOption = findOption(displayVal);
         }
-
-        // If displayValue didn't match, try raw value as string
-        // (handles numeric physical attrs where displayValue is "0.0" but option is "0")
         if (matchedOption == null) {
-            Object rawValue = bindAttr.getValue();
-            if (rawValue != null) {
-                matchedOption = findOption(rawValue.toString());
-            }
+            throw new IllegalStateException(
+                "Physical value '" + displayVal + "' cannot be mapped to any standard option, attrId=" + attributeID
+                + ", options=" + getOptions());
         }
 
-        if (matchedOption != null) {
-            updateValue(matchedOption, updatedAttr.getStatus());
-        }
+        updateValue(matchedOption, updatedAttr.getStatus());
     }
 
     /**
      * Sets the display value on this logic attribute.
      *
-     * <p>Bound mode: delegates to bindAttr.setDisplayValue().
+     * <p>Bound mode: translates standard option key to physical value via valueMapping,
+     * then delegates to bindAttr.setDisplayValue().
+     * <b>Strict mode</b>: throws IllegalArgumentException if the standard key has no mapping
+     * and valueMapping is non-empty.
      * Standalone mode: calls selectOption() locally.
      *
-     * @param newDisplayValue the display value to set
+     * @param newDisplayValue the standard option key to set
      * @param fromUnit the unit of the display value
      * @return CompletableFuture indicating success/failure
+     * @throws IllegalArgumentException if standard key has no mapping to physical value
      */
     @Override
     public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
         if (bindAttr != null) {
-            return bindAttr.setDisplayValue(newDisplayValue, bindAttr.getNativeUnit());
+            String physicalValue = valueMapping.get(newDisplayValue);
+            if (physicalValue == null) {
+                throw new IllegalArgumentException(
+                    "Standard key '" + newDisplayValue + "' has no mapping to physical value, attrId=" + attributeID);
+            }
+            return bindAttr.setDisplayValue(physicalValue, bindAttr.getNativeUnit());
         }
         // Standalone mode: delegate to parent (valueChangeable check + selectOption)
         // Caller must pass an exact option string as newDisplayValue
@@ -246,11 +274,47 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     }
 
     /**
+     * Gets the valueMapping (standard option key → physical value).
+     *
+     * @return unmodifiable copy of the valueMapping
+     */
+    public Map<String, String> getValueMapping() {
+        return new HashMap<>(valueMapping);
+    }
+
+    /**
+     * Reverse lookup: find the standard option key for a given physical value.
+     *
+     * @param physicalValue the physical attribute value to look up
+     * @return the matching standard option key, or null if not found
+     */
+    private String reverseLookupMapping(String physicalValue) {
+        if (physicalValue == null || valueMapping.isEmpty()) return null;
+        for (Map.Entry<String, String> entry : valueMapping.entrySet()) {
+            if (entry.getValue().equals(physicalValue)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
      * Returns whether this attribute is in standalone mode (no physical binding).
      *
      * @return true if standalone mode, false if bound mode
      */
     public boolean isStandalone() {
         return bindAttr == null;
+    }
+
+    /**
+     * Sets the options list for factory-created instances.
+     * Called by {@link LogicAttributeFactory} after construction when
+     * the definition is a {@link StringSelectAttrDef}.
+     *
+     * @param options the standard options list to set
+     */
+    void setOptionsFromDef(List<String> options) {
+        this.options = options;
     }
 }

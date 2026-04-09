@@ -331,6 +331,19 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
     }
 
     /**
+     * Sets the standard commands list for factory-created instances.
+     * Called by {@link LogicAttributeFactory} after construction when
+     * the definition is a {@link CommandAttrDef}.
+     *
+     * @param commands the standard commands list to set
+     */
+    void setCommandsFromDef(List<String> commands) {
+        this.standardCommands.clear();
+        this.standardCommands.addAll(commands);
+        setCommands(this.standardCommands);
+    }
+
+    /**
      * Implements the abstract sendCommandImpl from StringCommandAttribute.
      *
      * <p>In bound mode, translates the command via mapping and delegates to bindAttr.

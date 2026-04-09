@@ -52,6 +52,11 @@ public class LogicAttributeFactory {
      * 然后调用 {@link ILogicAttribute#initFromDefinition(LogicAttributeDefine)} 完成初始化。
      * attributeID 从 def 中获取，确保 i18n 在构造阶段正确初始化。
      *
+     * <p>对于 {@link StringSelectAttrDef}，在 initFromDefinition 之后会调用
+     * {@link LStringSelectAttribute#setOptionsFromDef(List)} 设置 options 列表。
+     * 对于 {@link CommandAttrDef}，在 initFromDefinition 之后会调用
+     * {@link LCommandAttribute#setCommandsFromDef(List)} 设置 commands 列表。
+     *
      * @param attrClass 逻辑属性类（如 LNumericAttribute.class），
      *                  必须有 protected 构造函数 {@code (String attributeID)}
      * @param def       属性定义，提供初始化元数据（attributeID、attrClass、unit 等）
@@ -67,6 +72,17 @@ public class LogicAttributeFactory {
                 .getDeclaredConstructor(String.class)
                 .newInstance(def.getAttrId());
             instance.initFromDefinition(def);
+
+            // StringSelectAttrDef: 设置 options 列表
+            if (def instanceof StringSelectAttrDef && instance instanceof LStringSelectAttribute) {
+                ((LStringSelectAttribute) instance).setOptionsFromDef(((StringSelectAttrDef) def).getOptions());
+            }
+
+            // CommandAttrDef: 设置 commands 列表
+            if (def instanceof CommandAttrDef && instance instanceof LCommandAttribute) {
+                ((LCommandAttribute) instance).setCommandsFromDef(((CommandAttrDef) def).getCommands());
+            }
+
             return (T) instance;
         } catch (NoSuchMethodException e) {
             throw new RuntimeException(attrClass.getSimpleName()

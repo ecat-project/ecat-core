@@ -44,7 +44,7 @@ public class LAlarmStatusAttributeTest {
         LAlarmStatusAttribute logicAttr = new LAlarmStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertTrue(logicAttr.getValue());
+        assertEquals("alarm", logicAttr.getValue());
         assertEquals(AttributeStatus.ALARM, logicAttr.getStatus());
     }
 
@@ -56,7 +56,7 @@ public class LAlarmStatusAttributeTest {
         LAlarmStatusAttribute logicAttr = new LAlarmStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertFalse(logicAttr.getValue());
+        assertEquals("normal", logicAttr.getValue());
         assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
     }
 
@@ -68,7 +68,7 @@ public class LAlarmStatusAttributeTest {
         LAlarmStatusAttribute logicAttr = new LAlarmStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertFalse(logicAttr.getValue());
+        assertEquals("normal", logicAttr.getValue());
         assertEquals(AttributeStatus.MAINTENANCE, logicAttr.getStatus());
     }
 
@@ -79,11 +79,11 @@ public class LAlarmStatusAttributeTest {
 
         LAlarmStatusAttribute logicAttr = new LAlarmStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
-        assertFalse(logicAttr.getValue());
+        assertEquals("normal", logicAttr.getValue());
 
         phyAttr.setTestStatus(AttributeStatus.ALARM);
         logicAttr.updateBindAttrValue(phyAttr);
-        assertTrue(logicAttr.getValue());
+        assertEquals("alarm", logicAttr.getValue());
     }
 
     @Test
@@ -93,11 +93,11 @@ public class LAlarmStatusAttributeTest {
 
         LAlarmStatusAttribute logicAttr = new LAlarmStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
-        assertTrue(logicAttr.getValue());
+        assertEquals("alarm", logicAttr.getValue());
 
         phyAttr.setTestStatus(AttributeStatus.NORMAL);
         logicAttr.updateBindAttrValue(phyAttr);
-        assertFalse(logicAttr.getValue());
+        assertEquals("normal", logicAttr.getValue());
     }
 
     @Test
@@ -108,7 +108,7 @@ public class LAlarmStatusAttributeTest {
         LAlarmStatusAttribute logicAttr = new LAlarmStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertFalse(logicAttr.getValue());
+        assertEquals("normal", logicAttr.getValue());
         assertEquals(AttributeStatus.MALFUNCTION, logicAttr.getStatus());
     }
 
@@ -133,17 +133,17 @@ public class LAlarmStatusAttributeTest {
         LAlarmStatusAttribute logicAttr = new LAlarmStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertFalse(logicAttr.getValue());
+        assertEquals("normal", logicAttr.getValue());
         assertEquals(AttributeStatus.INSUFFICIENT, logicAttr.getStatus());
     }
 
     // ========== 继承与接口测试 ==========
 
     @Test
-    public void extendsLBinaryAttribute() {
+    public void extendsLStringSelectAttribute() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         LAlarmStatusAttribute logicAttr = new LAlarmStatusAttribute(phyAttr);
-        assertTrue(logicAttr instanceof LBinaryAttribute);
+        assertTrue(logicAttr instanceof LStringSelectAttribute);
     }
 
     @Test

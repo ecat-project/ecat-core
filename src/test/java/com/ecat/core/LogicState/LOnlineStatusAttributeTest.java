@@ -46,7 +46,7 @@ public class LOnlineStatusAttributeTest {
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertTrue(logicAttr.getValue());
+        assertEquals("online", logicAttr.getValue());
         assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
     }
 
@@ -59,7 +59,7 @@ public class LOnlineStatusAttributeTest {
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertFalse(logicAttr.getValue());
+        assertEquals("offline", logicAttr.getValue());
         assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
     }
 
@@ -72,7 +72,7 @@ public class LOnlineStatusAttributeTest {
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertFalse(logicAttr.getValue());
+        assertEquals("offline", logicAttr.getValue());
         assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
     }
 
@@ -85,7 +85,7 @@ public class LOnlineStatusAttributeTest {
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertFalse(logicAttr.getValue());
+        assertEquals("offline", logicAttr.getValue());
         assertEquals(AttributeStatus.EMPTY, logicAttr.getStatus());
     }
 
@@ -100,7 +100,7 @@ public class LOnlineStatusAttributeTest {
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertTrue(logicAttr.getValue());
+        assertEquals("online", logicAttr.getValue());
     }
 
     @Test
@@ -112,7 +112,7 @@ public class LOnlineStatusAttributeTest {
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertFalse(logicAttr.getValue());
+        assertEquals("offline", logicAttr.getValue());
     }
 
     @Test
@@ -123,12 +123,12 @@ public class LOnlineStatusAttributeTest {
 
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
-        assertTrue(logicAttr.getValue());
+        assertEquals("online", logicAttr.getValue());
 
         // 模拟设备断开，更新时间设为 2 分钟前
         phyAttr.setTestUpdateTime(LocalDateTime.now().minusSeconds(120));
         logicAttr.updateBindAttrValue(phyAttr);
-        assertFalse(logicAttr.getValue());
+        assertEquals("offline", logicAttr.getValue());
     }
 
     @Test
@@ -139,12 +139,12 @@ public class LOnlineStatusAttributeTest {
 
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
-        assertFalse(logicAttr.getValue());
+        assertEquals("offline", logicAttr.getValue());
 
         // 模拟设备恢复，更新时间设为现在
         phyAttr.setTestUpdateTime(LocalDateTime.now());
         logicAttr.updateBindAttrValue(phyAttr);
-        assertTrue(logicAttr.getValue());
+        assertEquals("online", logicAttr.getValue());
     }
 
     @Test
@@ -156,7 +156,7 @@ public class LOnlineStatusAttributeTest {
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
         logicAttr.updateBindAttrValue(phyAttr);
 
-        assertTrue(logicAttr.getValue());
+        assertEquals("online", logicAttr.getValue());
         assertEquals(AttributeStatus.MAINTENANCE, logicAttr.getStatus());
     }
 
@@ -170,17 +170,17 @@ public class LOnlineStatusAttributeTest {
         logicAttr.updateBindAttrValue(phyAttr);
 
         // 即使在报警状态，只要最近更新过，仍为 online
-        assertTrue(logicAttr.getValue());
+        assertEquals("online", logicAttr.getValue());
         assertEquals(AttributeStatus.ALARM, logicAttr.getStatus());
     }
 
     // ========== 继承与接口测试 ==========
 
     @Test
-    public void extendsLBinaryAttribute() {
+    public void extendsLStringSelectAttribute() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         LOnlineStatusAttribute logicAttr = new LOnlineStatusAttribute(phyAttr);
-        assertTrue(logicAttr instanceof LBinaryAttribute);
+        assertTrue(logicAttr instanceof LStringSelectAttribute);
     }
 
     @Test
