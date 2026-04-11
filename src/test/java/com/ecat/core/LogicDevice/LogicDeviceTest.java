@@ -255,9 +255,9 @@ public class LogicDeviceTest {
 
     @Test
     public void testGenAttrMapWithMissingDeviceId() {
-        // mapping entry without device_id should be skipped
+        // mapping entry without device_id should be created as standalone attribute
         Map<String, Object> mappingConfig = new HashMap<>();
-        // no "device_id" key
+        // no "device_id" key — user selected "no physical device"
         Map<String, Object> mappings = new LinkedHashMap<>();
         mappings.put("test_attr", mappingConfig);
         ConfigEntry entry = createEntryWithMappings("test-001", mappings);
@@ -267,12 +267,13 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        assertTrue("Mapping without device_id should be skipped", attrMap.isEmpty());
+        assertFalse("Mapping without device_id should be created as standalone", attrMap.isEmpty());
+        assertTrue("Should contain test_attr", attrMap.containsKey("test_attr"));
     }
 
     @Test
     public void testGenAttrMapWithEmptyDeviceId() {
-        // mapping entry with empty device_id should be skipped
+        // mapping entry with empty device_id should be created as standalone attribute
         Map<String, Object> mappingConfig = new HashMap<>();
         mappingConfig.put("device_id", "");
         Map<String, Object> mappings = new LinkedHashMap<>();
@@ -284,7 +285,8 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        assertTrue("Mapping with empty device_id should be skipped", attrMap.isEmpty());
+        assertFalse("Mapping with empty device_id should be created as standalone", attrMap.isEmpty());
+        assertTrue("Should contain test_attr", attrMap.containsKey("test_attr"));
     }
 
     @Test

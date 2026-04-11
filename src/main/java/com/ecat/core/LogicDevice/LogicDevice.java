@@ -18,13 +18,15 @@ package com.ecat.core.LogicDevice;
 
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.Device.DeviceBase;
+import com.ecat.core.Device.DeviceStatus;
 import com.ecat.core.LogicMapping.IDeviceMapping;
 import com.ecat.core.LogicMapping.LogicMappingManager;
 import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.LogicState.LogicAttributeFactory;
-import com.ecat.core.LogicState.LNumericAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
 import com.ecat.core.State.AttributeBase;
+import com.ecat.core.State.AttributeStatus;
+import com.ecat.core.State.SelectAttribute;
 
 import lombok.Getter;
 
@@ -239,6 +241,10 @@ public abstract class LogicDevice extends DeviceBase {
                         }
                         attr = mapping.getAttr(attrId, phyDevice, this);
                     }
+                } else if (attrConfig != null) {
+                    // device_id 为 null（用户选择"无物理设备"）：创建独立属性，不绑定物理设备
+                    attr = LogicAttributeFactory.create(
+                        (Class<? extends ILogicAttribute<?>>) def.getAttrClassType(), def);
                 }
             } else {
                 // YAML 未配置映射的属性，根据类型分别处理：
@@ -290,6 +296,119 @@ public abstract class LogicDevice extends DeviceBase {
                 }
             }
             // attr == null means this business attribute is not configured in mappings
+        }
+    }
+
+    // ---- Device Status Aggregation ----
+
+    /**
+     * 聚合逻辑属性状态为设备级状态。
+     *
+     * <p>优先级链：
+     * <ol>
+     *   <li>manual_status != Normal → 映射为设备状态</li>
+     *   <li>online_status == offline → UNKNOWN</li>
+     *   <li>alarm_status == alarm → ALARM</li>
+     *   <li>running_status → 映射为设备状态</li>
+     * </ol>
+     */
+    @Override
+    public DeviceStatus getDeviceStatus() {
+        this.deviceStatus = computeAggregatedStatus();
+        return this.deviceStatus;
+    }
+
+    private DeviceStatus computeAggregatedStatus() {
+        // Priority 1: manual_status — if not Normal, it takes precedence
+        String manual = getStatusAttrValue("manual_status");
+        if (manual != null && !"Normal".equals(manual)) {
+            return mapAttributeStatusToDeviceStatus(AttributeStatus.getEnum(manual));
+        }
+
+        // Priority 2: online_status — offline means device unreachable
+        String online = getStatusAttrValue("online_status");
+        if ("offline".equals(online)) {
+            return DeviceStatus.UNKNOWN;
+        }
+
+        // Priority 3: alarm_status
+        String alarm = getStatusAttrValue("alarm_status");
+        if ("alarm".equals(alarm)) {
+            return DeviceStatus.ALARM;
+        }
+
+        // Priority 4: running_status — map to device status
+        String running = getStatusAttrValue("running_status");
+        if (running != null) {
+            return mapAttributeStatusToDeviceStatus(AttributeStatus.getEnum(running));
+        }
+
+        return DeviceStatus.UNKNOWN;
+    }
+
+    /**
+     * 从 attrs 中读取状态属性当前值。
+     *
+     * @param attrId 属性ID（如 "online_status"、"running_status"）
+     * @return 当前选项值的字符串形式，属性不存在或值为 null 时返回 null
+     */
+    private String getStatusAttrValue(String attrId) {
+        AttributeBase<?> attr = getAttrs().get(attrId);
+        if (attr instanceof SelectAttribute) {
+            Object option = ((SelectAttribute<?>) attr).getCurrentOption();
+            return option != null ? option.toString() : null;
+        }
+        return null;
+    }
+
+    /**
+     * 将 AttributeStatus 映射为 DeviceStatus。
+     *
+     * <p>分组规则：
+     * <ul>
+     *   <li>NORMAL → NORMAL</li>
+     *   <li>ALARM, MALFUNCTION → ALARM</li>
+     *   <li>CALIBRATION 系列（含各类检查） → CALIBRATION</li>
+     *   <li>MAINTENANCE, WAITING, DEVICE_REPLACEMENT, 及统计类状态 → MAINTENANCE</li>
+     *   <li>EMPTY, OTHER, 未知 → UNKNOWN</li>
+     * </ul>
+     */
+    private DeviceStatus mapAttributeStatusToDeviceStatus(AttributeStatus attrStatus) {
+        if (attrStatus == null || attrStatus == AttributeStatus.EMPTY) {
+            return DeviceStatus.UNKNOWN;
+        }
+        switch (attrStatus) {
+            case NORMAL:
+                return DeviceStatus.NORMAL;
+            case ALARM:
+            case MALFUNCTION:
+                return DeviceStatus.ALARM;
+            case CALIBRATION:
+            case ZERO_CALIBRATION:
+            case SPAN_CALIBRATION:
+            case ZERO_CHECK:
+            case SPAN_CHECK:
+            case ACCURACY_CHECK:
+            case FLOW_CHECK:
+            case QUALITY_CHECK:
+            case ZERO_DRIFT:
+            case SPAN_DRIFT:
+            case SPAN_REPRODUCIBILITY:
+            case MULTI_POINT_SPAN:
+            case PRECISION_CHECK:
+            case TEMP_PRESSURE_CALIBRATION:
+                return DeviceStatus.CALIBRATION;
+            case MAINTENANCE:
+            case WAITING:
+            case DEVICE_REPLACEMENT:
+            case INSUFFICIENT:
+            case ABNORMAL_CHANGE:
+            case NO_CHANGE:
+            case OVER_UPPER_LIMIT:
+            case UNDER_LOWER_LIMIT:
+                return DeviceStatus.MAINTENANCE;
+            default:
+                return DeviceStatus.UNKNOWN;
         }
     }
 }

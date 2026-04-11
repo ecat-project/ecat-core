@@ -100,6 +100,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         log.info("Creating entry: {}", entry.getUniqueId());
         DeviceBase device = createDeviceFromEntry(entry);
         if (device != null) {
+            // device.load(core) 已在各集成的 createDeviceFromEntry() 中调用
             addDevice(device);
             device.start();
         }
@@ -124,6 +125,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         if (newDevice == null) {
             throw new RuntimeException("Failed to create device with new config for entry: " + entryId);
         }
+        // device.load(core) 已在各集成的 createDeviceFromEntry() 中调用
         addDevice(newDevice);
         newDevice.start();
 
