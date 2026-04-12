@@ -184,32 +184,26 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
      */
     @Override
     public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
-        if (bindAttr != null) {
-            // Translate standard command to physical command via mapping
-            String physicalCommand = translateCommand(newDisplayValue);
-            return bindAttr.setDisplayValue(physicalCommand, bindAttr.getNativeUnit());
-        }
-        // Standalone mode: silently complete without error
-        return CompletableFuture.completedFuture(true);
+        // Bound and standalone modes both use sendCommand() which handles:
+        // - translateCommand + bindAttr.setDisplayValue (via sendCommandImpl) for bound mode
+        // - setValue + publicState on success
+        // - standalone mode completes silently
+        return sendCommand(newDisplayValue);
     }
 
     /**
-     * Sends a command, translating via command mapping if needed.
+     * Sends a standard command, translating via command mapping if needed.
      *
-     * <p>Bound mode: translates the standard command via commandMapping, then delegates
-     * to bindAttr.setDisplayValue() with the translated physical command string.
-     * Standalone mode: no-op (silently ignores).
+     * <p>Delegates to {@link #sendCommand(String)} which handles:
+     * - translateCommand + bindAttr.setDisplayValue (via sendCommandImpl) for bound mode
+     * - setValue + publicState on success
+     * - standalone mode completes silently
      *
      * @param standardCommand the standard command string to send (e.g., "ZERO_START")
      * @return CompletableFuture indicating success/failure
      */
     public CompletableFuture<Boolean> sendStandardCommand(String standardCommand) {
-        if (bindAttr != null) {
-            String physicalCommand = translateCommand(standardCommand);
-            return bindAttr.setDisplayValue(physicalCommand, bindAttr.getNativeUnit());
-        }
-        // Standalone mode: silently complete without error
-        return CompletableFuture.completedFuture(true);
+        return sendCommand(standardCommand);
     }
 
     /**

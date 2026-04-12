@@ -33,6 +33,7 @@ import com.ecat.core.I18n.I18nHelper;
 import com.ecat.core.I18n.I18nKeyPath;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.State.AttributeBase;
+import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
 
@@ -84,8 +85,177 @@ public abstract class DeviceBase implements DeviceControl {
     protected String model;
     @Getter
     protected DeviceClasses deviceClass;
-    @Getter
     protected DeviceStatus deviceStatus;
+
+    /**
+     * 获取设备状态。
+     *
+     * <p>采用懒计算机制：每次调用时通过 {@link #computeDeviceStatus()} 重新计算。
+     * 子类可覆写 {@code computeDeviceStatus()} 实现自定义状态聚合逻辑。
+     *
+     * <p>如果子类自行管理 deviceStatus 字段（如直接赋值），可覆写此方法直接返回 {@code this.deviceStatus}，
+     * 跳过计算逻辑，保持向后兼容。
+     *
+     * @return 当前设备状态
+     */
+    public DeviceStatus getDeviceStatus() {
+        DeviceStatus computed = computeDeviceStatus();
+        if (computed != null) {
+            this.deviceStatus = computed;
+        }
+        return this.deviceStatus;
+    }
+
+    /**
+     * 从属性状态懒计算设备状态（通用算法）。
+     *
+     * <p>通用计算逻辑（按优先级）：
+     * <ol>
+     *   <li><b>最严重的属性状态</b>：遍历所有属性，找到最严重的 AttributeStatus，映射为 DeviceStatus</li>
+     *   <li><b>在线判断</b>：如果有属性在近期更新过（60秒内），视为 NORMAL</li>
+     *   <li><b>离线/未知</b>：无任何数据更新 → UNKNOWN</li>
+     * </ol>
+     *
+     * <p>子类可覆写此方法实现自定义逻辑。参考：
+     * <ul>
+     *   <li>{@code MyDeviceBase.computeDeviceStatus()} — sailhero manual_status 优先</li>
+     *   <li>{@code LogicDevice.computeDeviceStatus()} — 逻辑设备状态属性聚合</li>
+     * </ul>
+     *
+     * @return 计算得到的设备状态，返回 null 表示不更新字段
+     */
+    protected DeviceStatus computeDeviceStatus() {
+        if (getAttrs() == null || getAttrs().isEmpty()) {
+            return DeviceStatus.UNKNOWN;
+        }
+
+        // Priority 1: 扫描所有属性，找到最严重的 AttributeStatus
+        DeviceStatus worstFromAttrs = scanWorstAttributeStatus();
+        if (worstFromAttrs != null && worstFromAttrs != DeviceStatus.UNKNOWN) {
+            return worstFromAttrs;
+        }
+
+        // Priority 2: 在线判断 — 有近期更新数据则为 NORMAL
+        if (hasRecentUpdate()) {
+            return DeviceStatus.NORMAL;
+        }
+
+        // Priority 3: 无数据或数据过期
+        return DeviceStatus.UNKNOWN;
+    }
+
+    /**
+     * 扫描所有属性，找到最严重的 AttributeStatus 并映射为 DeviceStatus。
+     *
+     * @return 最严重的 DeviceStatus，如果所有属性都是 NORMAL 或无状态则返回 null
+     */
+    private DeviceStatus scanWorstAttributeStatus() {
+        DeviceStatus worst = null;
+        for (AttributeBase<?> attr : getAttrs().values()) {
+            AttributeStatus attrStatus = attr.getStatus();
+            if (attrStatus != null && attrStatus != AttributeStatus.EMPTY) {
+                DeviceStatus ds = mapAttributeStatusToDeviceStatus(attrStatus);
+                if (ds != null) {
+                    int severity = getStatusSeverity(ds);
+                    int currentWorst = (worst != null) ? getStatusSeverity(worst) : 0;
+                    if (severity > currentWorst) {
+                        worst = ds;
+                    }
+                }
+            }
+        }
+        return worst;
+    }
+
+    /**
+     * 检查是否有属性在最近 60 秒内更新过。
+     *
+     * @return true 如果至少有一个属性的 updateTime 在 60 秒内
+     */
+    private boolean hasRecentUpdate() {
+        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusSeconds(60);
+        for (AttributeBase<?> attr : getAttrs().values()) {
+            java.time.LocalDateTime ut = attr.getUpdateTime();
+            if (ut != null && ut.isAfter(cutoff)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 设备状态严重程度排序。
+     * ALARM(4) > MAINTENANCE(3) = CALIBRATION(3) > WARM_UP(2) = DIAGNOSTIC(2) = RECOVERY(2) > NORMAL(1) = MEASURE(1) > UNKNOWN(0)
+     */
+    private int getStatusSeverity(DeviceStatus ds) {
+        if (ds == null) return 0;
+        switch (ds) {
+            case ALARM: return 4;
+            case MAINTENANCE: return 3;
+            case CALIBRATION: return 3;
+            case WARM_UP: return 2;
+            case DIAGNOSTIC: return 2;
+            case RECOVERY: return 2;
+            case NORMAL: return 1;
+            case MEASURE: return 1;
+            default: return 0; // UNKNOWN, STANDBY
+        }
+    }
+
+    /**
+     * 将 AttributeStatus 映射为 DeviceStatus（通用映射）。
+     *
+     * <p>分组规则：
+     * <ul>
+     *   <li>NORMAL → NORMAL</li>
+     *   <li>ALARM, MALFUNCTION → ALARM</li>
+     *   <li>CALIBRATION 系列 → CALIBRATION</li>
+     *   <li>MAINTENANCE, DEVICE_REPLACEMENT → MAINTENANCE</li>
+     *   <li>WAITING → WARM_UP</li>
+     *   <li>统计类状态 → DIAGNOSTIC</li>
+     *   <li>EMPTY, OTHER, 未知 → UNKNOWN</li>
+     * </ul>
+     */
+    protected DeviceStatus mapAttributeStatusToDeviceStatus(AttributeStatus attrStatus) {
+        if (attrStatus == null || attrStatus == AttributeStatus.EMPTY) {
+            return DeviceStatus.UNKNOWN;
+        }
+        switch (attrStatus) {
+            case NORMAL:
+                return DeviceStatus.NORMAL;
+            case ALARM:
+            case MALFUNCTION:
+                return DeviceStatus.ALARM;
+            case CALIBRATION:
+            case ZERO_CALIBRATION:
+            case SPAN_CALIBRATION:
+            case ZERO_CHECK:
+            case SPAN_CHECK:
+            case ACCURACY_CHECK:
+            case FLOW_CHECK:
+            case QUALITY_CHECK:
+            case ZERO_DRIFT:
+            case SPAN_DRIFT:
+            case SPAN_REPRODUCIBILITY:
+            case MULTI_POINT_SPAN:
+            case PRECISION_CHECK:
+            case TEMP_PRESSURE_CALIBRATION:
+                return DeviceStatus.CALIBRATION;
+            case MAINTENANCE:
+            case DEVICE_REPLACEMENT:
+                return DeviceStatus.MAINTENANCE;
+            case WAITING:
+                return DeviceStatus.WARM_UP;
+            case INSUFFICIENT:
+            case ABNORMAL_CHANGE:
+            case NO_CHANGE:
+            case OVER_UPPER_LIMIT:
+            case UNDER_LOWER_LIMIT:
+                return DeviceStatus.DIAGNOSTIC;
+            default:
+                return DeviceStatus.UNKNOWN;
+        }
+    }
     @Getter
     private List<DeviceAbility> abilities;
     

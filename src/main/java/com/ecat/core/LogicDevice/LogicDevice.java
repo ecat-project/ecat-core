@@ -313,9 +313,8 @@ public abstract class LogicDevice extends DeviceBase {
      * </ol>
      */
     @Override
-    public DeviceStatus getDeviceStatus() {
-        this.deviceStatus = computeAggregatedStatus();
-        return this.deviceStatus;
+    protected DeviceStatus computeDeviceStatus() {
+        return computeAggregatedStatus();
     }
 
     private DeviceStatus computeAggregatedStatus() {
@@ -359,56 +358,5 @@ public abstract class LogicDevice extends DeviceBase {
             return option != null ? option.toString() : null;
         }
         return null;
-    }
-
-    /**
-     * 将 AttributeStatus 映射为 DeviceStatus。
-     *
-     * <p>分组规则：
-     * <ul>
-     *   <li>NORMAL → NORMAL</li>
-     *   <li>ALARM, MALFUNCTION → ALARM</li>
-     *   <li>CALIBRATION 系列（含各类检查） → CALIBRATION</li>
-     *   <li>MAINTENANCE, WAITING, DEVICE_REPLACEMENT, 及统计类状态 → MAINTENANCE</li>
-     *   <li>EMPTY, OTHER, 未知 → UNKNOWN</li>
-     * </ul>
-     */
-    private DeviceStatus mapAttributeStatusToDeviceStatus(AttributeStatus attrStatus) {
-        if (attrStatus == null || attrStatus == AttributeStatus.EMPTY) {
-            return DeviceStatus.UNKNOWN;
-        }
-        switch (attrStatus) {
-            case NORMAL:
-                return DeviceStatus.NORMAL;
-            case ALARM:
-            case MALFUNCTION:
-                return DeviceStatus.ALARM;
-            case CALIBRATION:
-            case ZERO_CALIBRATION:
-            case SPAN_CALIBRATION:
-            case ZERO_CHECK:
-            case SPAN_CHECK:
-            case ACCURACY_CHECK:
-            case FLOW_CHECK:
-            case QUALITY_CHECK:
-            case ZERO_DRIFT:
-            case SPAN_DRIFT:
-            case SPAN_REPRODUCIBILITY:
-            case MULTI_POINT_SPAN:
-            case PRECISION_CHECK:
-            case TEMP_PRESSURE_CALIBRATION:
-                return DeviceStatus.CALIBRATION;
-            case MAINTENANCE:
-            case WAITING:
-            case DEVICE_REPLACEMENT:
-            case INSUFFICIENT:
-            case ABNORMAL_CHANGE:
-            case NO_CHANGE:
-            case OVER_UPPER_LIMIT:
-            case UNDER_LOWER_LIMIT:
-                return DeviceStatus.MAINTENANCE;
-            default:
-                return DeviceStatus.UNKNOWN;
-        }
     }
 }

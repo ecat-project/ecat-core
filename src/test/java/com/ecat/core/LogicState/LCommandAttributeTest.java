@@ -16,6 +16,8 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.ConfigEntry.ConfigEntry;
+import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import org.junit.Test;
@@ -74,10 +76,12 @@ public class LCommandAttributeTest {
             Arrays.asList("ZERO_START", "ZERO_END"), mapping);
         logicAttr.initAttributeID("dispatch_command");
         logicAttr.initValueChangeable(true);
+        logicAttr.setDevice(createMockDevice());
 
         logicAttr.setDisplayValue("ZERO_START", null).join();
 
         assertEquals("zero_calibration_start", phyAttr.getLastCommand());
+        assertEquals("ZERO_START", logicAttr.getValue());
     }
 
     @Test
@@ -100,10 +104,12 @@ public class LCommandAttributeTest {
             Arrays.asList("ZERO_START", "ZERO_END"), new HashMap<String, String>());
         logicAttr.initAttributeID("dispatch_command");
         logicAttr.initValueChangeable(true);
+        logicAttr.setDevice(createMockDevice());
 
         logicAttr.setDisplayValue("ZERO_START", null).join();
 
         assertEquals("ZERO_START", phyAttr.getLastCommand());
+        assertEquals("ZERO_START", logicAttr.getValue());
     }
 
     // ========== Standalone mode tests ==========
@@ -126,6 +132,7 @@ public class LCommandAttributeTest {
             Arrays.asList("ZERO_START", "ZERO_END"));
         logicAttr.initAttributeID("dispatch_command");
         logicAttr.initValueChangeable(true);
+        logicAttr.setDevice(createMockDevice());
 
         try {
             logicAttr.setDisplayValue("ZERO_START", null).join();
@@ -141,9 +148,11 @@ public class LCommandAttributeTest {
             Arrays.asList("ZERO_START", "ZERO_END"));
         logicAttr.initAttributeID("dispatch_command");
         logicAttr.initValueChangeable(true);
+        logicAttr.setDevice(createMockDevice());
 
         Boolean result = logicAttr.setDisplayValue("ZERO_START", null).join();
         assertTrue(result);
+        assertEquals("ZERO_START", logicAttr.getValue());
     }
 
     @Test
@@ -233,6 +242,23 @@ public class LCommandAttributeTest {
 
     private static TestStringCommandAttr createStringCommandAttr(String attrId) {
         return new TestStringCommandAttr(attrId);
+    }
+
+    /** Minimal mock DeviceBase for standalone tests (sendCommand needs getDevice().getId()) */
+    private static DeviceBase createMockDevice() {
+        ConfigEntry entry = new ConfigEntry();
+        entry.setEntryId("test-device");
+        entry.setUniqueId("test-device");
+        java.util.Map<String, Object> data = new java.util.HashMap<>();
+        data.put("name", "test-device");
+        entry.setData(data);
+        return new DeviceBase(entry) {
+            @Override public String getId() { return "test-device"; }
+            @Override public void init() {}
+            @Override public void start() {}
+            @Override public void stop() {}
+            @Override public void release() {}
+        };
     }
 
     /** Minimal test StringCommand attribute */
