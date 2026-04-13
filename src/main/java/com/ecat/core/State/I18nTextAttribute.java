@@ -98,11 +98,8 @@ public class I18nTextAttribute extends TextAttribute {
             UnitInfo displayUnit, boolean valueChangeable, List<String> options,
             Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback,
             boolean caseSensitive) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, onChangedCallback);
-
-        this.options = options;
-        this.optionCache = new HashMap<>();
-        this.caseSensitive = caseSensitive;
+        this(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, options,
+                onChangedCallback, caseSensitive, false, null);
     }
 
     /**
@@ -112,7 +109,34 @@ public class I18nTextAttribute extends TextAttribute {
             UnitInfo displayUnit, boolean valueChangeable, List<String> options,
             Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback,
             boolean caseSensitive) {
-        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, onChangedCallback);
+        this(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, options,
+                onChangedCallback, caseSensitive, false, null);
+    }
+
+    /**
+     * 完整参数构造函数（包含 caseSensitive + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public I18nTextAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, boolean valueChangeable, List<String> options,
+            Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback,
+            boolean caseSensitive, boolean persistable, String defaultValue) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, persistable, defaultValue, onChangedCallback);
+
+        this.options = options;
+        this.optionCache = new HashMap<>();
+        this.caseSensitive = caseSensitive;
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + caseSensitive + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public I18nTextAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, boolean valueChangeable, List<String> options,
+            Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback,
+            boolean caseSensitive, boolean persistable, String defaultValue) {
+        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, persistable, defaultValue, onChangedCallback);
 
         this.options = options;
         this.optionCache = new HashMap<>();

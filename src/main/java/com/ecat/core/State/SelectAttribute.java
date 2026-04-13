@@ -87,11 +87,7 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
     public SelectAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, boolean valueChangeable, List<T> options,
             Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, 0, false,
-                valueChangeable, onChangedCallback);
-
-        this.options = options;
-        this.valueDef = getValueDefinition(); // 初始化验证定义
+        this(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, options, false, null, onChangedCallback);
     }
 
     /**
@@ -100,8 +96,35 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
     public SelectAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, boolean valueChangeable, List<T> options,
             Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, 0, false,
-                valueChangeable, onChangedCallback);
+        this(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, options, false, null, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public SelectAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, boolean valueChangeable, List<T> options,
+            boolean persistable, T defaultValue,
+            Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, 0, false,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+
+        this.options = options;
+        this.valueDef = getValueDefinition(); // 初始化验证定义
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public SelectAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, boolean valueChangeable, List<T> options,
+            boolean persistable, T defaultValue,
+            Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, 0, false,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+        this.displayName = displayName;
 
         this.options = options;
         this.valueDef = getValueDefinition(); // 初始化验证定义

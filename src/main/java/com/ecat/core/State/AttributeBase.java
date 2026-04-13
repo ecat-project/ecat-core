@@ -18,13 +18,18 @@ package com.ecat.core.State;
 
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 import lombok.Getter;
+import lombok.Setter;
 
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
@@ -82,6 +87,15 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
 
     protected Log log;
 
+    // 持久化支持
+    @Getter
+    @Setter
+    protected boolean persistable = false; // 是否持久化属性状态，默认 false
+
+    @Getter
+    @Setter
+    protected T defaultValue = null; // 默认值，无历史记录时使用
+
     /**
      * 支持I18n的构造函数，属性i18n名称规则见i18nDispNamePath
      * 适合参数固定名称的设备的国际化支持，比如气象仪、监测仪等
@@ -120,6 +134,18 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     protected AttributeBase(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
         UnitInfo displayUnit, int displayPrecision, boolean unitChangeable, boolean valueChangeable,
         Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback){
+        this(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable, valueChangeable,
+            false, null, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 所有其他构造函数最终委托到此构造函数
+     */
+    protected AttributeBase(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+        UnitInfo displayUnit, int displayPrecision, boolean unitChangeable, boolean valueChangeable,
+        boolean persistable, T defaultValue,
+        Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
 
         this.targetType = extractTargetType();
 
@@ -134,14 +160,11 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
         this.valueChangeable = valueChangeable;
 
         this.onChangedCallback = onChangedCallback;
+        this.persistable = persistable;
+        this.defaultValue = defaultValue;
 
-        // 初始化日志对象为子类的类名
         this.log = LogFactory.getLogger(getClass());
-
-        // 初始化I18n路径 - 使用子类提供的路径前缀
         this.i18nDispNamePath = getI18nPrefixPath().withLastSegment(attributeID.toLowerCase(Locale.ENGLISH));
-
-        // 延迟初始化验证定义，避免在构造函数中调用抽象方法
         this.valueDef = null;
     }
 
@@ -432,6 +455,14 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     protected boolean updateValue(T newValue){
         this.value = newValue;
         this.setValueUpdated();
+        // 持久化：persistable 标志为 true 且已绑定设备时自动保存
+        if (persistable && device != null && device.getCore() != null) {
+            try {
+                device.getCore().getStateManager().saveState(device, this);
+            } catch (Exception e) {
+                log.error("Failed to persist state for attribute " + attributeID, e);
+            }
+        }
         return true;
     }
 
@@ -621,6 +652,74 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
                 "，仅支持具体类作为泛型参数"
             );
         }
+    }
+
+    /**
+     * 从 PersistedState 恢复属性状态（value, status, updateTime）
+     * 基类统一处理类型转换，不需要子类重写
+     */
+    public void restore(PersistedState state) {
+        this.value = convertObjectToTargetType(state.value);
+        this.status = AttributeStatus.fromId(state.statusCode);
+        if (state.updateTimeEpochMs > 0) {
+            this.updateTime = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(state.updateTimeEpochMs),
+                ZoneId.systemDefault()
+            );
+        }
+    }
+
+    /**
+     * 使用 defaultValue 恢复属性
+     */
+    public void restoreFromDefault() {
+        this.value = defaultValue;
+        this.status = AttributeStatus.NORMAL;
+        this.updateTime = LocalDateTime.now();
+    }
+
+    /**
+     * 将 Object 转换为目标类型 T
+     * 用于从 PersistedState 恢复时 fastjson2 反序列化后的类型窄化
+     * fastjson2 可能将数字反序列化为 BigDecimal/Integer/Long 等
+     */
+    @SuppressWarnings("unchecked")
+    private T convertObjectToTargetType(Object rawValue) {
+        if (rawValue == null) return null;
+
+        if (targetType == Double.class && rawValue instanceof Number) {
+            return (T) (Double) ((Number) rawValue).doubleValue();
+        }
+        if (targetType == Float.class && rawValue instanceof Number) {
+            return (T) (Float) ((Number) rawValue).floatValue();
+        }
+        if (targetType == Integer.class && rawValue instanceof Number) {
+            return (T) (Integer) ((Number) rawValue).intValue();
+        }
+        if (targetType == Short.class && rawValue instanceof Number) {
+            return (T) (Short) ((Number) rawValue).shortValue();
+        }
+        if (targetType == Long.class && rawValue instanceof Number) {
+            return (T) (Long) ((Number) rawValue).longValue();
+        }
+        if (targetType == Byte.class && rawValue instanceof Number) {
+            return (T) (Byte) ((Number) rawValue).byteValue();
+        }
+        if (targetType == Boolean.class && rawValue instanceof Boolean) {
+            return (T) rawValue;
+        }
+        if (targetType == String.class && rawValue instanceof String) {
+            return (T) rawValue;
+        }
+        if (targetType == Instant.class && rawValue instanceof Number) {
+            return (T) Instant.ofEpochMilli(((Number) rawValue).longValue());
+        }
+
+        throw new IllegalArgumentException(
+            "Cannot convert persisted value type " + rawValue.getClass().getName() +
+            " to attribute type " + targetType.getName() +
+            " for attribute " + attributeID
+        );
     }
 
     /**

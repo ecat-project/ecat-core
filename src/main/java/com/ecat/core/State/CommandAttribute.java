@@ -80,9 +80,7 @@ abstract class CommandAttribute<T> extends AttributeBase<T> {
      */
     public CommandAttribute(String attributeID, AttributeClass attrClass, List<T> commands,
             Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, attrClass, null, null, 0, false, true, onChangedCallback);
-        setCommands(commands);
-        this.valueDef = getValueDefinition(); // 初始化验证定义
+        this(attributeID, attrClass, commands, false, null, onChangedCallback);
     }
 
     /**
@@ -90,7 +88,30 @@ abstract class CommandAttribute<T> extends AttributeBase<T> {
      */
     public CommandAttribute(String attributeID, String displayName, AttributeClass attrClass, List<T> commands,
             Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, displayName, attrClass, null, null, 0, false, true, onChangedCallback);
+        this(attributeID, displayName, attrClass, commands, false, null, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public CommandAttribute(String attributeID, AttributeClass attrClass, List<T> commands,
+            boolean persistable, T defaultValue,
+            Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, null, null, 0, false, true, persistable, defaultValue, onChangedCallback);
+        setCommands(commands);
+        this.valueDef = getValueDefinition(); // 初始化验证定义
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public CommandAttribute(String attributeID, String displayName, AttributeClass attrClass, List<T> commands,
+            boolean persistable, T defaultValue,
+            Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, null, null, 0, false, true, persistable, defaultValue, onChangedCallback);
+        this.displayName = displayName;
         setCommands(commands);
         this.valueDef = getValueDefinition(); // 初始化验证定义
     }

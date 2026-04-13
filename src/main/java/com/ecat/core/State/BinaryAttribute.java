@@ -55,10 +55,7 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
      */
     public BinaryAttribute(String attributeID, AttributeClass attrClass, boolean valueChangeable,
             Function<AttrChangedCallbackParams<Boolean>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, attrClass, null, null, 0, false,
-                valueChangeable, onChangedCallback);
-        this.optionCache = new HashMap<>();
-        this.valueDef = getValueDefinition(); // 初始化验证定义
+        this(attributeID, attrClass, valueChangeable, false, null, onChangedCallback);
     }
 
     /**
@@ -88,8 +85,32 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
      */
     public BinaryAttribute(String attributeID, String displayName, AttributeClass attrClass, boolean valueChangeable,
             Function<AttrChangedCallbackParams<Boolean>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, displayName, attrClass, null, null, 0, false,
-                valueChangeable, onChangedCallback);
+        this(attributeID, displayName, attrClass, valueChangeable, false, null, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public BinaryAttribute(String attributeID, AttributeClass attrClass, boolean valueChangeable,
+            boolean persistable, Boolean defaultValue,
+            Function<AttrChangedCallbackParams<Boolean>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, null, null, 0, false,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+        this.optionCache = new HashMap<>();
+        this.valueDef = getValueDefinition(); // 初始化验证定义
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public BinaryAttribute(String attributeID, String displayName, AttributeClass attrClass, boolean valueChangeable,
+            boolean persistable, Boolean defaultValue,
+            Function<AttrChangedCallbackParams<Boolean>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, null, null, 0, false,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+        this.displayName = displayName;
         this.optionCache = new HashMap<>();
         this.valueDef = getValueDefinition(); // 初始化验证定义
     }

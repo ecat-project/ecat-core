@@ -372,6 +372,11 @@ public abstract class DeviceBase implements DeviceControl {
         }
         attr.setDevice(this); // 绑定属性与设备的关系以及使用device所在集成的i18n资源
         attrs.put(attr.getAttributeID(), attr);
+
+        // 恢复持久化状态（persistable 属性在 setAttribute 时自动恢复）
+        if (attr.isPersistable() && core != null && core.getStateManager() != null) {
+            core.getStateManager().restoreAttributeState(this, attr);
+        }
         return true;
     }
 

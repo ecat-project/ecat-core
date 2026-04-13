@@ -146,8 +146,9 @@ public class EcatCore {
         i18nProxy = new I18nProxy(Const.CORE_COORDINATE, EcatCore.class, EcatCore.class.getClassLoader());
         integrationRegistry = new IntegrationRegistry();
         busRegistry = new BusRegistry();
-        stateManager = new StateManager();
         taskManager = new TaskManager();
+        stateManager = new StateManager(".ecat-data/core/states/",
+            taskManager.getMdcScheduledExecutorService());
         configFlowRegistry = new ConfigFlowRegistry();
         configEntryRegistry = new ConfigEntryRegistry(this, new YmlConfigEntryPersistence());
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
@@ -162,6 +163,18 @@ public class EcatCore {
 
     public void load(){
         integrationManager.loadIntegrations();
+    }
+
+    /**
+     * 优雅关闭：提交所有状态持久化数据，释放资源
+     */
+    public void shutdown() {
+        if (stateManager != null) {
+            stateManager.shutdown();
+        }
+        if (taskManager != null) {
+            taskManager.shutdownAll();
+        }
     }
 
     public static void main(String[] args) {
@@ -179,6 +192,7 @@ public class EcatCore {
         // 添加关闭钩子，确保优雅退出
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("EcatCore is shutting down...");
+            core.shutdown();
         }));
 
         // 保持运行，直到收到终止信号

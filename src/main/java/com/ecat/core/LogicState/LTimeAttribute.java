@@ -83,14 +83,29 @@ public class LTimeAttribute extends TimeAttribute implements ILogicAttribute<Ins
     }
 
     /**
+     * Master standalone constructor with persistable support.
+     *
+     * @param attributeID 逻辑属性ID
+     * @param attrClass 属性类型
+     * @param persistable 是否持久化属性值
+     * @param defaultValue 默认值（无持久化记录时使用）
+     */
+    public LTimeAttribute(String attributeID, AttributeClass attrClass,
+                          boolean persistable, java.time.Instant defaultValue) {
+        super(attributeID, attrClass, null, null, 0, false, false);
+        this.persistable = persistable;
+        this.defaultValue = defaultValue;
+        this.bindAttr = null;
+    }
+
+    /**
      * Standalone 构造函数 - 创建一个独立的逻辑时间属性（无物理绑定）。
      *
      * @param attributeID 逻辑属性ID
      * @param attrClass 属性类型
      */
     public LTimeAttribute(String attributeID, AttributeClass attrClass) {
-        super(attributeID, attrClass, null, null, 0, false, false);
-        this.bindAttr = null;
+        this(attributeID, attrClass, false, null);
     }
 
     /**

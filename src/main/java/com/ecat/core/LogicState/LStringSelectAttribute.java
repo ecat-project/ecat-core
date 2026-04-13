@@ -95,6 +95,24 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     }
 
     /**
+     * Master constructor for standalone mode with persistable support.
+     *
+     * @param attributeID the logic attribute ID
+     * @param attrClass the attribute class
+     * @param options the list of valid options for this select attribute
+     * @param persistable whether this attribute's value should be persisted
+     * @param defaultValue the default value to use when no persisted value exists
+     */
+    protected LStringSelectAttribute(String attributeID, AttributeClass attrClass, List<String> options,
+                                      boolean persistable, String defaultValue) {
+        super(attributeID, attrClass, null, null, false, options, null);
+        this.persistable = persistable;
+        this.defaultValue = defaultValue;
+        this.bindAttr = null;
+        this.valueMapping = new HashMap<>();
+    }
+
+    /**
      * Protected constructor for subclasses that manage their own binding independently.
      *
      * @param attributeID the logic attribute ID
@@ -102,9 +120,7 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
      * @param options the list of valid options for this select attribute
      */
     protected LStringSelectAttribute(String attributeID, AttributeClass attrClass, List<String> options) {
-        super(attributeID, attrClass, null, null, false, options, null);
-        this.bindAttr = null;
-        this.valueMapping = new HashMap<>();
+        this(attributeID, attrClass, options, false, null);
     }
 
     /**

@@ -188,6 +188,15 @@ public class ILogicAttributeTest {
             return AttributeType.NUMERIC;
         }
 
+        @Override
+        public boolean isPersistable() { return false; }
+        @Override
+        public void setPersistable(boolean persistable) {}
+        @Override
+        public Double getDefaultValue() { return null; }
+        @Override
+        public void setDefaultValue(Double defaultValue) {}
+
         // --- 辅助方法供测试访问 ---
 
         public UnitInfo getStoredDisplayUnit() {

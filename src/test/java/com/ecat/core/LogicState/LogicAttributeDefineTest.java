@@ -157,7 +157,7 @@ public class LogicAttributeDefineTest {
 
     @Test
     public void testAllArgsConstructorWithTenParams() {
-        // 全参数构造函数包含 displayName, mapable, displayable 共10个参数
+        // 全参数构造函数包含所有12个字段（含 persistable, defaultValue）
         LogicAttributeDefine def = new LogicAttributeDefine(
                 "so2",                                          // attrId
                 AttributeClass.SO2,                            // attrClass
@@ -168,7 +168,9 @@ public class LogicAttributeDefineTest {
                 com.ecat.core.State.AQAttribute.class,         // attrClassType
                 "二氧化硫",                                      // displayName
                 false,                                         // mapable
-                false                                          // displayable
+                false,                                         // displayable
+                true,                                          // persistable
+                100.0                                          // defaultValue
         );
         assertEquals("so2", def.getAttrId());
         assertEquals(AttributeClass.SO2, def.getAttrClass());
@@ -180,5 +182,7 @@ public class LogicAttributeDefineTest {
         assertEquals("二氧化硫", def.getDisplayName());
         assertFalse("mapable should be false", def.isMapable());
         assertFalse("displayable should be false", def.isDisplayable());
+        assertTrue("persistable should be true", def.isPersistable());
+        assertEquals(100.0, def.getDefaultValue());
     }
 }

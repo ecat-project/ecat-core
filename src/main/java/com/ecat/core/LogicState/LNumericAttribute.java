@@ -68,6 +68,26 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
     }
 
     /**
+     * Master constructor for subclasses (e.g., {@link LMixNumericAttribute})
+     * that manage their own binding independently.
+     *
+     * @param attributeID the logic attribute ID
+     * @param attrClass the attribute class
+     * @param nativeUnit the native unit
+     * @param displayUnit the display unit
+     * @param displayPrecision the number of decimal places to display
+     * @param persistable whether this attribute's value should be persisted
+     * @param defaultValue the default value to use when no persisted value exists
+     */
+    protected LNumericAttribute(String attributeID, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision,
+            boolean persistable, Double defaultValue) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision,
+              false, false, persistable, defaultValue, null);
+        this.bindAttr = null;
+    }
+
+    /**
      * Protected constructor for subclasses (e.g., {@link LMixNumericAttribute})
      * that manage their own binding independently.
      *
@@ -79,8 +99,7 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
      */
     protected LNumericAttribute(String attributeID, AttributeClass attrClass,
             UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, false, false);
-        this.bindAttr = null;
+        this(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, false, null);
     }
 
     /**

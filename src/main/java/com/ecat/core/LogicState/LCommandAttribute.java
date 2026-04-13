@@ -120,6 +120,25 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
     }
 
     /**
+     * Master constructor for standalone mode with persistable support.
+     *
+     * @param attributeID the logic attribute ID
+     * @param attrClass the attribute class
+     * @param standardCommands the list of standard commands
+     * @param persistable whether this attribute's value should be persisted
+     * @param defaultValue the default value to use when no persisted value exists
+     */
+    protected LCommandAttribute(String attributeID, AttributeClass attrClass, List<String> standardCommands,
+                                 boolean persistable, String defaultValue) {
+        super(attributeID, attrClass, standardCommands, null);
+        this.persistable = persistable;
+        this.defaultValue = defaultValue;
+        this.bindAttr = null;
+        this.standardCommands = standardCommands;
+        this.commandMapping = new HashMap<>();
+    }
+
+    /**
      * Protected constructor for standalone mode.
      *
      * @param attributeID the logic attribute ID
@@ -127,10 +146,7 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
      * @param standardCommands the list of standard commands
      */
     protected LCommandAttribute(String attributeID, AttributeClass attrClass, List<String> standardCommands) {
-        super(attributeID, attrClass, standardCommands, null);
-        this.bindAttr = null;
-        this.standardCommands = standardCommands;
-        this.commandMapping = new HashMap<>();
+        this(attributeID, attrClass, standardCommands, false, null);
     }
 
     /**

@@ -57,8 +57,30 @@ public class TimeAttribute extends AttributeBase<Instant> {
     public TimeAttribute(String attributeID, AttributeClass attrClass,
                          UnitInfo nativeUnit, UnitInfo displayUnit,
                          int displayPrecision, boolean unitChangeable, boolean valueChangeable) {
+        this(attributeID, attrClass, nativeUnit, displayUnit,
+              displayPrecision, unitChangeable, valueChangeable, false, null);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     *
+     * @param attributeID 属性ID
+     * @param attrClass 属性类型
+     * @param nativeUnit 原始信号单位
+     * @param displayUnit 显示单位
+     * @param displayPrecision 显示精度
+     * @param unitChangeable 是否允许修改单位
+     * @param valueChangeable 是否允许外部修改值
+     * @param persistable 是否持久化属性状态
+     * @param defaultValue 默认值
+     */
+    public TimeAttribute(String attributeID, AttributeClass attrClass,
+                         UnitInfo nativeUnit, UnitInfo displayUnit,
+                         int displayPrecision, boolean unitChangeable, boolean valueChangeable,
+                         boolean persistable, Instant defaultValue) {
         super(attributeID, attrClass, nativeUnit, displayUnit,
-              displayPrecision, unitChangeable, valueChangeable);
+              displayPrecision, unitChangeable, valueChangeable, persistable, defaultValue, null);
     }
 
     /**

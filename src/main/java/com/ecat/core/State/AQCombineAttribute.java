@@ -70,9 +70,8 @@ public class AQCombineAttribute extends AQAttribute {
 	public AQCombineAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             List<AQAttribute> speAttrs) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision,
-                unitChangeable, false, calculateMolecularWeight(speAttrs));
-        this.speAttrs = speAttrs;
+        this(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision,
+                unitChangeable, speAttrs, false, null);
     }
 
     /**
@@ -90,8 +89,31 @@ public class AQCombineAttribute extends AQAttribute {
     public AQCombineAttribute(String attributeID, String displayName, AttributeClass attrClass,
             UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             List<AQAttribute> speAttrs) {
+        this(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision,
+                unitChangeable, speAttrs, false, null);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public AQCombineAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
+            List<AQAttribute> speAttrs, boolean persistable, Double defaultValue) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision,
+                unitChangeable, false, calculateMolecularWeight(speAttrs), persistable, defaultValue);
+        this.speAttrs = speAttrs;
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public AQCombineAttribute(String attributeID, String displayName, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
+            List<AQAttribute> speAttrs, boolean persistable, Double defaultValue) {
         super(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision,
-                unitChangeable, false, calculateMolecularWeight(speAttrs));
+                unitChangeable, false, calculateMolecularWeight(speAttrs), persistable, defaultValue);
         this.speAttrs = speAttrs;
     }
 

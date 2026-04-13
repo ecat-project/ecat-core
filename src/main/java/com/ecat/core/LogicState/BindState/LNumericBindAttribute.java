@@ -60,6 +60,29 @@ public class LNumericBindAttribute extends LNumericAttribute
     private ILogicAttribute<?> resolvedSource;
 
     /**
+     * Master constructor with persistable support.
+     *
+     * @param attrId 本逻辑属性ID
+     * @param attrClass 属性类型
+     * @param nativeUnit 原始信号单位
+     * @param displayUnit 显示单位
+     * @param precision 显示精度
+     * @param sourceDeviceId 源逻辑设备ID
+     * @param sourceAttrId 源逻辑属性ID
+     * @param persistable 是否持久化属性值
+     * @param defaultValue 默认值（无持久化记录时使用）
+     */
+    public LNumericBindAttribute(String attrId, AttributeClass attrClass,
+                                 UnitInfo nativeUnit, UnitInfo displayUnit,
+                                 int precision,
+                                 String sourceDeviceId, String sourceAttrId,
+                                 boolean persistable, Double defaultValue) {
+        super(attrId, attrClass, nativeUnit, displayUnit, precision, persistable, defaultValue);
+        this.sourceDeviceId = sourceDeviceId;
+        this.sourceAttrId = sourceAttrId;
+    }
+
+    /**
      * 构造函数 - 创建一个绑定到源逻辑属性的数值属性。
      *
      * @param attrId 本逻辑属性ID
@@ -74,9 +97,8 @@ public class LNumericBindAttribute extends LNumericAttribute
                                  UnitInfo nativeUnit, UnitInfo displayUnit,
                                  int precision,
                                  String sourceDeviceId, String sourceAttrId) {
-        super(attrId, attrClass, nativeUnit, displayUnit, precision);
-        this.sourceDeviceId = sourceDeviceId;
-        this.sourceAttrId = sourceAttrId;
+        this(attrId, attrClass, nativeUnit, displayUnit, precision,
+             sourceDeviceId, sourceAttrId, false, null);
     }
 
     /**

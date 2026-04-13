@@ -107,4 +107,10 @@ public interface AttributeAbility<T>{
      * @return 属性类型枚举
      */
     AttributeType getAttributeType();
+
+    // 持久化支持
+    boolean isPersistable();
+    void setPersistable(boolean persistable);
+    T getDefaultValue();
+    void setDefaultValue(T defaultValue);
 }

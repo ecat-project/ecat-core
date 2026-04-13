@@ -118,6 +118,10 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
             oldDevice.stop();
             oldDevice.release();
             removeDevice(oldDevice);
+            // 删除旧设备的持久化状态文件
+            if (core != null && core.getStateManager() != null) {
+                core.getStateManager().removeDevice(oldDevice);
+            }
         }
 
         // 2. 创建并启动新设备
@@ -141,6 +145,10 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
             device.stop();
             device.release();
             removeDevice(device);
+            // 删除持久化状态文件
+            if (core != null && core.getStateManager() != null) {
+                core.getStateManager().removeDevice(device);
+            }
         }
         // 注意：不调用 super.removeEntry(entryId)
         // 调用链：ConfigEntryRegistry.removeEntry() -> notifyIntegrationRemove() -> integration.removeEntry()
@@ -177,6 +185,10 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         log.info("{} paused", getName());
         for (DeviceBase device : getAllDevices()) {
             device.stop();
+        }
+        // 关闭所有设备的持久化 DB（commit + close，保留文件）
+        if (core != null && core.getStateManager() != null) {
+            core.getStateManager().closeIntegrationDevices(devices.keySet());
         }
     }
 

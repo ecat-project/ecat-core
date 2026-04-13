@@ -69,6 +69,24 @@ public abstract class LNumericBindMixAttribute extends LNumericAttribute
     protected final Map<String, BindedLogicAttrData> bindSources = new LinkedHashMap<>();
 
     /**
+     * Master constructor with persistable support.
+     *
+     * @param attrId 本逻辑属性ID
+     * @param attrClass 属性类型
+     * @param nativeUnit 原始信号单位
+     * @param displayUnit 显示单位
+     * @param precision 显示精度
+     * @param persistable 是否持久化属性值
+     * @param defaultValue 默认值（无持久化记录时使用）
+     */
+    public LNumericBindMixAttribute(String attrId, AttributeClass attrClass,
+                                    UnitInfo nativeUnit, UnitInfo displayUnit,
+                                    int precision,
+                                    boolean persistable, Double defaultValue) {
+        super(attrId, attrClass, nativeUnit, displayUnit, precision, persistable, defaultValue);
+    }
+
+    /**
      * 构造函数 - 创建一个多源数值聚合属性。
      *
      * @param attrId 本逻辑属性ID
@@ -80,7 +98,7 @@ public abstract class LNumericBindMixAttribute extends LNumericAttribute
     public LNumericBindMixAttribute(String attrId, AttributeClass attrClass,
                                     UnitInfo nativeUnit, UnitInfo displayUnit,
                                     int precision) {
-        super(attrId, attrClass, nativeUnit, displayUnit, precision);
+        this(attrId, attrClass, nativeUnit, displayUnit, precision, false, null);
     }
 
     /**

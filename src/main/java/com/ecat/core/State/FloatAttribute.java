@@ -57,8 +57,8 @@ public class FloatAttribute extends NumberAttribute<Float> {
     public FloatAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             boolean valueChangeable, Function<AttrChangedCallbackParams<Float>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
-                valueChangeable, onChangedCallback);
+        this(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, false, null, onChangedCallback);
     }
 
     /**
@@ -67,8 +67,33 @@ public class FloatAttribute extends NumberAttribute<Float> {
     public FloatAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             boolean valueChangeable, Function<AttrChangedCallbackParams<Float>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
-                valueChangeable, onChangedCallback);
+        this(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, false, null, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public FloatAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
+            boolean valueChangeable, boolean persistable, Float defaultValue,
+            Function<AttrChangedCallbackParams<Float>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public FloatAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
+            boolean valueChangeable, boolean persistable, Float defaultValue,
+            Function<AttrChangedCallbackParams<Float>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+        this.displayName = displayName;
     }
 
     @Override

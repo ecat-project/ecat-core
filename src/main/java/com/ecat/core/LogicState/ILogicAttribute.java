@@ -111,6 +111,7 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
      *   <li>{@link #initDisplayUnit(UnitInfo)} - 设置显示单位（仅当displayUnit不为null时）</li>
      *   <li>{@link #changeDisplayPrecision(int)} - 设置显示精度</li>
      *   <li>{@link #initAttrClass(AttributeClass)} - 设置属性类型</li>
+     *   <li>persistable/defaultValue - 持久化支持（并列关系，非嵌套）</li>
      * </ol>
      *
      * @param def 逻辑属性定义对象，提供初始化所需的元数据
@@ -122,5 +123,15 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
         initDisplayUnit(def.getDisplayUnit());
         changeDisplayPrecision(def.getDisplayPrecision());
         initAttrClass(def.getAttrClass());
+        // 持久化支持
+        // persistable 和 defaultValue 是并列关系
+        if (def.isPersistable()) {
+            setPersistable(true);
+        }
+        if (def.getDefaultValue() != null) {
+            @SuppressWarnings("unchecked")
+            ILogicAttribute<Object> raw = (ILogicAttribute<Object>) this;
+            raw.setDefaultValue(def.getDefaultValue());
+        }
     }
 }

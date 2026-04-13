@@ -83,6 +83,18 @@ public class NumericAttribute extends NumberAttribute<Double> {
                 valueChangeable, onChangedCallback);
     }
 
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public NumericAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
+            boolean valueChangeable, boolean persistable, Double defaultValue,
+            Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+    }
+
     @Override
     public boolean updateValue(Double value) {
         return super.updateValue(value);

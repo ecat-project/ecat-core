@@ -69,6 +69,26 @@ public abstract class StringCommandAttribute extends CommandAttribute<String> {
         super(attributeID, displayName, attrClass, commands, onChangedCallback);
     }
 
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public StringCommandAttribute(String attributeID, AttributeClass attrClass, List<String> commands,
+            boolean persistable, String defaultValue,
+            Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, commands, persistable, defaultValue, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public StringCommandAttribute(String attributeID, String displayName, AttributeClass attrClass, List<String> commands,
+            boolean persistable, String defaultValue,
+            Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, displayName, attrClass, commands, persistable, defaultValue, onChangedCallback);
+    }
+
     @Override
     public String getDisplayValue(UnitInfo toUnit) {
         if (value == null) {

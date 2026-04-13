@@ -40,7 +40,7 @@ public class CommandAttrDef extends LogicAttributeDefine {
     private final List<String> commands;
 
     /**
-     * 构造一个命令型逻辑属性定义。
+     * 11 参数构造函数，包含 persistable 和 defaultValue。
      *
      * @param attrId          逻辑属性ID
      * @param attrClass       属性类型
@@ -51,14 +51,26 @@ public class CommandAttrDef extends LogicAttributeDefine {
      * @param attrType        属性值的具体类型（如 LCommandAttribute.class）
      * @param mapable         是否在ConfigFlow中让用户配置物理设备映射
      * @param commands        支持的命令列表
+     * @param persistable     是否持久化属性状态
+     * @param defaultValue    默认值，无历史记录时使用
+     */
+    public CommandAttrDef(String attrId, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int precision,
+            boolean changeable, Class<?> attrType, boolean mapable,
+            List<String> commands, boolean persistable, Object defaultValue) {
+        super(attrId, attrClass, nativeUnit, displayUnit, precision, changeable, attrType, persistable, defaultValue);
+        setMapable(mapable);
+        this.commands = commands;
+    }
+
+    /**
+     * 9 参数构造函数，保持向后兼容。委托到 11 参数构造函数，persistable=false, defaultValue=null。
      */
     public CommandAttrDef(String attrId, AttributeClass attrClass,
             UnitInfo nativeUnit, UnitInfo displayUnit, int precision,
             boolean changeable, Class<?> attrType, boolean mapable,
             List<String> commands) {
-        super(attrId, attrClass, nativeUnit, displayUnit, precision, changeable, attrType);
-        setMapable(mapable);
-        this.commands = commands;
+        this(attrId, attrClass, nativeUnit, displayUnit, precision, changeable, attrType, mapable, commands, false, null);
     }
 
     /**

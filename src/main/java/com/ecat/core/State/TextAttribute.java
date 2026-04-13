@@ -60,8 +60,7 @@ public class TextAttribute extends AttributeBase<String> {
     public TextAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, boolean valueChangeable,
             Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, 0, false,
-                valueChangeable, onChangedCallback);
+        this(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, false, null, onChangedCallback);
     }
 
     /**
@@ -70,8 +69,32 @@ public class TextAttribute extends AttributeBase<String> {
     public TextAttribute(String attributeID,  String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, boolean valueChangeable,
             Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, 0, false,
-                valueChangeable, onChangedCallback);
+        this(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, false, null, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public TextAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, boolean valueChangeable,
+            boolean persistable, String defaultValue,
+            Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, 0, false,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public TextAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, boolean valueChangeable,
+            boolean persistable, String defaultValue,
+            Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, 0, false,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+        this.displayName = displayName;
     }
 
     /**

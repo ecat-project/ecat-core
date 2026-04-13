@@ -71,6 +71,25 @@ public abstract class LMixNumericAttribute extends LNumericAttribute {
     private final long windowSize;
 
     /**
+     * Master constructor with persistable support.
+     *
+     * @param attributeID the logic attribute ID
+     * @param attrClass the attribute class
+     * @param nativeUnit the native unit for this logic attribute
+     * @param displayUnit the display unit for this logic attribute
+     * @param displayPrecision the number of decimal places to display
+     * @param windowSize time window in milliseconds within which all bound attributes must be updated
+     * @param persistable whether this attribute's value should be persisted
+     * @param defaultValue the default value to use when no persisted value exists
+     */
+    public LMixNumericAttribute(String attributeID, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision, long windowSize,
+            boolean persistable, Double defaultValue) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, persistable, defaultValue);
+        this.windowSize = windowSize;
+    }
+
+    /**
      * Constructor - creates a mix numeric attribute with the specified metadata and time window.
      *
      * @param attributeID the logic attribute ID
@@ -82,8 +101,7 @@ public abstract class LMixNumericAttribute extends LNumericAttribute {
      */
     public LMixNumericAttribute(String attributeID, AttributeClass attrClass,
             UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision, long windowSize) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision);
-        this.windowSize = windowSize;
+        this(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, windowSize, false, null);
     }
 
     /**

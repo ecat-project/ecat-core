@@ -120,14 +120,8 @@ public class LinearConversionAttribute extends NumericAttribute {
                                    String inputUnitEnumName, String outputUnitEnumName,
                                    int displayPrecision, boolean valueChangeable,
                                    Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, attrClass,
-              UnitInfoFactory.getEnum(inputUnitEnumName),
-              UnitInfoFactory.getEnum(outputUnitEnumName),
-              displayPrecision, false, valueChangeable, onChangedCallback);
-
-        this.segments = sortAndValidateSegments(segments);
-        this.inputUnit = UnitInfoFactory.getEnum(inputUnitEnumName);
-        this.outputUnit = UnitInfoFactory.getEnum(outputUnitEnumName);
+        this(attributeID, attrClass, segments, inputUnitEnumName, outputUnitEnumName,
+             displayPrecision, valueChangeable, false, null, onChangedCallback);
     }
 
     /**
@@ -138,10 +132,45 @@ public class LinearConversionAttribute extends NumericAttribute {
                                    String inputUnitEnumName, String outputUnitEnumName,
                                    int displayPrecision, boolean valueChangeable,
                                    Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, displayName, attrClass,
+        this(attributeID, displayName, attrClass, segments, inputUnitEnumName, outputUnitEnumName,
+             displayPrecision, valueChangeable, false, null, onChangedCallback);
+    }
+
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public LinearConversionAttribute(String attributeID, AttributeClass attrClass,
+                                   List<LinearSegment> segments,
+                                   String inputUnitEnumName, String outputUnitEnumName,
+                                   int displayPrecision, boolean valueChangeable,
+                                   boolean persistable, Double defaultValue,
+                                   Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass,
               UnitInfoFactory.getEnum(inputUnitEnumName),
               UnitInfoFactory.getEnum(outputUnitEnumName),
-              displayPrecision, false, valueChangeable, onChangedCallback);
+              displayPrecision, false, valueChangeable, persistable, defaultValue, onChangedCallback);
+
+        this.segments = sortAndValidateSegments(segments);
+        this.inputUnit = UnitInfoFactory.getEnum(inputUnitEnumName);
+        this.outputUnit = UnitInfoFactory.getEnum(outputUnitEnumName);
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public LinearConversionAttribute(String attributeID, String displayName, AttributeClass attrClass,
+                                   List<LinearSegment> segments,
+                                   String inputUnitEnumName, String outputUnitEnumName,
+                                   int displayPrecision, boolean valueChangeable,
+                                   boolean persistable, Double defaultValue,
+                                   Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass,
+              UnitInfoFactory.getEnum(inputUnitEnumName),
+              UnitInfoFactory.getEnum(outputUnitEnumName),
+              displayPrecision, false, valueChangeable, persistable, defaultValue, onChangedCallback);
+        this.displayName = displayName;
 
         this.segments = sortAndValidateSegments(segments);
         this.inputUnit = UnitInfoFactory.getEnum(inputUnitEnumName);

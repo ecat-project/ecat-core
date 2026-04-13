@@ -85,14 +85,18 @@ public class LogicAttributeDefine {
     private boolean mapable = true;
     /** 是否在前端展示，默认true */
     private boolean displayable = true;
+    /** 是否持久化属性状态（重启后恢复），默认 false */
+    private boolean persistable = false;
+    /** 默认值，无历史记录时使用，允许为 null */
+    private Object defaultValue = null;
 
     /**
-     * 7 参数构造函数，保持向后兼容。
-     * 新代码请使用全参数构造函数或通过 setDisplayName()/setMapable()/setDisplayable() 设置。
+     * 9 参数构造函数，包含 persistable 和 defaultValue。
      */
     public LogicAttributeDefine(String attrId, AttributeClass attrClass,
             UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision,
-            boolean valueChangeable, Class<?> attrClassType) {
+            boolean valueChangeable, Class<?> attrClassType,
+            boolean persistable, Object defaultValue) {
         this.attrId = attrId;
         this.attrClass = attrClass;
         this.nativeUnit = nativeUnit;
@@ -100,8 +104,20 @@ public class LogicAttributeDefine {
         this.displayPrecision = displayPrecision;
         this.valueChangeable = valueChangeable;
         this.attrClassType = attrClassType;
+        this.persistable = persistable;
+        this.defaultValue = defaultValue;
         this.mapable = true;
         this.displayable = true;
+    }
+
+    /**
+     * 7 参数构造函数，保持向后兼容。委托到 9 参数构造函数，persistable=false, defaultValue=null。
+     */
+    public LogicAttributeDefine(String attrId, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision,
+            boolean valueChangeable, Class<?> attrClassType) {
+        this(attrId, attrClass, nativeUnit, displayUnit, displayPrecision,
+             valueChangeable, attrClassType, false, null);
     }
 
     /**

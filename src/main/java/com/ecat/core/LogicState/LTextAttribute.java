@@ -59,14 +59,29 @@ public class LTextAttribute extends TextAttribute implements ILogicAttribute<Str
     }
 
     /**
+     * Master constructor for standalone mode with persistable support.
+     *
+     * @param attributeID the logic attribute ID
+     * @param attrClass the attribute class
+     * @param persistable whether this attribute's value should be persisted
+     * @param defaultValue the default value to use when no persisted value exists
+     */
+    protected LTextAttribute(String attributeID, AttributeClass attrClass,
+                             boolean persistable, String defaultValue) {
+        super(attributeID, attrClass, null, null, false);
+        this.persistable = persistable;
+        this.defaultValue = defaultValue;
+        this.bindAttr = null;
+    }
+
+    /**
      * Protected constructor for standalone mode.
      *
      * @param attributeID the logic attribute ID
      * @param attrClass the attribute class
      */
     protected LTextAttribute(String attributeID, AttributeClass attrClass) {
-        super(attributeID, attrClass, null, null, false);
-        this.bindAttr = null;
+        this(attributeID, attrClass, false, null);
     }
 
     /**

@@ -40,7 +40,7 @@ public class StringSelectAttrDef extends LogicAttributeDefine {
     private final List<String> options;
 
     /**
-     * 构造一个字符串选择型逻辑属性定义。
+     * 11 参数构造函数，包含 persistable 和 defaultValue。
      *
      * @param attrId          逻辑属性ID
      * @param attrClass       属性类型
@@ -51,14 +51,26 @@ public class StringSelectAttrDef extends LogicAttributeDefine {
      * @param attrType        属性值的具体类型（如 LStringSelectAttribute.class）
      * @param mapable         是否在ConfigFlow中让用户配置物理设备映射
      * @param options         可选值列表
+     * @param persistable     是否持久化属性状态
+     * @param defaultValue    默认值，无历史记录时使用
+     */
+    public StringSelectAttrDef(String attrId, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int precision,
+            boolean changeable, Class<?> attrType, boolean mapable,
+            List<String> options, boolean persistable, Object defaultValue) {
+        super(attrId, attrClass, nativeUnit, displayUnit, precision, changeable, attrType, persistable, defaultValue);
+        setMapable(mapable);
+        this.options = options;
+    }
+
+    /**
+     * 9 参数构造函数，保持向后兼容。委托到 11 参数构造函数，persistable=false, defaultValue=null。
      */
     public StringSelectAttrDef(String attrId, AttributeClass attrClass,
             UnitInfo nativeUnit, UnitInfo displayUnit, int precision,
             boolean changeable, Class<?> attrType, boolean mapable,
             List<String> options) {
-        super(attrId, attrClass, nativeUnit, displayUnit, precision, changeable, attrType);
-        setMapable(mapable);
-        this.options = options;
+        this(attrId, attrClass, nativeUnit, displayUnit, precision, changeable, attrType, mapable, options, false, null);
     }
 
     /**

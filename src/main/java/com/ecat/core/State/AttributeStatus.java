@@ -91,4 +91,18 @@ public enum AttributeStatus {
         }
         throw new IllegalArgumentException("AttributeStatus not found: " + className);
     }
+
+    /**
+     * 根据数值 ID 获取枚举
+     * @param id 状态 ID
+     * @return 对应的 AttributeStatus，未找到返回 EMPTY
+     */
+    public static AttributeStatus fromId(int id) {
+        for (AttributeStatus status : AttributeStatus.values()) {
+            if (status.id == id) {
+                return status;
+            }
+        }
+        return EMPTY;
+    }
 }

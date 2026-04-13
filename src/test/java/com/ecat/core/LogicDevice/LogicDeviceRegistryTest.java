@@ -144,6 +144,10 @@ public class LogicDeviceRegistryTest {
         @Override public UnitInfo getDisplayUnit() { return null; }
         @Override public UnitInfo getNativeUnit() { return null; }
         @Override public AttributeType getAttributeType() { return AttributeType.NUMERIC; }
+        @Override public boolean isPersistable() { return false; }
+        @Override public void setPersistable(boolean persistable) {}
+        @Override public Double getDefaultValue() { return null; }
+        @Override public void setDefaultValue(Double defaultValue) {}
     }
 
     /**

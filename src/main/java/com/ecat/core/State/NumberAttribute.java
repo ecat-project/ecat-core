@@ -83,6 +83,18 @@ public abstract class NumberAttribute<T extends Number> extends AttributeBase<T>
                 valueChangeable, onChangedCallback);
     }
 
+    /**
+     * 完整参数构造函数（包含 persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    protected NumberAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
+            boolean valueChangeable, boolean persistable, T defaultValue,
+            Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, persistable, defaultValue, onChangedCallback);
+    }
+
     @Override
     public String getDisplayValue(UnitInfo toUnit) {
         if (value == null) return null;

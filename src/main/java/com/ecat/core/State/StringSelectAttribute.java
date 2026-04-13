@@ -75,11 +75,8 @@ public class StringSelectAttribute extends SelectAttribute<String> {
     public StringSelectAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, boolean valueChangeable, List<String> options,
             Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, options, onChangedCallback);
-
-        this.caseSensitive = true;
-        this.optionCache = new HashMap<>();
-        // i18nOptionPathPrefix 由父类自动生成
+        this(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, options,
+                onChangedCallback, true);
     }
 
     /**
@@ -88,11 +85,8 @@ public class StringSelectAttribute extends SelectAttribute<String> {
     public StringSelectAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, boolean valueChangeable, List<String> options,
             Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
-        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, options, onChangedCallback);
-
-        this.caseSensitive = true;
-        this.optionCache = new HashMap<>();
-        // i18nOptionPathPrefix 由父类自动生成
+        this(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, options,
+                onChangedCallback, true);
     }
 
     /**
@@ -102,11 +96,8 @@ public class StringSelectAttribute extends SelectAttribute<String> {
             UnitInfo displayUnit, boolean valueChangeable, List<String> options,
             Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback,
             boolean caseSensitive) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, options, onChangedCallback);
-
-        this.caseSensitive = caseSensitive;
-        this.optionCache = new HashMap<>();
-        // i18nOptionPathPrefix 由父类自动生成
+        this(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, options,
+                onChangedCallback, caseSensitive, false, null);
     }
 
     /**
@@ -116,7 +107,34 @@ public class StringSelectAttribute extends SelectAttribute<String> {
             UnitInfo displayUnit, boolean valueChangeable, List<String> options,
             Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback,
             boolean caseSensitive) {
-        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, options, onChangedCallback);
+        this(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, options,
+                onChangedCallback, caseSensitive, false, null);
+    }
+
+    /**
+     * 完整参数构造函数（包含 caseSensitive + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public StringSelectAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, boolean valueChangeable, List<String> options,
+            Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback,
+            boolean caseSensitive, boolean persistable, String defaultValue) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, valueChangeable, options, persistable, defaultValue, onChangedCallback);
+
+        this.caseSensitive = caseSensitive;
+        this.optionCache = new HashMap<>();
+        // i18nOptionPathPrefix 由父类自动生成
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + caseSensitive + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     */
+    public StringSelectAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, boolean valueChangeable, List<String> options,
+            Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback,
+            boolean caseSensitive, boolean persistable, String defaultValue) {
+        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, valueChangeable, options, persistable, defaultValue, onChangedCallback);
 
         this.caseSensitive = caseSensitive;
         this.optionCache = new HashMap<>();

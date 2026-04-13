@@ -79,13 +79,8 @@ public class AQAttribute extends NumericAttribute {
     public AQAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             boolean valueChangeable, Double molecularWeight) {
-        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
-                valueChangeable);
-
-        if (molecularWeight != null && molecularWeight <= 0) {
-            throw new IllegalArgumentException("Molecular weight must be positive or null");
-        }
-        this.molecularWeight = molecularWeight;
+        this(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, molecularWeight, false, null);
     }
 
     /**
@@ -130,13 +125,8 @@ public class AQAttribute extends NumericAttribute {
     public AQAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
             UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
             boolean valueChangeable, Double molecularWeight) {
-        super(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
-                valueChangeable);
-
-        if (molecularWeight != null && molecularWeight <= 0) {
-            throw new IllegalArgumentException("Molecular weight must be positive or null");
-        }
-        this.molecularWeight = molecularWeight;
+        this(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, molecularWeight, false, null);
     }
 
     /**
@@ -160,6 +150,64 @@ public class AQAttribute extends NumericAttribute {
             boolean valueChangeable) {
         this(attributeID, displayName, attrClass, nativeUnit, displayUnit, displayPrecision,
              unitChangeable, valueChangeable, null);
+    }
+
+    /**
+     * 完整参数构造函数（包含 molecularWeight + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     *
+     * @param attributeID The unique identifier for this attribute
+     * @param attrClass The attribute class
+     * @param nativeUnit The native unit of the attribute
+     * @param displayUnit The display unit of the attribute
+     * @param displayPrecision The number of decimal places to display
+     * @param unitChangeable Whether the unit can be changed by the user
+     * @param valueChangeable Whether the value can be changed by the user
+     * @param molecularWeight The molecular weight in g/mol (must be positive for cross-class conversion)
+     * @param persistable Whether this attribute should be persisted
+     * @param defaultValue The default value to use when no persisted value exists
+     * @throws IllegalArgumentException if molecularWeight is not null and not positive
+     */
+    public AQAttribute(String attributeID, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
+            boolean valueChangeable, Double molecularWeight, boolean persistable, Double defaultValue) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, persistable, defaultValue, null);
+
+        if (molecularWeight != null && molecularWeight <= 0) {
+            throw new IllegalArgumentException("Molecular weight must be positive or null");
+        }
+        this.molecularWeight = molecularWeight;
+    }
+
+    /**
+     * 完整参数构造函数（包含 displayName + molecularWeight + persistable + defaultValue）
+     * 用于支持属性持久化场景
+     *
+     * @param attributeID The unique identifier for this attribute
+     * @param displayName The custom display name (takes priority over I18n)
+     * @param attrClass The attribute class
+     * @param nativeUnit The native unit of the attribute
+     * @param displayUnit The display unit of the attribute
+     * @param displayPrecision The number of decimal places to display
+     * @param unitChangeable Whether the unit can be changed by the user
+     * @param valueChangeable Whether the value can be changed by the user
+     * @param molecularWeight The molecular weight in g/mol
+     * @param persistable Whether this attribute should be persisted
+     * @param defaultValue The default value to use when no persisted value exists
+     * @throws IllegalArgumentException if molecularWeight is not null and not positive
+     */
+    public AQAttribute(String attributeID, String displayName, AttributeClass attrClass, UnitInfo nativeUnit,
+            UnitInfo displayUnit, int displayPrecision, boolean unitChangeable,
+            boolean valueChangeable, Double molecularWeight, boolean persistable, Double defaultValue) {
+        super(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, unitChangeable,
+                valueChangeable, persistable, defaultValue, null);
+
+        if (molecularWeight != null && molecularWeight <= 0) {
+            throw new IllegalArgumentException("Molecular weight must be positive or null");
+        }
+        this.molecularWeight = molecularWeight;
+        this.displayName = displayName;
     }
 
     /**
