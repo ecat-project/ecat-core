@@ -35,6 +35,7 @@ import org.mapdb.Serializer;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
+import com.ecat.core.Utils.platform.OsUtils;
 
 /**
  * 属性状态持久化管理器
@@ -49,7 +50,6 @@ public class StateManager {
 
     private final String baseDir;
     private final Map<String, DB> dbCache = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService scheduler;
     private final Log log = LogFactory.getLogger(getClass());
 
     /**
@@ -57,7 +57,6 @@ public class StateManager {
      */
     public StateManager() {
         this.baseDir = null;
-        this.scheduler = null;
     }
 
     /**
@@ -67,8 +66,6 @@ public class StateManager {
      */
     public StateManager(String baseDir, ScheduledExecutorService scheduler) {
         this.baseDir = baseDir;
-        this.scheduler = scheduler;
-
         if (baseDir != null) {
             new File(baseDir).mkdirs();
         }
@@ -208,6 +205,12 @@ public class StateManager {
         String deviceId = device.getId();
         closeDevice(deviceId);
 
+        if (OsUtils.isWindows()) {
+            // only win needs
+            System.gc();
+            System.runFinalization();
+        }
+
         String dbPath = buildDbPath(device);
         // MapDB 可能产生辅助文件 (.p, .t)
         String[] extensions = {"", ".p", ".t"};
@@ -236,7 +239,6 @@ public class StateManager {
 
     // ========== 内部方法 ==========
 
-    @SuppressWarnings("unchecked")
     private ConcurrentMap<String, String> getOrCreateMap(DeviceBase device) {
         DB db = getOrCreateDb(device);
         HTreeMap<String, String> map = (HTreeMap<String, String>) db.hashMap("states")
