@@ -49,7 +49,7 @@ import java.util.concurrent.CompletableFuture;
 public class LNumericAttribute extends NumericAttribute implements ILogicAttribute<Double> {
 
     /** Bound physical attribute that this logic attribute delegates to */
-    private final AttributeBase<?> bindAttr;
+    protected final AttributeBase<?> bindAttr;
 
     /**
      * Constructor - creates a logic numeric attribute bound to a physical attribute.
