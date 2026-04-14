@@ -203,21 +203,43 @@ public class StateManager {
      */
     public void removeDevice(DeviceBase device) {
         String deviceId = device.getId();
-        closeDevice(deviceId);
 
-        if (OsUtils.isWindows()) {
-            // only win needs
-            System.gc();
-            System.runFinalization();
+        // 先从缓存获取 DB，通过 MapDB 官方 API 获取所有关联文件列表
+        DB db = dbCache.get(deviceId);
+        Iterable<String> allFiles = null;
+        if (db != null) {
+            try {
+                allFiles = db.getStore().getAllFiles();
+            } catch (Exception e) {
+                log.warn("Failed to get DB file list for device " + deviceId, e);
+            }
         }
 
-        String dbPath = buildDbPath(device);
-        // MapDB 可能产生辅助文件 (.p, .t)
-        String[] extensions = {"", ".p", ".t"};
-        for (String ext : extensions) {
-            File f = new File(dbPath + ext);
-            if (f.exists()) {
-                f.delete();
+        // 关闭 DB
+        closeDevice(deviceId);
+
+        // 删除文件：优先使用 MapDB API 获取的文件列表，兜底使用路径猜测
+        if (allFiles != null) {
+            for (String filePath : allFiles) {
+                File f = new File(filePath);
+                if (f.exists()) {
+                    f.delete();
+                }
+            }
+        } else {
+            // 兜底：DB 已关闭或获取文件列表失败，基于主路径删除
+            String dbPath = buildDbPath(device);
+            File dbDir = new File(dbPath).getParentFile();
+            String dbFileName = new File(dbPath).getName();
+            if (dbDir != null && dbDir.isDirectory()) {
+                File[] candidates = dbDir.listFiles();
+                if (candidates != null) {
+                    for (File f : candidates) {
+                        if (f.getName().startsWith(dbFileName)) {
+                            f.delete();
+                        }
+                    }
+                }
             }
         }
     }
@@ -253,10 +275,13 @@ public class StateManager {
         return dbCache.computeIfAbsent(deviceId, id -> {
             String dbPath = buildDbPath(device);
             new File(dbPath).getParentFile().mkdirs();
-            return DBMaker.fileDB(dbPath)
-                .fileMmapEnable()
-                .transactionEnable()
-                .make();
+            DBMaker.Maker maker = DBMaker.fileDB(dbPath)
+                .transactionEnable();
+            // Windows 下不启用 mmap，避免文件被锁定无法动态删除
+            if (!OsUtils.isWindows()) {
+                maker.fileMmapEnable();
+            }
+            return maker.make();
         });
     }
 
