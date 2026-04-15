@@ -27,7 +27,7 @@ public enum PressureUnit implements InternationalizedUnit {
     KPA("kPa", 1000.0), // 千帕
     MPA("MPa", 1000000.0), // 兆帕
     ATM("atm", 101325.0), // 标准大气压  1atm = 101325Pa
-    MMHG("mmHg", 75960.3 ); // 毫米汞柱
+    MMHG("mmHg", 133.3223684); // 毫米汞柱
     private final String name;
     private final Double ratio;
 
