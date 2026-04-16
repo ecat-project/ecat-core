@@ -36,7 +36,7 @@ import java.util.stream.Collectors;
  * </ul>
  *
  * <p>Options are populated from {@link AttributeStatus#getNames()}, excluding
- * {@link AttributeStatus#EMPTY} and {@link AttributeStatus#OTHER} (deprecated).
+ * {@link AttributeStatus#EMPTY}.
  *
  * <p>Read-only: value cannot be changed externally.
  *
@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  */
 public class LRunningStatusAttribute extends LStringSelectAttribute {
 
-    /** Status options, excluding EMPTY and OTHER */
+    /** Status options, excluding EMPTY */
     private static final List<String> RUNNING_STATUS_OPTIONS = buildOptions();
 
     /**
@@ -93,7 +93,7 @@ public class LRunningStatusAttribute extends LStringSelectAttribute {
      */
     private static List<String> buildOptions() {
         return Arrays.stream(AttributeStatus.values())
-                .filter(s -> s != AttributeStatus.EMPTY && s != AttributeStatus.OTHER)
+                .filter(s -> s != AttributeStatus.EMPTY)
                 .map(AttributeStatus::getName)
                 .collect(Collectors.toList());
     }

@@ -50,8 +50,6 @@ public enum AttributeStatus {
     TEMP_PRESSURE_CALIBRATION(124, "TempPressureCalibration", "温度压力校准"),  // 人工设置状态
     DEVICE_REPLACEMENT(125, "DeviceReplacement", "维修更换设备"),  // 人工设置状态
 
-    @Deprecated
-    OTHER(9999, "Other", "其他状态"),  // 不要用此属性，已废弃（2026-03-01后将删除）
     OFFLINE(0, "Offline", "离线"), // 系统状态
     EMPTY(-1, "Empty", "未设置"); // 系统初始
 

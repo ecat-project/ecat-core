@@ -152,10 +152,9 @@ public class LRunningStatusAttributeTest {
     // ========== 选项列表测试 ==========
 
     @Test
-    public void runningStatusOptionsExcludesEmptyAndOther() {
+    public void runningStatusOptionsExcludesEmpty() {
         List<String> options = LRunningStatusAttribute.getRunningStatusOptions();
         assertFalse(options.contains("Empty"));
-        assertFalse(options.contains("Other"));
     }
 
     @Test
