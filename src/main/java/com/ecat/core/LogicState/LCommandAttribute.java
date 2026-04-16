@@ -99,7 +99,7 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
         super(bindAttr.getAttributeID(), bindAttr.getAttrClass(),
               standardCommands, null);
         this.bindAttr = bindAttr;
-        this.standardCommands = standardCommands;
+        this.standardCommands = new ArrayList<>(standardCommands);
         this.commandMapping = commandMapping != null
                 ? new HashMap<>(commandMapping)
                 : new HashMap<String, String>();
@@ -134,7 +134,7 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
         this.persistable = persistable;
         this.defaultValue = defaultValue;
         this.bindAttr = null;
-        this.standardCommands = standardCommands;
+        this.standardCommands = new ArrayList<>(standardCommands);
         this.commandMapping = new HashMap<>();
     }
 
@@ -342,12 +342,12 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
 
     /**
      * Sets the standard commands list for factory-created instances.
-     * Called by {@link LogicAttributeFactory} after construction when
-     * the definition is a {@link CommandAttrDef}.
+     * Called by {@link LogicAttributeFactory} or {@link com.ecat.core.LogicDevice.LogicDevice#genAttrMap}
+     * after construction when the definition is a {@link CommandAttrDef}.
      *
      * @param commands the standard commands list to set
      */
-    void setCommandsFromDef(List<String> commands) {
+    public void setCommandsFromDef(List<String> commands) {
         this.standardCommands.clear();
         this.standardCommands.addAll(commands);
         setCommands(this.standardCommands);

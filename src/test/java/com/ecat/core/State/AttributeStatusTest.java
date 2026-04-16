@@ -17,6 +17,6 @@ public class AttributeStatusTest {
     @Test
     public void testFromId_unknownReturnsEmpty() {
         assertEquals(AttributeStatus.EMPTY, AttributeStatus.fromId(999));
-        assertEquals(AttributeStatus.EMPTY, AttributeStatus.fromId(0));
+        assertEquals(AttributeStatus.OFFLINE, AttributeStatus.fromId(0));
     }
 }

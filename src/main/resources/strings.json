@@ -92,7 +92,8 @@
       "multi_point_span": "Multi Point Span",
       "precision_check": "Precision Check",
       "other": "Other",
-      "empty": "Not Set"
+      "empty": "Not Set",
+      "offline": "Offline"
     },
     "unit": {
       "temperature": {

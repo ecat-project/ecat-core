@@ -434,6 +434,11 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     public boolean publicState() {
         if(this.isValueUpdated){
             try {
+                if (device == null) {
+                    // 属性未注册到设备时（如单元测试中），无法发布总线事件
+                    log.warn("Attribute '{}' is not registered to any device, skip publicState", this.getAttributeID());
+                    return true;
+                }
                 device.getCore().getBusRegistry().publish(BusTopic.DEVICE_DATA_UPDATE.getTopicName(), this);
             } catch (Exception e) {
                 log.error("Failed to update attribute " + this.getAttributeID() + " for device " + device.getId());
@@ -474,10 +479,12 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      * @param newStatus
      * @return
      */
-    protected boolean updateValue(T newValue, AttributeStatus newStatus){
+    @Override
+    public boolean updateValue(T newValue, AttributeStatus newStatus){
         this.status = newStatus;
         return updateValue(newValue);
     }
+
 
     /**
      * 子类按需实现具体的用户侧业务的属性设置
@@ -503,6 +510,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
             return CompletableFuture.completedFuture(false);
         }
         if(updateValue(newValue)){
+            publicState();  // 值变更成功后自动发布 Bus 事件，确保下游绑定属性感知变化
             // 触发事件订阅
             if(onChangedCallback != null){
                 return onChangedCallback.apply(new AttrChangedCallbackParams<T>(this, newValue));

@@ -255,7 +255,13 @@ public class LogicDeviceTest {
 
     @Test
     public void testGenAttrMapWithMissingDeviceId() {
-        // mapping entry without device_id should be created as standalone attribute
+        // 重构后：mapping 统一负责所有属性创建。没有 device_id 意味着用户选择"无物理设备"。
+        // 需要先注册一个 mapping，mapping.getAttr() 会创建 standalone 属性。
+        String coordinate = "com.ecat:test-integration";
+        String model = "TestModel";
+        TestDeviceMapping mapping = new TestDeviceMapping("TEST", coordinate, model);
+        testMappingManager.registerMapping(mapping);
+
         Map<String, Object> mappingConfig = new HashMap<>();
         // no "device_id" key — user selected "no physical device"
         Map<String, Object> mappings = new LinkedHashMap<>();
@@ -267,13 +273,19 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        assertFalse("Mapping without device_id should be created as standalone", attrMap.isEmpty());
+        assertFalse("Mapping without device_id should delegate to mapping.getAttr() for standalone", attrMap.isEmpty());
         assertTrue("Should contain test_attr", attrMap.containsKey("test_attr"));
     }
 
     @Test
     public void testGenAttrMapWithEmptyDeviceId() {
-        // mapping entry with empty device_id should be created as standalone attribute
+        // 重构后：mapping 统一负责所有属性创建。空 device_id 意味着用户选择"无物理设备"。
+        // 需要先注册一个 mapping，mapping.getAttr() 会创建 standalone 属性。
+        String coordinate = "com.ecat:test-integration";
+        String model = "TestModel";
+        TestDeviceMapping mapping = new TestDeviceMapping("TEST", coordinate, model);
+        testMappingManager.registerMapping(mapping);
+
         Map<String, Object> mappingConfig = new HashMap<>();
         mappingConfig.put("device_id", "");
         Map<String, Object> mappings = new LinkedHashMap<>();
@@ -285,7 +297,7 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        assertFalse("Mapping with empty device_id should be created as standalone", attrMap.isEmpty());
+        assertFalse("Mapping with empty device_id should delegate to mapping.getAttr() for standalone", attrMap.isEmpty());
         assertTrue("Should contain test_attr", attrMap.containsKey("test_attr"));
     }
 

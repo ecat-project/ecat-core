@@ -19,6 +19,7 @@ package com.ecat.core.LogicState;
 import com.ecat.core.State.AttributeAbility;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
+import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.UnitInfo;
 
 import java.util.List;
@@ -133,5 +134,35 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
             ILogicAttribute<Object> raw = (ILogicAttribute<Object>) this;
             raw.setDefaultValue(def.getDefaultValue());
         }
+    }
+
+    /**
+     * 更新属性值并立即发布 Bus 事件。
+     *
+     * <p>组合 {@link AttributeAbility#updateValue(Object, AttributeStatus)} + {@link AttributeAbility#publicState()}，
+     * 专用于逻辑设备内部更新属性后需要触发 Bus 传播链的场景。
+     * 不检查 valueChangeable、不触发 onChangedCallback。
+     *
+     * <p>调用此方法等价于：
+     * <pre>
+     *   attr.updateValue(value, status);
+     *   attr.publicState();
+     * </pre>
+     *
+     * <p>典型场景：
+     * <ul>
+     *   <li>ActivateCylinderCommandAttribute 更新 remaining_volume / total_volume / total_pressure</li>
+     *   <li>Calibrator146iConsumptionAttribute 更新 remaining_volume（扣减消耗量）</li>
+     *   <li>PaperTapeLogicDevice 更新 remaining_spots / predicted_remaining_hours / tape_alarm</li>
+     * </ul>
+     *
+     * @param newValue 新值
+     * @param newStatus 新状态
+     * @return true 更新成功
+     */
+    default boolean updateValueAndPublish(T newValue, AttributeStatus newStatus) {
+        boolean result = updateValue(newValue, newStatus);
+        publicState();
+        return result;
     }
 }

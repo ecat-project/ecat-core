@@ -99,6 +99,11 @@ public class ILogicAttributeTest {
             return true;
         }
 
+        @Override
+        public boolean updateValue(Double newValue, AttributeStatus newStatus) {
+            return true;
+        }
+
         // --- AttributeAbility 方法（最小化实现） ---
 
         @Override

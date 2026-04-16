@@ -113,4 +113,20 @@ public interface AttributeAbility<T>{
     void setPersistable(boolean persistable);
     T getDefaultValue();
     void setDefaultValue(T defaultValue);
+
+    /**
+     * 设备自己更新原始数据，不触发 onChangedCallback，适于收到设备新数据更新状态值。
+     *
+     * <p>与 {@link #setDisplayValue(String)} 不同，此方法：
+     * <ul>
+     *   <li>不检查 valueChangeable</li>
+     *   <li>不触发 onChangedCallback</li>
+     *   <li>直接设置原始值（无需单位转换）</li>
+     * </ul>
+     *
+     * @param newValue 新值
+     * @param newStatus 新状态
+     * @return true 更新成功
+     */
+    boolean updateValue(T newValue, AttributeStatus newStatus);
 }

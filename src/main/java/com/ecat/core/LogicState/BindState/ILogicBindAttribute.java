@@ -33,9 +33,8 @@ import com.ecat.core.LogicState.ILogicAttribute;
  *       用于 buildReverseIndex 构建反向索引</li>
  * </ul>
  *
- * @param <T> 属性值的类型（如 Boolean、Double 等）
+ * @param <T> 属性值的类型（如 Double 等）
  * @see ILogicAttribute
- * @see LBinaryBindAttribute
  * @see LNumericBindAttribute
  * @see LNumericBindMixAttribute
  * @author coffee

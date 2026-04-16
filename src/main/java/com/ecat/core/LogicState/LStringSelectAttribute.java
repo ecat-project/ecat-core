@@ -325,12 +325,12 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
 
     /**
      * Sets the options list for factory-created instances.
-     * Called by {@link LogicAttributeFactory} after construction when
-     * the definition is a {@link StringSelectAttrDef}.
+     * Called by {@link LogicAttributeFactory} or {@link com.ecat.core.LogicDevice.LogicDevice#genAttrMap}
+     * after construction when the definition is a {@link StringSelectAttrDef}.
      *
      * @param options the standard options list to set
      */
-    void setOptionsFromDef(List<String> options) {
+    public void setOptionsFromDef(List<String> options) {
         this.options = options;
     }
 }

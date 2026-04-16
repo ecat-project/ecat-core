@@ -142,6 +142,8 @@ public class StateManager {
                     ? attr.getNativeUnit().getFullUnitString() : null;
                 if (Objects.equals(currentUnit, state.nativeUnitStr)) {
                     attr.restore(state);
+                    log.debug("Restored state for attr '{}' value={} device={}",
+                        attr.getAttributeID(), state.value, device.getId());
                 } else {
                     log.warn("Unit mismatch for attr {}, skip restore (persisted={}, current={})",
                         attr.getAttributeID(), state.nativeUnitStr, currentUnit);
@@ -277,9 +279,10 @@ public class StateManager {
             new File(dbPath).getParentFile().mkdirs();
             DBMaker.Maker maker = DBMaker.fileDB(dbPath)
                 .transactionEnable();
-            // Windows 下不启用 mmap，避免文件被锁定无法动态删除
+            // 使用 fileMmapEnableIfSupported() 而非 fileMmapEnable()，
+            // 避免进程异常退出后遗留 stale file lock 导致重启时 FileLocked 异常
             if (!OsUtils.isWindows()) {
-                maker.fileMmapEnable();
+                maker.fileMmapEnableIfSupported();
             }
             return maker.make();
         });

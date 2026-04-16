@@ -125,6 +125,9 @@ public class LogicDeviceRegistryTest {
         @Override
         public boolean publicState() { return true; }
 
+        @Override
+        public boolean updateValue(Double newValue, AttributeStatus newStatus) { return true; }
+
         // --- AttributeAbility 最小化实现 ---
 
         @Override public String getAttributeID() { return attributeID; }

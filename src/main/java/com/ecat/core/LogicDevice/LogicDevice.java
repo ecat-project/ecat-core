@@ -21,9 +21,12 @@ import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Device.DeviceStatus;
 import com.ecat.core.LogicMapping.IDeviceMapping;
 import com.ecat.core.LogicMapping.LogicMappingManager;
+import com.ecat.core.LogicState.CommandAttrDef;
 import com.ecat.core.LogicState.ILogicAttribute;
-import com.ecat.core.LogicState.LogicAttributeFactory;
+import com.ecat.core.LogicState.LCommandAttribute;
+import com.ecat.core.LogicState.LStringSelectAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
+import com.ecat.core.LogicState.StringSelectAttrDef;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.SelectAttribute;
@@ -190,6 +193,7 @@ public abstract class LogicDevice extends DeviceBase {
     @SuppressWarnings("unchecked")
     private Map<String, ILogicAttribute<?>> genAttrMap(ConfigEntry entry) throws Exception {
         Map<String, ILogicAttribute<?>> result = new LinkedHashMap<>();
+        this.attrMap = result;  // 提前设置，使 mapping.getAttr() 中可用 getAttrMap() 获取已创建的属性
 
         // 读取 entry 中的 mappings 配置（物理设备绑定信息）
         Map<String, Object> data = entry.getData();
@@ -198,12 +202,12 @@ public abstract class LogicDevice extends DeviceBase {
             mappings = (Map<String, Object>) data.get("mappings");
         }
 
-        // 记录第一个成功解析的 mapping 和 phyDevice，供 unmapped 属性（standalone/alarm）使用
-        // alarm 属性需要 phyDevice 来绑定物理源属性，以便 reverseIndex 正确路由总线事件
+        // 记录第一个成功解析的 mapping 和 phyDevice，供所有非 YAML 映射的属性使用
+        // 所有属性创建统一委托给 mapping.getAttr()
         IDeviceMapping resolvedMapping = null;
         DeviceBase firstPhyDevice = null;
 
-        // 以 getAttrDefs() 为属性创建的唯一来源（mapping-driven）
+        // 以 getAttrDefs() 为属性定义来源，以 mapping.getAttr() 为属性创建的唯一入口
         for (LogicAttributeDefine def : getAttrDefs()) {
             String attrId = def.getAttrId();
             ILogicAttribute<?> attr = null;
@@ -214,6 +218,7 @@ public abstract class LogicDevice extends DeviceBase {
                 String deviceId = attrConfig != null ? (String) attrConfig.get("device_id") : null;
 
                 if (deviceId != null && !deviceId.isEmpty()) {
+                    // 用户配置了物理设备 → 解析 phyDevice + mapping
                     if (this.core == null) {
                         throw new RuntimeException("LogicDevice [" + getId() + "] attr '" + attrId
                             + "' mapped to device '" + deviceId + "' but core is null");
@@ -234,32 +239,48 @@ public abstract class LogicDevice extends DeviceBase {
 
                     IDeviceMapping mapping = logicMappingManager.getMapping(mappingType, coordinate, model);
                     if (mapping != null) {
-                        // 记录第一个成功解析的 mapping 和 phyDevice
                         if (resolvedMapping == null) {
                             resolvedMapping = mapping;
                             firstPhyDevice = phyDevice;
                         }
                         attr = mapping.getAttr(attrId, phyDevice, this);
                     }
-                } else if (attrConfig != null) {
-                    // device_id 为 null（用户选择"无物理设备"）：创建独立属性，不绑定物理设备
-                    attr = LogicAttributeFactory.create(
-                        (Class<? extends ILogicAttribute<?>>) def.getAttrClassType(), def);
                 }
-            } else {
-                // YAML 未配置映射的属性，根据类型分别处理：
-                // - standalone 属性（!mapable, changeable）：直接从 define 创建，不需要 mapping
-                // - alarm 属性（!mapable, !changeable）：委托 mapping 创建（需绑定物理源属性）
-                if (!def.isMapable() && def.isValueChangeable()) {
-                    attr = LogicAttributeFactory.create(
-                        (Class<? extends ILogicAttribute<?>>) def.getAttrClassType(), def);
-                } else if (resolvedMapping != null) {
+                // device_id 为 null（用户选择"无物理设备"）→ fall through，mapping 创建 standalone 属性
+            }
+
+            // 如果 YAML 映射未创建属性，统一委托给 resolvedMapping
+            // mapping 负责所有属性的创建：standalone、computed、alarm、command 等
+            if (attr == null && resolvedMapping != null) {
+                attr = resolvedMapping.getAttr(attrId, firstPhyDevice, this);
+            } else if (attr == null && resolvedMapping == null && logicMappingManager != null) {
+                // 没有通过物理设备解析到 mapping，尝试按类型查找任意 mapping
+                // 处理场景：YAML 有映射配置但 device_id 为空（用户选择"无物理设备"），
+                // 仍需 mapping 来创建 standalone 属性
+                IDeviceMapping fallbackMapping = logicMappingManager.getAnyMappingByType(getMappingType());
+                if (fallbackMapping != null) {
+                    resolvedMapping = fallbackMapping;
                     attr = resolvedMapping.getAttr(attrId, firstPhyDevice, this);
                 }
             }
 
+            // 注入元数据 + 特殊 def 类型处理
             if (attr != null) {
                 attr.initFromDefinition(def);
+                // CommandAttrDef: 注入命令列表
+                if (def instanceof CommandAttrDef && attr instanceof LCommandAttribute) {
+                    List<String> commands = ((CommandAttrDef) def).getCommands();
+                    if (commands != null) {
+                        ((LCommandAttribute) attr).setCommandsFromDef(commands);
+                    }
+                }
+                // StringSelectAttrDef: 注入选项列表
+                if (def instanceof StringSelectAttrDef && attr instanceof LStringSelectAttribute) {
+                    List<String> options = ((StringSelectAttrDef) def).getOptions();
+                    if (options != null) {
+                        ((LStringSelectAttribute) attr).setOptionsFromDef(options);
+                    }
+                }
                 result.put(attrId, attr);
             }
         }

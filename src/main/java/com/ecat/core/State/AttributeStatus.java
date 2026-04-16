@@ -52,6 +52,7 @@ public enum AttributeStatus {
 
     @Deprecated
     OTHER(9999, "Other", "其他状态"),  // 不要用此属性，已废弃（2026-03-01后将删除）
+    OFFLINE(0, "Offline", "离线"), // 系统状态
     EMPTY(-1, "Empty", "未设置"); // 系统初始
 
     private final int id;
