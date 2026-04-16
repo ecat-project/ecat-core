@@ -98,7 +98,7 @@ public class TextAttribute extends AttributeBase<String> {
     }
 
     /**
-     * 仅 attributeID 的构造函数，用于 LogicAttributeFactory "先 new 再 init" 模式。
+     * 仅 attributeID 的构造函数，用于 "先 new 再 init" 模式。
      * 不要滥用，仅在此模式下使用。
      */
     protected TextAttribute(String attributeID) {

@@ -25,13 +25,13 @@ import java.util.List;
  * 命令型逻辑属性定义。
  *
  * <p>用于 standalone 命令属性（如 dispatch_command: ZERO_START/SPAN_START），
- * 由 {@link LogicAttributeFactory#create} 创建 {@link LCommandAttribute} 实例时使用。
+ * 由 {@code mapping.getAttr()} 创建 {@link LCommandAttribute} 实例时使用。
  * 在基类 {@link LogicAttributeDefine} 的基础上增加了 commands 字段，
  * 用于描述支持的命令列表。
  *
  * @see LogicAttributeDefine
  * @see LCommandAttribute
- * @see LogicAttributeFactory
+ * @see LCommandAttribute
  * @author coffee
  */
 public class CommandAttrDef extends LogicAttributeDefine {

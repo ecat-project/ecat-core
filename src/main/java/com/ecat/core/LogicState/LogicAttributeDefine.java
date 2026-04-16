@@ -28,8 +28,8 @@ import lombok.Setter;
  *
  * <p>由 IDeviceMapping.getAttrDefs() 返回，用于 LogicDevice 创建逻辑属性时提供初始化信息。
  * LogicAttributeDefine 是不可变的配置元数据，描述逻辑属性的"蓝图"，
- * 实际的逻辑属性实例由 {@link LogicAttributeFactory} 通过 {@link ILogicAttribute}
- * 子类的 0-arg 构造函数 + {@link ILogicAttribute#initFromDefinition} 创建。
+ * 实际的逻辑属性实例由 {@code mapping.getAttr()} 通过 {@link ILogicAttribute}
+ * 子类创建 + {@link ILogicAttribute#initFromDefinition} 注入元数据。
  *
  * <h3>子类化约定</h3>
  * <p>当某种 L*Attribute 类型的 standalone 创建需要额外参数时，
@@ -59,7 +59,6 @@ import lombok.Setter;
  *   }
  * </pre>
  *
- * @see LogicAttributeFactory
  * @see ILogicAttribute#initFromDefinition(LogicAttributeDefine)
  * @author coffee
  */

@@ -81,7 +81,7 @@ public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute
     }
 
     /**
-     * Protected constructor for {@link LogicAttributeFactory}.
+     * Protected constructor for standalone binary attributes.
      * Creates a template with attributeID set (for i18n initialization);
      * remaining fields are set by {@link #initFromDefinition(LogicAttributeDefine)}.
      *

@@ -25,13 +25,13 @@ import java.util.List;
  * 字符串选择型逻辑属性定义。
  *
  * <p>用于 standalone 字符串选择属性（如 manual_status: Normal/Maintenance/Calibration），
- * 由 {@link LogicAttributeFactory#create} 创建 {@link LStringSelectAttribute} 实例时使用。
+ * 由 {@code mapping.getAttr()} 创建 {@link LStringSelectAttribute} 实例时使用。
  * 在基类 {@link LogicAttributeDefine} 的基础上增加了 options 字段，
  * 用于描述可选值列表。
  *
  * @see LogicAttributeDefine
  * @see LStringSelectAttribute
- * @see LogicAttributeFactory
+ * @see LStringSelectAttribute
  * @author coffee
  */
 public class StringSelectAttrDef extends LogicAttributeDefine {

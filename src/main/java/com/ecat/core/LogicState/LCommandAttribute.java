@@ -106,7 +106,7 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
     }
 
     /**
-     * Protected constructor for {@link LogicAttributeFactory}.
+     * Protected constructor for standalone command attributes.
      * Creates a template with attributeID set (for i18n initialization);
      * remaining fields are set by {@link #initFromDefinition(LogicAttributeDefine)}.
      *
@@ -342,7 +342,7 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
 
     /**
      * Sets the standard commands list for factory-created instances.
-     * Called by {@link LogicAttributeFactory} or {@link com.ecat.core.LogicDevice.LogicDevice#genAttrMap}
+     * Called by {@link com.ecat.core.LogicDevice.LogicDevice#genAttrMap}
      * after construction when the definition is a {@link CommandAttrDef}.
      *
      * @param commands the standard commands list to set

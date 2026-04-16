@@ -85,7 +85,7 @@ public class LTextAttribute extends TextAttribute implements ILogicAttribute<Str
     }
 
     /**
-     * Protected constructor for {@link LogicAttributeFactory}.
+     * Protected constructor for standalone text attributes.
      * Creates a template with attributeID set (for i18n initialization);
      * remaining fields are set by {@link #initFromDefinition(LogicAttributeDefine)}.
      *

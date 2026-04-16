@@ -20,13 +20,13 @@ package com.ecat.core.LogicState;
  * 数值型逻辑属性定义。
  *
  * <p>用于 standalone 数值属性（阈值、浓度、温度等），
- * 由 {@link LogicAttributeFactory#create} 创建 {@link LNumericAttribute} 实例时使用。
+ * 由 {@code mapping.getAttr()} 创建 {@link LNumericAttribute} 实例时使用。
  * 基类 {@link LogicAttributeDefine} 已包含 nativeUnit、displayUnit、displayPrecision 等字段，
  * 本类当前无额外字段，作为类型标记和未来扩展点。
  *
  * @see LogicAttributeDefine
  * @see LNumericAttribute
- * @see LogicAttributeFactory
+ * @see LNumericAttribute
  * @author coffee
  */
 public class NumericAttrDef extends LogicAttributeDefine {

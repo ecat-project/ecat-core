@@ -112,7 +112,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     /**
      * 仅 attributeID 的构造函数，用于先创建属性实例再通过 init 方法完成初始化的场景。
      *
-     * <p>适用场景：{@link LogicAttributeFactory} 通过反射创建 standalone 逻辑属性时，
+     * <p>适用场景：通过反射创建 standalone 逻辑属性时（如 mapping.getAttr()），
      * 需要 attributeID 来正确初始化 i18n 路径，其余字段由 {@code initFromDefinition} 设置。
      *
      * <p><b>不要滥用</b>：常规属性创建应使用完整参数的构造函数，

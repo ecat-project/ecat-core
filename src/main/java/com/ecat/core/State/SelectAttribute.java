@@ -67,7 +67,7 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
     }
 
     /**
-     * 仅 attributeID 的构造函数，用于 LogicAttributeFactory "先 new 再 init" 模式。
+     * 仅 attributeID 的构造函数，用于 "先 new 再 init" 模式。
      * 不要滥用，仅在此模式下使用。
      */
     protected SelectAttribute(String attributeID) {

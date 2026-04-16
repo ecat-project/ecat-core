@@ -103,7 +103,7 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
     }
 
     /**
-     * Protected constructor for {@link LogicAttributeFactory}.
+     * Protected constructor for standalone numeric attributes.
      * Creates a template with attributeID set (for i18n initialization);
      * remaining fields are set by {@link #initFromDefinition(LogicAttributeDefine)}.
      *

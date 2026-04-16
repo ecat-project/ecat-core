@@ -124,7 +124,7 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     }
 
     /**
-     * Protected constructor for {@link LogicAttributeFactory}.
+     * Protected constructor for standalone string-select attributes.
      * Creates a template with attributeID set (for i18n initialization);
      * remaining fields are set by {@link #initFromDefinition(LogicAttributeDefine)}.
      *
@@ -325,7 +325,7 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
 
     /**
      * Sets the options list for factory-created instances.
-     * Called by {@link LogicAttributeFactory} or {@link com.ecat.core.LogicDevice.LogicDevice#genAttrMap}
+     * Called by {@link com.ecat.core.LogicDevice.LogicDevice#genAttrMap}
      * after construction when the definition is a {@link StringSelectAttrDef}.
      *
      * @param options the standard options list to set
