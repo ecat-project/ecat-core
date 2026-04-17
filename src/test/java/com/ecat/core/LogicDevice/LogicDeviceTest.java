@@ -32,6 +32,7 @@ import com.ecat.core.State.NumericAttribute;
 import com.ecat.core.State.UnitInfo;
 import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 import com.ecat.core.I18n.I18nKeyPath;
+import com.ecat.core.LogicState.LTextAttribute;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -221,7 +222,11 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        assertTrue("No mappings key should result in empty attrMap", attrMap.isEmpty());
+        // test_attr is mapable=true (default), no mapping resolved → placeholder created with ALARM status
+        assertEquals("No mappings key should create placeholder for mapable attr", 1, attrMap.size());
+        ILogicAttribute<?> attr = attrMap.get("test_attr");
+        assertNotNull("Placeholder attr should exist", attr);
+        assertEquals("Placeholder should have ALARM status", AttributeStatus.ALARM, attr.getStatus());
     }
 
     @Test
@@ -236,7 +241,9 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        assertTrue("Null mappings should result in empty attrMap", attrMap.isEmpty());
+        // test_attr is mapable=true (default), no mapping resolved → placeholder created
+        assertEquals("Null mappings should create placeholder for mapable attr", 1, attrMap.size());
+        assertNotNull("Placeholder attr should exist", attrMap.get("test_attr"));
     }
 
     @Test
@@ -250,7 +257,9 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        assertTrue("Empty mappings should result in empty attrMap", attrMap.isEmpty());
+        // test_attr is mapable=true (default), no mapping resolved → placeholder created
+        assertEquals("Empty mappings should create placeholder for mapable attr", 1, attrMap.size());
+        assertNotNull("Placeholder attr should exist", attrMap.get("test_attr"));
     }
 
     @Test
@@ -303,7 +312,8 @@ public class LogicDeviceTest {
 
     @Test
     public void testGenAttrMapWithNullAttrConfig() {
-        // mapping entry with null config should be skipped
+        // mapping entry with null config → no device_id → fall through
+        // test_attr is mapable=true, no mapping resolved → placeholder created
         Map<String, Object> mappings = new LinkedHashMap<>();
         mappings.put("test_attr", null);
         ConfigEntry entry = createEntryWithMappings("test-001", mappings);
@@ -313,7 +323,8 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        assertTrue("Mapping with null config should be skipped", attrMap.isEmpty());
+        assertEquals("Null config should create placeholder for mapable attr", 1, attrMap.size());
+        assertNotNull("Placeholder attr should exist", attrMap.get("test_attr"));
     }
 
     @Test
@@ -328,9 +339,10 @@ public class LogicDeviceTest {
 
         ConfigEntry entry = createEntryWithMappings("test-001", new HashMap<>());
         TestLogicDevice device = createTestLogicDevice(entry);
-        // Should not throw even with null mapping manager (because empty mappings)
+        // Should not throw even with null mapping manager
+        // test_attr is mapable=true, placeholder will be created
         device.init();
-        assertTrue(device.getAttrMap().isEmpty());
+        assertFalse("Placeholder should be created even with null mapping manager", device.getAttrMap().isEmpty());
     }
 
     @Test
@@ -395,6 +407,31 @@ public class LogicDeviceTest {
         assertEquals("test-entry-id-123", device.getId());
     }
 
+    @Test
+    public void testPlaceholderAttrCreatedWithAlarmStatus() {
+        // When a mappable attr has no phyDevice, a placeholder should be created with ALARM status
+        ConfigEntry entry = createTestEntry("test-001", null);
+        TestLogicDevice device = createTestLogicDevice(entry);
+        device.init();
+
+        Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
+        ILogicAttribute<?> attr = attrMap.get("test_attr");
+        assertNotNull("Placeholder should be created for mapable attr", attr);
+        assertEquals("Placeholder should have ALARM status", AttributeStatus.ALARM, attr.getStatus());
+        assertTrue("Placeholder should be LNumericAttribute", attr instanceof LNumericAttribute);
+    }
+
+    @Test
+    public void testNonMapableAttrNoPlaceholder() {
+        // Non-mapable attrs should NOT get placeholder when mapping returns null
+        ConfigEntry entry = createTestEntry("test-001", null);
+        TestLogicDeviceWithNonMapable device = new TestLogicDeviceWithNonMapable(entry);
+        device.init();
+
+        Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
+        assertNull("Non-mapable attr should NOT get placeholder", attrMap.get("non_mapable_attr"));
+    }
+
     // ========== 测试用具体子类 ==========
 
     /**
@@ -406,6 +443,45 @@ public class LogicDeviceTest {
         );
 
         public TestLogicDevice(ConfigEntry entry) {
+            super(entry);
+        }
+
+        @Override
+        public List<LogicAttributeDefine> getAttrDefs() {
+            return TEST_DEFS;
+        }
+
+        @Override
+        protected String getMappingType() {
+            return "TEST";
+        }
+
+        @Override
+        public void start() {}
+
+        @Override
+        public void stop() {}
+
+        @Override
+        public void release() {}
+    }
+
+    /**
+     * 测试用 LogicDevice 子类，包含 mapable=false 的属性定义。
+     */
+    private static class TestLogicDeviceWithNonMapable extends LogicDevice {
+        private static final List<LogicAttributeDefine> TEST_DEFS = Arrays.asList(
+            createNonMapableDef()
+        );
+
+        private static LogicAttributeDefine createNonMapableDef() {
+            LogicAttributeDefine def = new LogicAttributeDefine("non_mapable_attr", AttributeClass.VALUE,
+                null, null, 2, false, LNumericAttribute.class);
+            def.setMapable(false);
+            return def;
+        }
+
+        public TestLogicDeviceWithNonMapable(ConfigEntry entry) {
             super(entry);
         }
 

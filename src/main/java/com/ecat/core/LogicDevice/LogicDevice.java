@@ -24,7 +24,9 @@ import com.ecat.core.LogicMapping.LogicMappingManager;
 import com.ecat.core.LogicState.CommandAttrDef;
 import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.LogicState.LCommandAttribute;
+import com.ecat.core.LogicState.LNumericAttribute;
 import com.ecat.core.LogicState.LStringSelectAttribute;
+import com.ecat.core.LogicState.LTextAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
 import com.ecat.core.LogicState.StringSelectAttrDef;
 import com.ecat.core.State.AttributeBase;
@@ -264,6 +266,13 @@ public abstract class LogicDevice extends DeviceBase {
                 }
             }
 
+            // 对 mappable 属性，当 mapping.getAttr() 返回 null（phyDevice 未绑定）时
+            // 创建 ALARM 状态的占位属性，确保 LogicDevice 属性完整。
+            // 占位属性在 reconfigure 绑定物理设备后会被完整替换。
+            if (attr == null && def.isMapable()) {
+                attr = createPlaceholderAttr(attrId, def);
+            }
+
             // 注入元数据 + 特殊 def 类型处理
             if (attr != null) {
                 attr.initFromDefinition(def);
@@ -379,5 +388,43 @@ public abstract class LogicDevice extends DeviceBase {
             return option != null ? option.toString() : null;
         }
         return null;
+    }
+
+    /**
+     * 当 mappable 属性因 phyDevice 未绑定而无法创建时，使用 standalone 工厂方法
+     * 创建一个同类型的占位属性，状态设为 ALARM。
+     *
+     * <p>占位属性在 reconfigure 绑定物理设备后会被完整替换。
+     *
+     * <p>根据 LogicAttributeDefine 的具体类型和 attrClassType 选择正确的 standalone 工厂：
+     * <ul>
+     *   <li>StringSelectAttrDef → LStringSelectAttribute.standalone(attrId, attrClass, options)</li>
+     *   <li>CommandAttrDef → LCommandAttribute.standalone(attrId, attrClass, commands)</li>
+     *   <li>LNumericAttribute.class → LNumericAttribute.standalone(attrId, attrClass, units, precision)</li>
+     *   <li>LTextAttribute.class → LTextAttribute.standalone(attrId, attrClass)</li>
+     * </ul>
+     *
+     * @param attrId 逻辑属性ID
+     * @param def 属性定义，包含类型、单位、选项等信息
+     * @return ALARM 状态的占位属性，如果无法识别类型则返回 null
+     */
+    private ILogicAttribute<?> createPlaceholderAttr(String attrId, LogicAttributeDefine def) {
+        ILogicAttribute<?> attr = null;
+        if (def instanceof StringSelectAttrDef) {
+            attr = LStringSelectAttribute.standalone(attrId, def.getAttrClass(),
+                ((StringSelectAttrDef) def).getOptions());
+        } else if (def instanceof CommandAttrDef) {
+            attr = LCommandAttribute.standalone(attrId, def.getAttrClass(),
+                ((CommandAttrDef) def).getCommands());
+        } else if (def.getAttrClassType() == LNumericAttribute.class) {
+            attr = LNumericAttribute.standalone(attrId, def.getAttrClass(),
+                def.getNativeUnit(), def.getDisplayUnit(), def.getDisplayPrecision());
+        } else if (def.getAttrClassType() == LTextAttribute.class) {
+            attr = LTextAttribute.standalone(attrId, def.getAttrClass());
+        } else {
+            return null;
+        }
+        attr.setStatus(AttributeStatus.ALARM);
+        return attr;
     }
 }
