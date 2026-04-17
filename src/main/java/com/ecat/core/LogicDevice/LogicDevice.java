@@ -28,6 +28,7 @@ import com.ecat.core.LogicState.LNumericAttribute;
 import com.ecat.core.LogicState.LStringSelectAttribute;
 import com.ecat.core.LogicState.LTextAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
+import com.ecat.core.LogicState.SetupData;
 import com.ecat.core.LogicState.StringSelectAttrDef;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
@@ -157,6 +158,7 @@ public abstract class LogicDevice extends DeviceBase {
             throw new RuntimeException("LogicDevice creation failed: " + getId(), e);
         }
         createAttrs();
+        setupAttributes();
     }
 
     /**
@@ -326,6 +328,24 @@ public abstract class LogicDevice extends DeviceBase {
                 }
             }
             // attr == null means this business attribute is not configured in mappings
+        }
+    }
+
+    /**
+     * 在所有属性创建完成、持久化值恢复后，统一触发每个属性的初始化回调。
+     *
+     * <p>遍历 attrMap，对每个 ILogicAttribute 调用
+     * {@link ILogicAttribute#setupAfterDeviceAttrsCreated(SetupData)}。
+     * 可安全重复调用（计算逻辑幂等）。
+     *
+     * <p>对于 {@code StationLogicDevice}，需要在 {@code createStatusAttrs()} 之后
+     * 再次调用此方法，以确保状态属性（alarm_status、running_status 等）也触发 setup。
+     */
+    public void setupAttributes() {
+        if (attrMap == null) return;
+        SetupData data = new SetupData();
+        for (ILogicAttribute<?> attr : attrMap.values()) {
+            attr.setupAfterDeviceAttrsCreated(data);
         }
     }
 

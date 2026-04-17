@@ -165,4 +165,20 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
         publicState();
         return result;
     }
+
+    /**
+     * 设备所有属性创建完成、持久化值恢复完成后的回调。
+     *
+     * <p>由 {@link com.ecat.core.LogicDevice.LogicDevice#setupAttributes()} 在
+     * {@code init()} 中所有属性创建和持久化恢复完成后统一调用。
+     *
+     * <p>计算属性和报警属性应 override 此方法，触发自身的值计算逻辑（如调用
+     * {@link #updateBindAttrValue(AttributeBase)} 复用现有计算逻辑）。
+     * 默认实现为空操作。
+     *
+     * @param data 初始化上下文数据（当前为空占位，保留用于未来扩展）
+     */
+    default void setupAfterDeviceAttrsCreated(SetupData data) {
+        // 默认空操作
+    }
 }
