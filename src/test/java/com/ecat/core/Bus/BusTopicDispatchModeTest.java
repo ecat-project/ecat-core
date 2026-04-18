@@ -100,4 +100,22 @@ public class BusTopicDispatchModeTest {
     public void logicDevicesAllLoaded_hasInstantDataClass() {
         assertEquals(Instant.class, BusTopic.LOGIC_DEVICES_ALL_LOADED.getDataClass());
     }
+
+    // --- CONFIG_ENTRY_LIFECYCLE topic tests ---
+
+    @Test
+    public void testConfigEntryLifecycleTopicIsSync() {
+        assertEquals(BusTopic.DispatchMode.SYNC,
+            BusTopic.resolveMode(BusTopic.CONFIG_ENTRY_LIFECYCLE.getTopicName()));
+    }
+
+    @Test
+    public void testConfigEntryLifecycleTopicName() {
+        assertEquals("config.entry.lifecycle", BusTopic.CONFIG_ENTRY_LIFECYCLE.getTopicName());
+    }
+
+    @Test
+    public void testConfigEntryLifecycleDataClass() {
+        assertEquals(ConfigEntryEvent.class, BusTopic.CONFIG_ENTRY_LIFECYCLE.getDataClass());
+    }
 }

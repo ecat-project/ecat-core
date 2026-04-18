@@ -169,6 +169,13 @@ public abstract class LMixNumericAttribute extends LNumericAttribute {
         return result;
     }
 
+    @Override
+    public void dispose() {
+        if (bindAttrs != null) {
+            bindAttrs.clear();
+        }
+    }
+
     /**
      * LMixNumericAttribute is read-only. Always throws UnsupportedOperationException.
      *

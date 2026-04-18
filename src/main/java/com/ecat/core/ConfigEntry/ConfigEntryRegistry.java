@@ -19,6 +19,8 @@ package com.ecat.core.ConfigEntry;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Integration.IntegrationRegistry;
+import com.ecat.core.Bus.BusTopic;
+import com.ecat.core.Bus.ConfigEntryEvent;
 import com.ecat.core.Utils.DateTimeUtils;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
@@ -174,6 +176,8 @@ public class ConfigEntryRegistry {
         // 7. 通知 integration
         notifyIntegrationCreate(entry);
 
+        publishConfigEntryEvent(entry, ConfigEntryEvent.Action.CREATE);
+
         log.info("Created config entry: entryId={}, uniqueId={}",
                 entry.getEntryId(), entry.getUniqueId());
 
@@ -237,6 +241,8 @@ public class ConfigEntryRegistry {
         // 5. 通知 integration
         notifyIntegrationReconfigure(updated);
 
+        publishConfigEntryEvent(updated, ConfigEntryEvent.Action.RECONFIGURE);
+
         log.info("Reconfigured config entry: entryId={}, version {} (preserved)",
                 entryId, updated.getVersion());
 
@@ -263,6 +269,8 @@ public class ConfigEntryRegistry {
 
         // 3. 从持久化删除
         persistence.delete(entryId);
+
+        publishConfigEntryEvent(entry, ConfigEntryEvent.Action.REMOVE);
 
         log.info("Removed config entry: entryId={}", entryId);
     }
@@ -350,6 +358,8 @@ public class ConfigEntryRegistry {
         } else {
             notifyIntegrationDisable(entry);
         }
+
+        publishConfigEntryEvent(entry, enabled ? ConfigEntryEvent.Action.ENABLE : ConfigEntryEvent.Action.DISABLE);
 
         ConfigEntry updated = new ConfigEntry.Builder()
                 .entryId(entry.getEntryId())
@@ -508,5 +518,31 @@ public class ConfigEntryRegistry {
             log.error("Failed to notify integration {} to enable entry {}: {}",
                     coordinate, entry.getEntryId(), e.getMessage());
         }
+    }
+
+    // ==================== ConfigEntry 生命周期事件发布 ====================
+
+    /**
+     * 发布 ConfigEntry 生命周期事件到 BusRegistry。
+     *
+     * <p><b>事件质量等级：</b>此事件在目标集成通知完成之后发布。
+     * 如果目标集成处理失败（抛出异常），根据 notifyIntegration* 的异常处理策略：
+     * <ul>
+     *   <li>create/reconfigure：异常会向上抛出，不会执行到此事件发布</li>
+     *   <li>remove/enable/disable：异常仅被记录，事件仍然会发布</li>
+     * </ul>
+     * 监听方需要理解：收到事件不保证目标集成的操作一定成功完成。
+     */
+    private void publishConfigEntryEvent(ConfigEntry entry, ConfigEntryEvent.Action action) {
+        if (core == null) return;
+        if (core.getBusRegistry() == null) return;
+
+        ConfigEntryEvent event = new ConfigEntryEvent(
+            entry.getEntryId(), entry.getCoordinate(), action);
+        core.getBusRegistry().publishSync(
+            BusTopic.CONFIG_ENTRY_LIFECYCLE.getTopicName(), event);
+
+        log.debug("Published config entry lifecycle event: action={}, entryId={}, coordinate={}",
+            action, entry.getEntryId(), entry.getCoordinate());
     }
 }

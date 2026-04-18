@@ -410,6 +410,138 @@ public abstract class LogicDevice extends DeviceBase {
         return null;
     }
 
+    // ==================== 属性替换方法 ====================
+
+    /**
+     * 替换指定 attrId 的属性为 placeholder（standalone、ALARM 状态）。
+     * 用于物理设备离线时保留属性槽位，防止内存泄漏和悬垂引用。
+     *
+     * @param attrId 要替换的逻辑属性ID
+     */
+    public void replaceAttrWithPlaceholder(String attrId) {
+        ILogicAttribute<?> existing = attrMap.get(attrId);
+        if (existing == null) return;
+
+        existing.dispose();
+
+        attrMap.remove(attrId);
+        getAttrs().remove(attrId);
+
+        LogicAttributeDefine def = findAttrDef(attrId);
+        if (def != null && def.isMapable()) {
+            ILogicAttribute<?> placeholder = createPlaceholderAttr(attrId, def);
+            if (placeholder != null) {
+                attrMap.put(attrId, placeholder);
+                setAttribute((AttributeBase<?>) placeholder);
+            }
+        }
+    }
+
+    /**
+     * 将 placeholder attr 替换为真实绑定的 attr。
+     *
+     * @param attrId 属性ID
+     * @param phyDevice 新的物理设备实例
+     * @return true 如果替换成功
+     */
+    public boolean replacePlaceholderWithRealAttr(String attrId, DeviceBase phyDevice) {
+        ILogicAttribute<?> existing = attrMap.get(attrId);
+        if (existing == null) return false;
+
+        existing.dispose();
+
+        attrMap.remove(attrId);
+        getAttrs().remove(attrId);
+
+        ILogicAttribute<?> realAttr = createAttrFromMapping(attrId, phyDevice);
+        if (realAttr != null) {
+            LogicAttributeDefine def = findAttrDef(attrId);
+            if (def != null) {
+                realAttr.initFromDefinition(def);
+            }
+            attrMap.put(attrId, realAttr);
+            setAttribute((AttributeBase<?>) realAttr);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 查找设备上所有处于 placeholder 状态的 attr。
+     *
+     * @return attrId -> 该 attr 等待绑定的 physical device uniqueId
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, String> findPlaceholderAttrs() {
+        Map<String, String> result = new LinkedHashMap<>();
+        Map<String, Object> data = getEntry().getData();
+        if (data == null) return result;
+        Map<String, Object> mappings = (Map<String, Object>) data.get("mappings");
+        if (mappings == null) return result;
+
+        for (Map.Entry<String, ILogicAttribute<?>> entry : attrMap.entrySet()) {
+            String attrId = entry.getKey();
+            ILogicAttribute<?> attr = entry.getValue();
+            if (isPlaceholder(attr)) {
+                Map<String, Object> mappingData = (Map<String, Object>) mappings.get(attrId);
+                if (mappingData != null && mappingData.get("device_id") != null) {
+                    result.put(attrId, (String) mappingData.get("device_id"));
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 判断一个逻辑属性是否是 placeholder。
+     * Placeholder 的特征：getBindedAttrs() 为空（standalone）且 status 为 ALARM。
+     */
+    private boolean isPlaceholder(ILogicAttribute<?> attr) {
+        if (!(attr instanceof AttributeBase)) return false;
+        AttributeBase<?> ab = (AttributeBase<?>) attr;
+        return ab.getStatus() == AttributeStatus.ALARM
+            && attr.getBindedAttrs().isEmpty();
+    }
+
+    /**
+     * 从 getAttrDefs() 中查找指定 attrId 的定义。
+     */
+    private LogicAttributeDefine findAttrDef(String attrId) {
+        for (LogicAttributeDefine def : getAttrDefs()) {
+            if (attrId.equals(def.getAttrId())) {
+                return def;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 使用 mapping 创建真实属性。
+     */
+    private ILogicAttribute<?> createAttrFromMapping(String attrId, DeviceBase phyDevice) {
+        if (logicMappingManager == null) return null;
+
+        String mappingType = getMappingType();
+        String coordinate = phyDevice.getEntry().getCoordinate();
+        String model = phyDevice.getModel();
+        IDeviceMapping mapping = logicMappingManager.getMapping(mappingType, coordinate, model);
+
+        if (mapping == null) {
+            mapping = logicMappingManager.getAnyMappingByType(mappingType);
+        }
+
+        if (mapping != null) {
+            try {
+                return mapping.getAttr(attrId, phyDevice, this);
+            } catch (Exception e) {
+                log.error("LogicDevice [{}] createAttrFromMapping failed for attr '{}': {}",
+                    getId(), attrId, e.getMessage(), e);
+                return null;
+            }
+        }
+        return null;
+    }
+
     /**
      * 当 mappable 属性因 phyDevice 未绑定而无法创建时，使用 standalone 工厂方法
      * 创建一个同类型的占位属性，状态设为 ALARM。

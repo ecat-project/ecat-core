@@ -168,6 +168,7 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
 
     /**
      * 设备所有属性创建完成、持久化值恢复完成后的回调。
+     * 此方法要求在相同关联数据状态下，多次调用保持幂等性，以适应设备重连、属性重置等场景。
      *
      * <p>由 {@link com.ecat.core.LogicDevice.LogicDevice#setupAttributes()} 在
      * {@code init()} 中所有属性创建和持久化恢复完成后统一调用。
@@ -180,5 +181,17 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
      */
     default void setupAfterDeviceAttrsCreated(SetupData data) {
         // 默认空操作
+    }
+
+    /**
+     * 释放逻辑属性持有的内部资源。
+     *
+     * <p>当逻辑属性因物理设备离线而被替换为占位属性时调用。
+     * 默认实现为空操作，持有资源（如绑定属性缓存、时间窗口状态）的子类应覆盖此方法。
+     *
+     * <p>调用此方法后，属性实例不应再被使用。
+     */
+    default void dispose() {
+        // 默认空实现，大多数子类无需额外释放
     }
 }

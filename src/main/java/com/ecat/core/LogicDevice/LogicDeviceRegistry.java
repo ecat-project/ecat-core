@@ -139,7 +139,7 @@ public class LogicDeviceRegistry {
      *
      * @param deviceID 逻辑设备ID
      */
-    private void removeReverseIndex(String deviceID) {
+    public void removeReverseIndex(String deviceID) {
         Iterator<Map.Entry<String, List<LogicDeviceAttrRef>>> it = reverseIndex.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<String, List<LogicDeviceAttrRef>> entry = it.next();
@@ -181,6 +181,27 @@ public class LogicDeviceRegistry {
      */
     public List<LogicDeviceAttrRef> findByPhysicalAttr(String deviceID, String attrID) {
         return reverseIndex.get(deviceID + ":" + attrID);
+    }
+
+    /**
+     * 根据物理设备ID查找所有引用了该设备属性的逻辑设备属性引用。
+     *
+     * <p>遍历反向索引，匹配 key 前缀为 "{deviceID}:" 的所有条目。
+     * 用于物理设备被卸载（REMOVE/DISABLE）时，不需要物理设备对象在 DeviceRegistry 中存在，
+     * 直接从反向索引中查找受影响的逻辑属性。
+     *
+     * @param deviceID 物理设备ID
+     * @return 受影响的逻辑设备属性引用列表
+     */
+    public List<LogicDeviceAttrRef> findByPhysicalDevice(String deviceID) {
+        List<LogicDeviceAttrRef> result = new ArrayList<>();
+        String prefix = deviceID + ":";
+        for (Map.Entry<String, List<LogicDeviceAttrRef>> entry : reverseIndex.entrySet()) {
+            if (entry.getKey().startsWith(prefix)) {
+                result.addAll(entry.getValue());
+            }
+        }
+        return result;
     }
 
     // ========== DAG 依赖图校验 ==========
