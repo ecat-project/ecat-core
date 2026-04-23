@@ -19,6 +19,7 @@ package com.ecat.core.LogicMapping;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -77,7 +78,7 @@ public class LogicMappingManager {
     public void registerMapping(IDeviceMapping mapping) {
         String mtype = mapping.getMappingType();
         String key = mapping.getDeviceCoordinate() + "-" + mapping.getDeviceModel();
-        mappingMap.computeIfAbsent(mtype, k -> new HashMap<>()).put(key, mapping);
+        mappingMap.computeIfAbsent(mtype, k -> new LinkedHashMap<>()).put(key, mapping);
     }
 
     /**
@@ -120,14 +121,34 @@ public class LogicMappingManager {
     }
 
     /**
-     * 获取指定映射类型下的任意一个设备映射。
-     * 适用于只需要知道某个类型是否存在映射的场景。
+     * 获取指定映射类型下注册顺序的第一个设备映射。
+     *
+     * 这个调用只用于 getAttrDefs() -
+     * 提供属性定义列表。所有 vendor mapping（如 SO2DeviceMapping_SMS8200）共享基类 SO2LogicDeviceMapping.getAttrDefs() 的定义，所以选哪个 mapping
+     * 都一样的场景
+     * 
+     * <p>注意：此方法仅应在无法确定具体 vendor 时使用（如 ConfigFlow 获取属性定义、
+     * 无物理设备绑定的 fallback 场景）。应优先使用精确匹配方法
+     * {@link #getMapping(String, String, String)} 通过 coordinate + model 确定正确的映射。
      *
      * @param mtype 映射类型（如 "SO2"）
-     * @return 该类型下的第一个映射实例，无映射则返回 null
+     * @return 该类型下注册顺序的第一个映射实例，无映射则返回 null
      */
-    public IDeviceMapping getAnyMappingByType(String mtype) {
+    public IDeviceMapping getFirstMappingByType(String mtype) {
         List<IDeviceMapping> mappings = getMappingsByType(mtype);
         return mappings.isEmpty() ? null : mappings.get(0);
+    }
+
+    /**
+     * 获取指定映射类型下的任意一个设备映射。
+     *
+     * @deprecated 使用 {@link #getFirstMappingByType(String)} 替代，方法名更明确语义。
+     *             或优先使用精确匹配 {@link #getMapping(String, String, String)}。
+     * @param mtype 映射类型
+     * @return 该类型下的第一个映射实例
+     */
+    @Deprecated
+    public IDeviceMapping getAnyMappingByType(String mtype) {
+        return getFirstMappingByType(mtype);
     }
 }

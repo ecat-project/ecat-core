@@ -194,4 +194,23 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
     default void dispose() {
         // 默认空实现，大多数子类无需额外释放
     }
+
+    /**
+     * 判断此属性是否为占位属性（Placeholder）。
+     *
+     * <p>占位属性表示逻辑设备中该属性槽位没有真实绑定物理设备的属性。
+     * 调用者可通过此方法判断属性是否真实存在可用，并据此调整业务逻辑。
+     *
+     * <p>占位属性有两种类型，通过 {@link PlaceholderLogicAttribute#getPlaceholderKind()} 区分：
+     * <ul>
+     *   <li>{@link PlaceholderLogicAttribute.Kind#ALARM_MISSING_DEVICE} — 物理设备未配置/未找到</li>
+     *   <li>{@link PlaceholderLogicAttribute.Kind#NORMAL_NO_ATTR} — 物理设备存在但无对应属性</li>
+     * </ul>
+     *
+     * @return true 表示此属性是占位属性，非真实可用属性
+     * @see PlaceholderLogicAttribute
+     */
+    default boolean isPlaceholder() {
+        return false;
+    }
 }

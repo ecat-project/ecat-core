@@ -232,14 +232,14 @@ public class LogicMappingManagerTest {
     }
 
     /**
-     * 测试：getAnyMappingByType 返回指定类型的第一个映射
+     * 测试：getFirstMappingByType 返回指定类型的第一个映射
      */
     @Test
-    public void testGetAnyMappingByType() {
+    public void testGetFirstMappingByType() {
         LogicMappingManager manager = new LogicMappingManager();
 
         // 空管理器应返回 null
-        IDeviceMapping result = manager.getAnyMappingByType("SO2");
+        IDeviceMapping result = manager.getFirstMappingByType("SO2");
         assertNull("空管理器应返回 null", result);
 
         // 注册映射后应返回第一个
@@ -247,7 +247,7 @@ public class LogicMappingManagerTest {
                 "SO2", "com.ecat:integration-saimosen", "SMS8200");
         manager.registerMapping(mapping);
 
-        result = manager.getAnyMappingByType("SO2");
+        result = manager.getFirstMappingByType("SO2");
         assertNotNull("应返回一个映射实例", result);
         // 结果应是已注册的映射之一
         assertTrue("返回的映射应是 SO2 类型",

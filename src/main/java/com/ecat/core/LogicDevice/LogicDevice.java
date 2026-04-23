@@ -29,6 +29,11 @@ import com.ecat.core.LogicState.LStringSelectAttribute;
 import com.ecat.core.LogicState.LTextAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
 import com.ecat.core.LogicState.SetupData;
+import com.ecat.core.LogicState.PlaceholderCommandAttribute;
+import com.ecat.core.LogicState.PlaceholderLogicAttribute;
+import com.ecat.core.LogicState.PlaceholderNumericAttribute;
+import com.ecat.core.LogicState.PlaceholderStringSelectAttribute;
+import com.ecat.core.LogicState.PlaceholderTextAttribute;
 import com.ecat.core.LogicState.StringSelectAttrDef;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
@@ -212,9 +217,14 @@ public abstract class LogicDevice extends DeviceBase {
         DeviceBase firstPhyDevice = null;
 
         // 以 getAttrDefs() 为属性定义来源，以 mapping.getAttr() 为属性创建的唯一入口
-        for (LogicAttributeDefine def : getAttrDefs()) {
+        List<LogicAttributeDefine> attrDefs = getAttrDefs();
+
+        for (LogicAttributeDefine def : attrDefs) {
             String attrId = def.getAttrId();
             ILogicAttribute<?> attr = null;
+            // 跟踪是否曾向 mapping.getAttr() 传入非 null 的物理设备。
+            // 用于区分：设备存在但无对应属性(NORMAL) vs 设备未配置(ALARM)
+            boolean triedWithNonNullPhyDevice = false;
 
             if (mappings != null && mappings.containsKey(attrId)) {
                 // YAML 配置了映射 → 用 YAML 指定的物理设备
@@ -247,6 +257,7 @@ public abstract class LogicDevice extends DeviceBase {
                             resolvedMapping = mapping;
                             firstPhyDevice = phyDevice;
                         }
+                        triedWithNonNullPhyDevice = true;
                         attr = mapping.getAttr(attrId, phyDevice, this);
                     }
                 }
@@ -256,23 +267,30 @@ public abstract class LogicDevice extends DeviceBase {
             // 如果 YAML 映射未创建属性，统一委托给 resolvedMapping
             // mapping 负责所有属性的创建：standalone、computed、alarm、command 等
             if (attr == null && resolvedMapping != null) {
+                if (firstPhyDevice != null) {
+                    triedWithNonNullPhyDevice = true;
+                }
                 attr = resolvedMapping.getAttr(attrId, firstPhyDevice, this);
             } else if (attr == null && resolvedMapping == null && logicMappingManager != null) {
                 // 没有通过物理设备解析到 mapping，尝试按类型查找任意 mapping
                 // 处理场景：YAML 有映射配置但 device_id 为空（用户选择"无物理设备"），
                 // 仍需 mapping 来创建 standalone 属性
-                IDeviceMapping fallbackMapping = logicMappingManager.getAnyMappingByType(getMappingType());
+                IDeviceMapping fallbackMapping = logicMappingManager.getFirstMappingByType(getMappingType());
                 if (fallbackMapping != null) {
                     resolvedMapping = fallbackMapping;
                     attr = resolvedMapping.getAttr(attrId, firstPhyDevice, this);
                 }
             }
 
-            // 对 mappable 属性，当 mapping.getAttr() 返回 null（phyDevice 未绑定）时
-            // 创建 ALARM 状态的占位属性，确保 LogicDevice 属性完整。
-            // 占位属性在 reconfigure 绑定物理设备后会被完整替换。
+            // 对 mappable 属性，当 mapping.getAttr() 返回 null 时创建占位属性：
+            // - 如果曾传入非 null phyDevice → 设备存在但无对应属性 → Blank (NORMAL)
+            // - 如果从未传入 phyDevice → 设备未配置 → Placeholder (ALARM)
             if (attr == null && def.isMapable()) {
-                attr = createPlaceholderAttr(attrId, def);
+                if (triedWithNonNullPhyDevice) {
+                    attr = createBlankAttr(attrId, def);
+                } else {
+                    attr = createPlaceholderAttr(attrId, def);
+                }
             }
 
             // 注入元数据 + 特殊 def 类型处理
@@ -494,13 +512,10 @@ public abstract class LogicDevice extends DeviceBase {
 
     /**
      * 判断一个逻辑属性是否是 placeholder。
-     * Placeholder 的特征：getBindedAttrs() 为空（standalone）且 status 为 ALARM。
+     * Placeholder 的特征：{@link ILogicAttribute#isPlaceholder()} 返回 true。
      */
     private boolean isPlaceholder(ILogicAttribute<?> attr) {
-        if (!(attr instanceof AttributeBase)) return false;
-        AttributeBase<?> ab = (AttributeBase<?>) attr;
-        return ab.getStatus() == AttributeStatus.ALARM
-            && attr.getBindedAttrs().isEmpty();
+        return attr != null && attr.isPlaceholder();
     }
 
     /**
@@ -527,7 +542,7 @@ public abstract class LogicDevice extends DeviceBase {
         IDeviceMapping mapping = logicMappingManager.getMapping(mappingType, coordinate, model);
 
         if (mapping == null) {
-            mapping = logicMappingManager.getAnyMappingByType(mappingType);
+            mapping = logicMappingManager.getFirstMappingByType(mappingType);
         }
 
         if (mapping != null) {
@@ -543,40 +558,63 @@ public abstract class LogicDevice extends DeviceBase {
     }
 
     /**
-     * 当 mappable 属性因 phyDevice 未绑定而无法创建时，使用 standalone 工厂方法
-     * 创建一个同类型的占位属性，状态设为 ALARM。
+     * 创建占位属性（Placeholder，ALARM 状态）。
      *
-     * <p>占位属性在 reconfigure 绑定物理设备后会被完整替换。
+     * <p>当 mappable 属性没有映射到物理设备（设备未配置/未找到）时调用，
+     * 创建一个带 ALARM 状态的占位属性，确保逻辑设备的属性集完整。
+     * 占位属性在 reconfigure 绑定物理设备后可被替换。
      *
-     * <p>根据 LogicAttributeDefine 的具体类型和 attrClassType 选择正确的 standalone 工厂：
-     * <ul>
-     *   <li>StringSelectAttrDef → LStringSelectAttribute.standalone(attrId, attrClass, options)</li>
-     *   <li>CommandAttrDef → LCommandAttribute.standalone(attrId, attrClass, commands)</li>
-     *   <li>LNumericAttribute.class → LNumericAttribute.standalone(attrId, attrClass, units, precision)</li>
-     *   <li>LTextAttribute.class → LTextAttribute.standalone(attrId, attrClass)</li>
-     * </ul>
+     * <p>返回的属性实现了 {@link PlaceholderLogicAttribute} 接口，
+     * {@link PlaceholderLogicAttribute#getPlaceholderKind()} 返回
+     * {@link PlaceholderLogicAttribute.Kind#ALARM_MISSING_DEVICE}。
      *
      * @param attrId 逻辑属性ID
      * @param def 属性定义，包含类型、单位、选项等信息
      * @return ALARM 状态的占位属性，如果无法识别类型则返回 null
      */
     private ILogicAttribute<?> createPlaceholderAttr(String attrId, LogicAttributeDefine def) {
-        ILogicAttribute<?> attr = null;
         if (def instanceof StringSelectAttrDef) {
-            attr = LStringSelectAttribute.standalone(attrId, def.getAttrClass(),
+            return PlaceholderStringSelectAttribute.createAlarm(attrId, def.getAttrClass(),
                 ((StringSelectAttrDef) def).getOptions());
         } else if (def instanceof CommandAttrDef) {
-            attr = LCommandAttribute.standalone(attrId, def.getAttrClass(),
+            return PlaceholderCommandAttribute.createAlarm(attrId, def.getAttrClass(),
                 ((CommandAttrDef) def).getCommands());
         } else if (def.getAttrClassType() == LNumericAttribute.class) {
-            attr = LNumericAttribute.standalone(attrId, def.getAttrClass(),
+            return PlaceholderNumericAttribute.createAlarm(attrId, def.getAttrClass(),
                 def.getNativeUnit(), def.getDisplayUnit(), def.getDisplayPrecision());
         } else if (def.getAttrClassType() == LTextAttribute.class) {
-            attr = LTextAttribute.standalone(attrId, def.getAttrClass());
-        } else {
-            return null;
+            return PlaceholderTextAttribute.createAlarm(attrId, def.getAttrClass());
         }
-        attr.setStatus(AttributeStatus.ALARM);
-        return attr;
+        return null;
+    }
+
+    /**
+     * 创建空白占位属性（Blank，NORMAL 状态）。
+     *
+     * <p>当 mappable 属性的物理设备已找到，但该设备没有对应的物理属性时调用。
+     * 创建一个带 NORMAL 状态的占位属性，表示该属性对当前设备不可用但设备正常。
+     *
+     * <p>返回的属性实现了 {@link PlaceholderLogicAttribute} 接口，
+     * {@link PlaceholderLogicAttribute#getPlaceholderKind()} 返回
+     * {@link PlaceholderLogicAttribute.Kind#NORMAL_NO_ATTR}。
+     *
+     * @param attrId 逻辑属性ID
+     * @param def 属性定义，包含类型、单位、选项等信息
+     * @return NORMAL 状态的空白占位属性，如果无法识别类型则返回 null
+     */
+    private ILogicAttribute<?> createBlankAttr(String attrId, LogicAttributeDefine def) {
+        if (def instanceof StringSelectAttrDef) {
+            return PlaceholderStringSelectAttribute.createBlank(attrId, def.getAttrClass(),
+                ((StringSelectAttrDef) def).getOptions());
+        } else if (def instanceof CommandAttrDef) {
+            return PlaceholderCommandAttribute.createBlank(attrId, def.getAttrClass(),
+                ((CommandAttrDef) def).getCommands());
+        } else if (def.getAttrClassType() == LNumericAttribute.class) {
+            return PlaceholderNumericAttribute.createBlank(attrId, def.getAttrClass(),
+                def.getNativeUnit(), def.getDisplayUnit(), def.getDisplayPrecision());
+        } else if (def.getAttrClassType() == LTextAttribute.class) {
+            return PlaceholderTextAttribute.createBlank(attrId, def.getAttrClass());
+        }
+        return null;
     }
 }

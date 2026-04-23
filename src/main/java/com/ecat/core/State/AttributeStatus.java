@@ -49,6 +49,7 @@ public enum AttributeStatus {
     PRECISION_CHECK(123, "PrecisionCheck", "精密度检查"), // 仪器或人工设置或系统状态
     TEMP_PRESSURE_CALIBRATION(124, "TempPressureCalibration", "温度压力校准"),  // 人工设置状态
     DEVICE_REPLACEMENT(125, "DeviceReplacement", "维修更换设备"),  // 人工设置状态
+    CONVERSION_CHECK(126, "ConversionCheck", "转换效率检查"), // 仪器或人工设置或系统状态
 
     OFFLINE(0, "Offline", "离线"), // 系统状态
     EMPTY(-1, "Empty", "未设置"); // 系统初始

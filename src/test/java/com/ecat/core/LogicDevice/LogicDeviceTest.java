@@ -23,6 +23,9 @@ import com.ecat.core.LogicMapping.LogicMappingManager;
 import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
 import com.ecat.core.LogicState.LNumericAttribute;
+import com.ecat.core.LogicState.PlaceholderLogicAttribute;
+import com.ecat.core.EcatCore;
+import com.ecat.core.Device.DeviceRegistry;
 import com.ecat.core.State.AttributeAbility;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
@@ -419,6 +422,84 @@ public class LogicDeviceTest {
         assertNotNull("Placeholder should be created for mapable attr", attr);
         assertEquals("Placeholder should have ALARM status", AttributeStatus.ALARM, attr.getStatus());
         assertTrue("Placeholder should be LNumericAttribute", attr instanceof LNumericAttribute);
+        assertTrue("Placeholder should be identifiable via isPlaceholder()", attr.isPlaceholder());
+        assertTrue("Placeholder should implement PlaceholderLogicAttribute",
+            attr instanceof PlaceholderLogicAttribute);
+        assertEquals("Placeholder kind should be ALARM_MISSING_DEVICE",
+            PlaceholderLogicAttribute.Kind.ALARM_MISSING_DEVICE,
+            ((PlaceholderLogicAttribute) attr).getPlaceholderKind());
+    }
+
+    @Test
+    public void testBlankAttrCreatedWithNormalStatusWhenPhyDeviceExists() {
+        // When phyDevice exists but vendor mapping returns null for an attribute,
+        // a blank placeholder (NORMAL status) should be created instead of ALARM.
+        String coordinate = "com.ecat:test-integration";
+        String model = "TestModel";
+
+        // Create a mapping that returns null for all attrs (simulating vendor device without attribute)
+        IDeviceMapping nullMapping = new IDeviceMapping() {
+            @Override public String getMappingType() { return "TEST"; }
+            @Override public String getDeviceCoordinate() { return coordinate; }
+            @Override public String getDeviceModel() { return model; }
+            @Override public ILogicAttribute<?> getAttr(String logicAttrId, DeviceBase phyDevice,
+                com.ecat.core.LogicDevice.LogicDevice logicDevice) {
+                return null; // vendor device has no corresponding attribute
+            }
+        };
+        testMappingManager.registerMapping(nullMapping);
+
+        // Create a physical device and configure YAML mapping
+        DeviceBase phyDevice = createMockPhysicalDevice("phy-001", coordinate, model);
+
+        Map<String, Object> mappingConfig = new HashMap<>();
+        mappingConfig.put("device_id", "phy-001");
+        Map<String, Object> mappings = new LinkedHashMap<>();
+        mappings.put("test_attr", mappingConfig);
+        ConfigEntry entry = createEntryWithMappings("test-001", mappings);
+
+        TestLogicDevice device = createTestLogicDevice(entry);
+        // Set core with device registry containing the physical device
+        device.setCoreForTest(phyDevice);
+        device.init();
+
+        Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
+        ILogicAttribute<?> attr = attrMap.get("test_attr");
+        assertNotNull("Blank attr should be created when device exists but has no attribute", attr);
+        assertEquals("Blank attr should have NORMAL status", AttributeStatus.NORMAL, attr.getStatus());
+        assertTrue("Blank attr should be LNumericAttribute", attr instanceof LNumericAttribute);
+        assertTrue("Blank attr should be identifiable via isPlaceholder()", attr.isPlaceholder());
+        assertTrue("Blank attr should implement PlaceholderLogicAttribute",
+            attr instanceof PlaceholderLogicAttribute);
+        assertEquals("Blank attr kind should be NORMAL_NO_ATTR",
+            PlaceholderLogicAttribute.Kind.NORMAL_NO_ATTR,
+            ((PlaceholderLogicAttribute) attr).getPlaceholderKind());
+    }
+
+    @Test
+    public void testRealAttrIsNotPlaceholder() {
+        // When vendor mapping returns a real attribute, isPlaceholder() should be false
+        String coordinate = "com.ecat:test-integration";
+        String model = "TestModel";
+        TestDeviceMapping mapping = new TestDeviceMapping("TEST", coordinate, model);
+        testMappingManager.registerMapping(mapping);
+
+        DeviceBase phyDevice = createMockPhysicalDevice("phy-001", coordinate, model);
+
+        Map<String, Object> mappingConfig = new HashMap<>();
+        mappingConfig.put("device_id", "phy-001");
+        Map<String, Object> mappings = new LinkedHashMap<>();
+        mappings.put("test_attr", mappingConfig);
+        ConfigEntry entry = createEntryWithMappings("test-001", mappings);
+
+        TestLogicDevice device = createTestLogicDevice(entry);
+        device.setCoreForTest(phyDevice);
+        device.init();
+
+        Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
+        ILogicAttribute<?> attr = attrMap.get("test_attr");
+        assertNotNull("Real attr should exist", attr);
+        assertFalse("Real attr should NOT be placeholder", attr.isPlaceholder());
     }
 
     @Test
@@ -464,6 +545,18 @@ public class LogicDeviceTest {
 
         @Override
         public void release() {}
+
+        /**
+         * 测试辅助方法：设置 EcatCore 实例，模拟设备注册表。
+         */
+        public void setCoreForTest(DeviceBase phyDevice) {
+            EcatCore mockCore = new EcatCore();
+            mockCore.init();
+            if (phyDevice != null) {
+                mockCore.getDeviceRegistry().register(phyDevice.getId(), phyDevice);
+            }
+            this.core = mockCore;
+        }
     }
 
     /**

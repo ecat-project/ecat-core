@@ -91,6 +91,7 @@
       "span_reproducibility": "Span Reproducibility",
       "multi_point_span": "Multi Point Span",
       "precision_check": "Precision Check",
+      "conversion_check": "Conversion Efficiency Check",
       "empty": "Not Set",
       "offline": "Offline"
     },

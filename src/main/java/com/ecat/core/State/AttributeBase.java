@@ -579,9 +579,22 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      * @return 转换后的目标类型值
      * @throws Exception 转换失败时抛出异常
      */
+    /**
+     * 将字符串转换为属性的目标类型 T。
+     *
+     * <p>整数类型（Short/Integer/Long/Byte）使用 {@code Double.parseDouble} + 强转，
+     * 而非直接 {@code parseShort}/parseInt 等，原因：
+     * {@link #getDisplayValue} 对整数属性输出浮点格式（如 {@code "1.0"}），
+     * 直接 {@code Short.parseShort("1.0")} 会抛 NumberFormatException。
+     * 使用 {@code (short) Double.parseDouble("1.0")} 既兼容浮点格式也兼容整数格式。
+     *
+     * @param source 输入字符串
+     * @return 转换后的类型 T 值
+     * @throws Exception 转换失败时抛出异常
+     */
     private T convertStringToType(String source) throws Exception {
         if (targetType == Integer.class) {
-            return targetType.cast(Integer.parseInt(source));
+            return targetType.cast((int) Double.parseDouble(source));
         }
         if (targetType == Double.class) {
             return targetType.cast(Double.parseDouble(source));
@@ -596,13 +609,13 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
             return targetType.cast(Float.parseFloat(source));
         }
         if (targetType == Short.class) {
-            return targetType.cast(Short.parseShort(source));
+            return targetType.cast((short) Double.parseDouble(source));
         }
         if (targetType == Long.class) {
-            return targetType.cast(Long.parseLong(source));
+            return targetType.cast((long) Double.parseDouble(source));
         }
         if (targetType == Byte.class) {
-            return targetType.cast(Byte.parseByte(source));
+            return targetType.cast((byte) Double.parseDouble(source));
         }
         // 可继续扩展其他常见类型...
         throw new UnsupportedOperationException(
