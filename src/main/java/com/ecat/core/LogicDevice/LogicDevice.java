@@ -27,6 +27,7 @@ import com.ecat.core.LogicState.LCommandAttribute;
 import com.ecat.core.LogicState.LNumericAttribute;
 import com.ecat.core.LogicState.LStringSelectAttribute;
 import com.ecat.core.LogicState.LTextAttribute;
+import com.ecat.core.LogicState.LTimeAttribute;
 import com.ecat.core.LogicState.LogicAttributeDefine;
 import com.ecat.core.LogicState.SetupData;
 import com.ecat.core.LogicState.PlaceholderCommandAttribute;
@@ -34,6 +35,7 @@ import com.ecat.core.LogicState.PlaceholderLogicAttribute;
 import com.ecat.core.LogicState.PlaceholderNumericAttribute;
 import com.ecat.core.LogicState.PlaceholderStringSelectAttribute;
 import com.ecat.core.LogicState.PlaceholderTextAttribute;
+import com.ecat.core.LogicState.PlaceholderTimeAttribute;
 import com.ecat.core.LogicState.StringSelectAttrDef;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
@@ -584,6 +586,8 @@ public abstract class LogicDevice extends DeviceBase {
                 def.getNativeUnit(), def.getDisplayUnit(), def.getDisplayPrecision());
         } else if (def.getAttrClassType() == LTextAttribute.class) {
             return PlaceholderTextAttribute.createAlarm(attrId, def.getAttrClass());
+        } else if (def.getAttrClassType() == LTimeAttribute.class) {
+            return PlaceholderTimeAttribute.createAlarm(attrId, def.getAttrClass());
         }
         return null;
     }
@@ -614,6 +618,8 @@ public abstract class LogicDevice extends DeviceBase {
                 def.getNativeUnit(), def.getDisplayUnit(), def.getDisplayPrecision());
         } else if (def.getAttrClassType() == LTextAttribute.class) {
             return PlaceholderTextAttribute.createBlank(attrId, def.getAttrClass());
+        } else if (def.getAttrClassType() == LTimeAttribute.class) {
+            return PlaceholderTimeAttribute.createBlank(attrId, def.getAttrClass());
         }
         return null;
     }
