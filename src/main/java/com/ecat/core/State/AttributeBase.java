@@ -282,6 +282,8 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      * @see BinaryAttribute#getDisplayValue(UnitInfo)
      */
 	public String getI18nValue(UnitInfo toUnit) {
+        // 这里的实现仅可满足 Text 和 number 属性的默认实现，因为他们的数值就是显示值，不需要再去映射选项的i18n key
+        // 但是 Binary、Command、Select 等属性的 getDisplayValue 有option的i18n转换，需要子类覆盖此方法返回选项的 i18n key
         return getDisplayValue(toUnit);
 	}
 

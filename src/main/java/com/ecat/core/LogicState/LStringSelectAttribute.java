@@ -167,7 +167,11 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
     public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
         if (bindAttr == null) return;
 
-        String displayVal = bindAttr.getDisplayValue(bindAttr.getNativeUnit());
+        // 使用 getI18nValue() 获取稳定的语言无关值：
+        // - NumericAttribute: 返回 getDisplayValue()（精度格式化后的值）
+        // - BinaryAttribute: 返回 "on"/"off"
+        // - 其他类型: 返回 getDisplayValue()
+        String displayVal = bindAttr.getI18nValue(bindAttr.getNativeUnit());
         if (displayVal == null) {
             throw new IllegalStateException("bindAttr displayValue is null, attrId=" + attributeID);
         }

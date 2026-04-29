@@ -123,6 +123,9 @@ public class LogicDeviceRegistryTest {
         public void initAttrClass(AttributeClass attrClass) {}
 
         @Override
+        public String getI18nValue(UnitInfo toUnit) { return null; }
+
+        @Override
         public boolean publicState() { return true; }
 
         @Override

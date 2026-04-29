@@ -174,6 +174,11 @@ public class ILogicAttributeTest {
         }
 
         @Override
+        public String getI18nValue(UnitInfo toUnit) {
+            return null;
+        }
+
+        @Override
         public String getDisplayUnitStr() {
             return "";
         }

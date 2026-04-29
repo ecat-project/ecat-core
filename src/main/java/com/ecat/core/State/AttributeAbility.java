@@ -18,6 +18,8 @@ package com.ecat.core.State;
 
 import java.util.concurrent.CompletableFuture;
 
+import com.ecat.core.Device.DeviceBase;
+
 /**
  * Attribute public interface for WebUI
  * 
@@ -81,6 +83,19 @@ public interface AttributeAbility<T>{
      *      String值或无值时为null
      */
     String getDisplayValue(UnitInfo toUnit);
+
+    /**
+     * 获取属性的显示值或国际化的key，适合数据存储场景使用，不适合用户侧显示
+     * @return 如果是文本、数值等属性，返回值就是显示值
+     *         如果是Binary、Command、Select等属性，返回值是选项的i18n的key，前端要显示字符串则根据集成、设备和参数id的路径拼接i18nkey获取对应的显示字符串value
+     *            例如BinaryAttribute返回"on"或"off"，CommandAttribute返回命令id，SelectAttribute返回选项id
+     * @see DeviceBase#getI18nPrefix()
+     * @see StringCommandAttribute#getI18nPrefixPath()
+     * @see StringCommandAttribute#getDisplayValue(UnitInfo)
+     * @see StringSelectAttribute#getDisplayValue(UnitInfo)
+     * @see BinaryAttribute#getDisplayValue(UnitInfo)
+     */
+    String getI18nValue(UnitInfo toUnit);
 
     /**
      * 获取展示单位字符串
