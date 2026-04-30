@@ -117,7 +117,9 @@
         "kpa": "kPa",
         "mpa": "MPa",
         "atm": "Atm",
-        "mmHg": "mmHg"
+        "mmhg": "mmHg",
+        "inhg": "inHg",
+        "torr": "Torr"
       },
       "airmass": {
         "ugm3": "ug/m3",

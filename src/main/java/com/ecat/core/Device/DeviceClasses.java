@@ -33,6 +33,7 @@ public enum DeviceClasses {
     AIR_MONITOR_CO("air.monitor.co"),
     AIR_MONITOR_O3("air.monitor.o3"),
     AIR_MONITOR_CALIBRATOR("air.monitor.calibrator"), // 校准仪
+    AIR_MONITOR_ZERO_GAS("air.monitor.zero_gas"), // 零气发生器
     AIR_MONITOR_QC("air.monitor.qc"), // 质控仪
 
     AIR_FILTER_MEMBRANE("air.filter.membrane"),  // 换膜器
