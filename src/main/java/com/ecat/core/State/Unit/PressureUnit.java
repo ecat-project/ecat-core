@@ -28,6 +28,7 @@ public enum PressureUnit implements InternationalizedUnit {
     MPA("MPa", 1000000.0), // 兆帕
     ATM("atm", 101325.0), // 标准大气压
     MMHG("mmHg", 133.3223684), // 毫米汞柱
+    INHG("inHg", 3386.389), // 英寸汞柱
     TORR("Torr", 133.3223684); // 托尔
 
     private final String name;

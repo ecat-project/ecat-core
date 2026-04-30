@@ -55,6 +55,12 @@ public class PressureUnitTest {
         assertEquals(Double.valueOf(133.3223684), PressureUnit.MMHG.getRatio(), 1e-6);
     }
 
+    @Test
+    public void testInhgRatio() {
+        // 1 inHg = 3386.389 Pa (standard inch of mercury definition)
+        assertEquals(Double.valueOf(3386.389), PressureUnit.INHG.getRatio(), 1e-6);
+    }
+
     // ========== convertUnit 转换验证 ==========
 
     @Test
@@ -116,6 +122,56 @@ public class PressureUnitTest {
         assertEquals(101.325, result, 0.001);
     }
 
+    @Test
+    public void testConvertUnit_InhgToPa() {
+        // 1 inHg = 3386.389 Pa
+        Double factor = PressureUnit.INHG.convertUnit(PressureUnit.PA);
+        assertEquals(3386.389, factor, 1e-3);
+        // 29.9213 inHg (standard atmosphere) = 101325 Pa
+        // 29.9213 × 3386.389 ≈ 101324.999
+        double result = 29.9213 * factor;
+        assertEquals(101325.0, result, 1.0);
+    }
+
+    @Test
+    public void testConvertUnit_InhgToKpa() {
+        // 1 inHg → kPa
+        Double factor = PressureUnit.INHG.convertUnit(PressureUnit.KPA);
+        // 3386.389 / 1000 = 3.386389
+        assertEquals(3.386389, factor, 1e-4);
+        // 29.92 inHg ≈ 101.325 kPa (standard atmosphere)
+        double result = 29.92 * factor;
+        assertEquals(101.325, result, 0.01);
+    }
+
+    @Test
+    public void testConvertUnit_KpaToInhg() {
+        // 101.325 kPa → inHg
+        Double factor = PressureUnit.KPA.convertUnit(PressureUnit.INHG);
+        double result = 101.325 * factor;
+        // 101.325 kPa ≈ 29.92 inHg (standard atmosphere)
+        assertEquals(29.92, result, 0.01);
+    }
+
+    @Test
+    public void testConvertUnit_InhgToMmhg() {
+        // 1 inHg = 25.4 mmHg (exact: 3386.389 / 133.3223684)
+        Double factor = PressureUnit.INHG.convertUnit(PressureUnit.MMHG);
+        assertEquals(25.4, factor, 0.01);
+        // 29.92 inHg ≈ 760 mmHg (standard atmosphere)
+        double result = 29.92 * factor;
+        assertEquals(760.0, result, 0.1);
+    }
+
+    @Test
+    public void testConvertUnit_MmhgToInhg() {
+        // 760 mmHg → inHg
+        Double factor = PressureUnit.MMHG.convertUnit(PressureUnit.INHG);
+        double result = 760.0 * factor;
+        // 760 mmHg ≈ 29.92 inHg (standard atmosphere)
+        assertEquals(29.92, result, 0.01);
+    }
+
     // ========== 往返转换验证 ==========
 
     @Test
@@ -131,6 +187,22 @@ public class PressureUnitTest {
         double original = 101.325;
         double toMmhg = original * PressureUnit.KPA.convertUnit(PressureUnit.MMHG);
         double back = toMmhg * PressureUnit.MMHG.convertUnit(PressureUnit.KPA);
+        assertEquals(original, back, 0.01);
+    }
+
+    @Test
+    public void testRoundTrip_Kpa_Inhg() {
+        double original = 101.325;
+        double toInhg = original * PressureUnit.KPA.convertUnit(PressureUnit.INHG);
+        double back = toInhg * PressureUnit.INHG.convertUnit(PressureUnit.KPA);
+        assertEquals(original, back, 0.01);
+    }
+
+    @Test
+    public void testRoundTrip_Inhg_Mmhg() {
+        double original = 29.92;
+        double toMmhg = original * PressureUnit.INHG.convertUnit(PressureUnit.MMHG);
+        double back = toMmhg * PressureUnit.MMHG.convertUnit(PressureUnit.INHG);
         assertEquals(original, back, 0.01);
     }
 
@@ -183,6 +255,8 @@ public class PressureUnitTest {
         assertEquals("mpa", PressureUnit.MPA.getEnumName());
         assertEquals("atm", PressureUnit.ATM.getEnumName());
         assertEquals("mmhg", PressureUnit.MMHG.getEnumName());
+        assertEquals("inhg", PressureUnit.INHG.getEnumName());
+        assertEquals("torr", PressureUnit.TORR.getEnumName());
     }
 
     @Test
@@ -193,6 +267,8 @@ public class PressureUnitTest {
         assertEquals("MPa", PressureUnit.MPA.getName());
         assertEquals("atm", PressureUnit.ATM.getName());
         assertEquals("mmHg", PressureUnit.MMHG.getName());
+        assertEquals("inHg", PressureUnit.INHG.getName());
+        assertEquals("Torr", PressureUnit.TORR.getName());
     }
 
     @Test
