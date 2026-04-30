@@ -41,6 +41,8 @@ public enum DeviceStatus {
 
     ALARM(31, "Alarm"), // 报警
     MAINTENANCE(32, "Maintenance"), // 维护
+
+    OFFLINE(41, "Offline"), // 离线
     
     
     UNKNOWN(-1, "Unknown");
