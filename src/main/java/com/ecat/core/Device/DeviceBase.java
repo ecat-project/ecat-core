@@ -75,6 +75,18 @@ public abstract class DeviceBase implements DeviceControl {
 
     @Getter
     protected ConfigEntry entry; // 配置条目引用，与设备一对一关系
+
+    /**
+     * 获取设备所属集成的坐标标识（如 com.ecat:integration-hikvision）。
+     *
+     * <p>委托给 {@link ConfigEntry#getCoordinate()}，子类和外部模块可直接通过设备获取坐标，
+     * 无需自行维护或穿透传递 coordinate 参数。
+     *
+     * @return 集成坐标，entry 未设置时返回 null
+     */
+    public String getCoordinate() {
+        return entry != null ? entry.getCoordinate() : null;
+    }
     @Getter
     protected String name;
     @Getter
