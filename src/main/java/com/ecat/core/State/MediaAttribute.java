@@ -16,6 +16,7 @@
 
 package com.ecat.core.State;
 
+import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -47,8 +48,8 @@ public class MediaAttribute extends TextAttribute {
     /** 媒体文件大小（字节） */
     private long fileSize;
 
-    /** 创建时间（Unix epoch 秒） */
-    private double createdTime;
+    /** 创建时间（UTC Instant） */
+    private Instant createdTime;
 
     /** MIME 类型，使用 ecat-core 中的 MimeType 枚举 */
     private MimeType mimeType;
@@ -112,11 +113,11 @@ public class MediaAttribute extends TextAttribute {
     /** 设置文件大小 */
     public void setFileSize(long fileSize) { this.fileSize = fileSize; }
 
-    /** 获取创建时间（Unix epoch 秒） */
-    public double getCreatedTime() { return createdTime; }
+    /** 获取创建时间（UTC Instant） */
+    public Instant getCreatedTime() { return createdTime; }
 
     /** 设置创建时间 */
-    public void setCreatedTime(double createdTime) { this.createdTime = createdTime; }
+    public void setCreatedTime(Instant createdTime) { this.createdTime = createdTime; }
 
     /**
      * 判断是否有关联的媒体文件。

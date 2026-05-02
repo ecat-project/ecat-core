@@ -17,6 +17,9 @@
 package com.ecat.core.State;
 
 import org.junit.Test;
+
+import java.time.Instant;
+
 import static org.junit.Assert.*;
 
 public class MediaAttributeTest {
@@ -49,12 +52,13 @@ public class MediaAttributeTest {
         attr.setMimeType(MimeType.IMAGE_JPEG);
         attr.setMediaClass(MediaClass.IMAGE);
         attr.setFileSize(204800);
-        attr.setCreatedTime(1745884800.0);
+        Instant testTime = Instant.ofEpochSecond(1745884800L);
+        attr.setCreatedTime(testTime);
 
         assertEquals(MimeType.IMAGE_JPEG, attr.getMimeType());
         assertEquals(MediaClass.IMAGE, attr.getMediaClass());
         assertEquals(204800, attr.getFileSize());
-        assertEquals(1745884800.0, attr.getCreatedTime(), 0.001);
+        assertEquals(testTime, attr.getCreatedTime());
     }
 
     @Test
