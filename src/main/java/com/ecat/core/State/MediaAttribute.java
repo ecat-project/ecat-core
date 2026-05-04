@@ -57,6 +57,11 @@ public class MediaAttribute extends TextAttribute {
     /** 媒体分类，使用 ecat-core 中的 MediaClass 枚举 */
     private MediaClass mediaClass;
 
+    /**
+     * 视频专属元数据。仅用于 VIDEO 类型的 MediaAttribute，其他类型为 null。
+     */
+    private VideoInfo videoInfo;
+
     // ===== 构造函数 =====
 
     /**
@@ -156,6 +161,33 @@ public class MediaAttribute extends TextAttribute {
 
     @Override
     public AttributeType getAttributeType() {
-        return AttributeType.TEXT;
+        return AttributeType.MEDIA;
     }
+
+    // ===== VideoInfo 内部类 =====
+
+    /**
+     * 视频专属元数据。仅用于 VIDEO 类型的 MediaAttribute。
+     *
+     * @param durationSeconds 总时长（秒）
+     * @param preEventSeconds 事前录制时长（秒），0=无缓存
+     */
+    public static class VideoInfo {
+        private final double durationSeconds;
+        private final int preEventSeconds;
+
+        public VideoInfo(double durationSeconds, int preEventSeconds) {
+            this.durationSeconds = durationSeconds;
+            this.preEventSeconds = preEventSeconds;
+        }
+
+        public double getDurationSeconds() { return durationSeconds; }
+        public int getPreEventSeconds() { return preEventSeconds; }
+    }
+
+    /** 获取视频专属元数据（仅 VIDEO 类型有值） */
+    public VideoInfo getVideoInfo() { return videoInfo; }
+
+    /** 设置视频专属元数据 */
+    public void setVideoInfo(VideoInfo videoInfo) { this.videoInfo = videoInfo; }
 }

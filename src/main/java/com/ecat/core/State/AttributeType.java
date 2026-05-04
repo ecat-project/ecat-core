@@ -26,6 +26,9 @@ public enum AttributeType {
     NUMERIC("numeric", "数值属性"),
     TEXT("text", "文本属性"),
 
+    // 媒体类型 - 媒体文件属性（图片/视频/文件）
+    MEDIA("media", "媒体属性"),
+
     // 命令类型 - 具体类型的命令属性
     STRING_COMMAND("string_command", "字符串命令类型"),
 

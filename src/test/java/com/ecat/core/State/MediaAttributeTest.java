@@ -72,7 +72,7 @@ public class MediaAttributeTest {
     @Test
     public void testAttributeType() {
         MediaAttribute attr = new MediaAttribute("last_photo", false);
-        assertEquals(AttributeType.TEXT, attr.getAttributeType());
+        assertEquals(AttributeType.MEDIA, attr.getAttributeType());
     }
 
     @Test
@@ -180,6 +180,6 @@ public class MediaAttributeTest {
         MediaAttribute attr = new MediaAttribute("test_attr") {};
         assertEquals("test_attr", attr.getAttributeID());
         assertFalse(attr.hasMedia());
-        assertEquals(AttributeType.TEXT, attr.getAttributeType());
+        assertEquals(AttributeType.MEDIA, attr.getAttributeType());
     }
 }
