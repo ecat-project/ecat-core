@@ -30,6 +30,7 @@ import com.ecat.core.LogicDevice.LogicDeviceRegistry;
 import com.ecat.core.LogicMapping.LogicMappingManager;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
+import com.ecat.core.Utils.platform.PlatformInfo;
 
 import lombok.Getter;
 
@@ -88,6 +89,12 @@ public class EcatCore {
     @Getter
     private LogicMappingManager logicMappingManager;
 
+    /**
+     * 平台信息（OS、架构、JavaCPP classifier）
+     */
+    @Getter
+    private PlatformInfo platformInfo;
+
     public IntegrationRegistry getIntegrationRegistry() {
         return integrationRegistry;
     }
@@ -143,6 +150,7 @@ public class EcatCore {
     // }
 
     public void init() {
+        platformInfo = PlatformInfo.getInstance();
         i18nProxy = new I18nProxy(Const.CORE_COORDINATE, EcatCore.class, EcatCore.class.getClassLoader());
         integrationRegistry = new IntegrationRegistry();
         busRegistry = new BusRegistry();

@@ -35,7 +35,7 @@ import org.mapdb.Serializer;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
-import com.ecat.core.Utils.platform.OsUtils;
+import com.ecat.core.Utils.platform.PlatformInfo;
 
 /**
  * 属性状态持久化管理器
@@ -281,7 +281,7 @@ public class StateManager {
                 .transactionEnable();
             // 使用 fileMmapEnableIfSupported() 而非 fileMmapEnable()，
             // 避免进程异常退出后遗留 stale file lock 导致重启时 FileLocked 异常
-            if (!OsUtils.isWindows()) {
+            if (!PlatformInfo.getInstance().isWindows()) {
                 maker.fileMmapEnableIfSupported();
             }
             return maker.make();
