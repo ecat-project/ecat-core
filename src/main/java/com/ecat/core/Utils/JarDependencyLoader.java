@@ -127,7 +127,19 @@ public class JarDependencyLoader {
                 if (webPlatformMap != null) {
                     boolean ui = (Boolean) webPlatformMap.getOrDefault("ui", false);
                     boolean api = (Boolean) webPlatformMap.getOrDefault("api", false);
-                    partialInfo.setWebPlatform(new WebPlatformSupport(ui, api));
+                    WebPlatformSupport webPlatform = new WebPlatformSupport(ui, api);
+                    partialInfo.setWebPlatform(webPlatform);
+
+                    // 解析 standalone 调试模式配置
+                    Map<String, Object> standaloneMap = (Map<String, Object>) webPlatformMap.get("standalone");
+                    if (standaloneMap != null) {
+                        boolean enabled = Boolean.TRUE.equals(standaloneMap.get("enabled"));
+                        String host = (String) standaloneMap.getOrDefault("host", "127.0.0.1");
+                        int port = standaloneMap.containsKey("port") ? ((Number) standaloneMap.get("port")).intValue() : 0;
+                        webPlatform.setStandaloneEnabled(enabled);
+                        webPlatform.setStandaloneHost(host);
+                        webPlatform.setStandalonePort(port);
+                    }
                 }
             } finally {
                 inputStream.close();

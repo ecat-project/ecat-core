@@ -42,11 +42,17 @@ public class WebPlatformSupport {
 
     private boolean ui; // 是否支持Web UI
     private boolean api; // 是否支持Web API
+    private boolean standaloneEnabled;
+    private String standaloneHost;
+    private int standalonePort;
     
     // 无参构造函数 - 使用默认值
     public WebPlatformSupport() {
         this.ui = false;
         this.api = false;
+        this.standaloneEnabled = false;
+        this.standaloneHost = "127.0.0.1";
+        this.standalonePort = 0;
     }
     
     // 有参构造函数 - 显式设置值
@@ -57,7 +63,7 @@ public class WebPlatformSupport {
     
     @Override
     public String toString() {
-        return "{ui=" + ui + ", api=" + api + "}";
+        return "{ui=" + ui + ", api=" + api + ", standalone=" + standaloneEnabled + ":" + standaloneHost + ":" + standalonePort + "}";
     }
 
     public boolean hasUi() {
@@ -66,4 +72,11 @@ public class WebPlatformSupport {
     public boolean hasApi() {
         return api;
     }
+    public boolean isStandaloneEnabled() { return standaloneEnabled; }
+    public void setStandaloneEnabled(boolean standaloneEnabled) { this.standaloneEnabled = standaloneEnabled; }
+    public String getStandaloneHost() { return standaloneHost; }
+    public void setStandaloneHost(String standaloneHost) { this.standaloneHost = standaloneHost; }
+    public int getStandalonePort() { return standalonePort; }
+    public void setStandalonePort(int standalonePort) { this.standalonePort = standalonePort; }
+    public boolean isStandaloneAvailable() { return standaloneEnabled && standalonePort > 0; }
 }
