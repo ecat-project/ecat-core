@@ -21,6 +21,7 @@ import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.ConfigEntry.YmlConfigEntryPersistence;
 import com.ecat.core.ConfigFlow.ConfigFlowRegistry;
 import com.ecat.core.Device.DeviceRegistry;
+import com.ecat.core.Device.UnifiedDeviceStore;
 import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.I18n.I18nRegistry;
 import com.ecat.core.Integration.IntegrationManager;
@@ -82,6 +83,12 @@ public class EcatCore {
      */
     @Getter
     private LogicDeviceRegistry logicDeviceRegistry;
+
+    /**
+     * 统一设备存储，提供跨注册表的只读查询能力
+     */
+    @Getter
+    private UnifiedDeviceStore unifiedDeviceStore;
 
     /**
      * 逻辑映射管理器
@@ -162,6 +169,9 @@ public class EcatCore {
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
         deviceRegistry = new DeviceRegistry();
         logicDeviceRegistry = new LogicDeviceRegistry();
+        unifiedDeviceStore = new UnifiedDeviceStore();
+        unifiedDeviceStore.addRegistry(deviceRegistry);
+        unifiedDeviceStore.addRegistry(logicDeviceRegistry);
         logicMappingManager = new LogicMappingManager();
         i18nRegistry = I18nRegistry.getInstance();
         

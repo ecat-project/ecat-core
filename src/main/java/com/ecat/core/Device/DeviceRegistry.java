@@ -26,7 +26,7 @@ import java.util.Map;
  * 
  * @author coffee
  */
-public class DeviceRegistry {
+public class DeviceRegistry implements IDeviceRegistry {
 
     /**
      * 使用Map结构存储设备ID和设备对象的映射关系

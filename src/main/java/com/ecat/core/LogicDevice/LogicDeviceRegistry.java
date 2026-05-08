@@ -17,6 +17,7 @@
 package com.ecat.core.LogicDevice;
 
 import com.ecat.core.Device.DeviceBase;
+import com.ecat.core.Device.IDeviceRegistry;
 import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.State.AttributeBase;
 
@@ -52,7 +53,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * @author coffee
  */
-public class LogicDeviceRegistry {
+public class LogicDeviceRegistry implements IDeviceRegistry {
 
     /**
      * 逻辑设备注册表：deviceID -> DeviceBase
