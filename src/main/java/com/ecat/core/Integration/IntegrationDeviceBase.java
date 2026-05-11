@@ -95,6 +95,10 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         // 默认空实现，子类可覆盖
     }
 
+    /**
+     * 默认实现：通过 createDeviceFromEntry 创建设备并启动
+     * 对于某些集成既有集成配置，又有设备配置的，应当重写此方法以自定义实现区分不同类型的 ConfigEntry
+     */
     @Override
     public ConfigEntry createEntry(ConfigEntry entry) {
         log.info("Creating entry: {}", entry.getUniqueId());
