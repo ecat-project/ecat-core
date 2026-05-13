@@ -184,7 +184,7 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
             // Caller must pass numeric string as newDisplayValue (e.g. "35.5")
             return super.setDisplayValue(newDisplayValue, fromUnit);
         }
-        return bindAttr.setDisplayValue(newDisplayValue, bindAttr.getNativeUnit());
+        return bindAttr.setDisplayValue(newDisplayValue, fromUnit);
     }
 
     /**

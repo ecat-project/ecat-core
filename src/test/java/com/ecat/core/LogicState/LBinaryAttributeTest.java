@@ -29,7 +29,8 @@ import org.mockito.MockitoAnnotations;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.verify;
 
 /**
  * LBinaryAttribute 单元测试
@@ -153,6 +154,29 @@ public class LBinaryAttributeTest {
         assertFalse(logicAttr.getValue());
     }
 
+    // ========== fromUnit 透传验证 ==========
+
+    @Test
+    public void boundModeSetDisplayValue_passesFromUnitToBindAttr() {
+        // 验证修复：setDisplayValue("on", fromUnit) 应将 fromUnit 透传到 bindAttr
+        UnitCapturingAttr captureAttr = new UnitCapturingAttr("test", AttributeClass.STATUS);
+        LBinaryAttribute logicAttr = new LBinaryAttribute(captureAttr);
+        logicAttr.initValueChangeable(true);
+
+        UnitInfo testUnit = new UnitInfo() {
+            @Override public String getName() { return "test"; }
+            @Override public Double getRatio() { return 1.0; }
+            @Override public String getDisplayName() { return "test"; }
+        };
+
+        logicAttr.setDisplayValue("on", testUnit).join();
+
+        // 验证 bindAttr.setDisplayValue 收到的 fromUnit 是传入的 testUnit，而非 bindAttr.getNativeUnit()
+        assertNotNull("fromUnit should be passed to bindAttr", captureAttr.capturedFromUnit);
+        assertSame("fromUnit should match the caller's fromUnit, not bindAttr.getNativeUnit()",
+                testUnit, captureAttr.capturedFromUnit);
+    }
+
     // ========== Test helpers ==========
 
     private static class TestStandaloneBinary extends LBinaryAttribute {
@@ -194,6 +218,30 @@ public class LBinaryAttributeTest {
         @Override
         protected CompletableFuture<Boolean> setDisplayValueImp(String value, UnitInfo fromUnit) {
             this.lastSetStringValue = value;
+            return CompletableFuture.completedFuture(true);
+        }
+    }
+
+    /** 捕获 setDisplayValue 收到的 fromUnit 参数 */
+    private static class UnitCapturingAttr extends AttributeBase<String> {
+        UnitInfo capturedFromUnit;
+
+        UnitCapturingAttr(String attributeID, AttributeClass attrClass) {
+            super(attributeID, attrClass, null, null, 0, false, true);
+        }
+
+        @Override public String getDisplayValue(UnitInfo toUnit) { return null; }
+        @Override protected String convertFromUnitImp(String value, UnitInfo fromUnit) { return value; }
+        @Override public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) { return value; }
+        @Override public com.ecat.core.Utils.DynamicConfig.ConfigDefinition getValueDefinition() { return null; }
+        @Override protected com.ecat.core.I18n.I18nKeyPath getI18nPrefixPath() {
+            return new com.ecat.core.I18n.I18nKeyPath("test.", "test");
+        }
+        @Override public AttributeType getAttributeType() { return AttributeType.STRING_SELECT; }
+
+        @Override
+        protected CompletableFuture<Boolean> setDisplayValueImp(String value, UnitInfo fromUnit) {
+            this.capturedFromUnit = fromUnit;
             return CompletableFuture.completedFuture(true);
         }
     }

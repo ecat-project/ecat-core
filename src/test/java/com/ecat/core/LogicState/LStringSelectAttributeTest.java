@@ -264,6 +264,37 @@ public class LStringSelectAttributeTest {
         logicAttr.setDisplayValue("unknown_key", null).join();
     }
 
+    // ========== fromUnit 透传验证 ==========
+
+    @Test
+    public void setDisplayValue_passesFromUnitToBindAttr() {
+        // 验证修复：setDisplayValue 的 fromUnit 应透传到 bindAttr，而非用 bindAttr.getNativeUnit()
+        UnitInfo testUnit = new UnitInfo() {
+            @Override public String getName() { return "test"; }
+            @Override public Double getRatio() { return 1.0; }
+            @Override public String getDisplayName() { return "test"; }
+        };
+
+        Map<String, String> mapping = new HashMap<>();
+        mapping.put("cooling", "1");
+        mapping.put("heating", "2");
+
+        FromUnitCapturingAttr captureAttr = new FromUnitCapturingAttr(
+                "fan_mode", Arrays.asList("1", "2"), "1");
+        LStringSelectAttribute logicAttr = new LStringSelectAttribute(captureAttr,
+                Arrays.asList("cooling", "heating"), mapping);
+        logicAttr.initAttributeID("fan_status");
+        logicAttr.initValueChangeable(true);
+
+        logicAttr.setDisplayValue("cooling", testUnit).join();
+
+        // 验证 bindAttr.setDisplayValue 收到的 fromUnit 是传入的 testUnit
+        assertNotNull("fromUnit should be passed to bindAttr", captureAttr.capturedFromUnit);
+        assertSame("fromUnit should match caller's fromUnit, not bindAttr.getNativeUnit()",
+                testUnit, captureAttr.capturedFromUnit);
+        assertEquals("1", captureAttr.capturedValue);
+    }
+
     // ========== Local test helpers ==========
 
     private static TestStringSelectAttr createStringSelectAttr(String attrId,
@@ -301,5 +332,37 @@ public class LStringSelectAttributeTest {
 
         public void setTestValue(String val) { this.value = val; }
         public String getLastSetDisplayValue() { return lastSetDisplayValue; }
+    }
+
+    /** 捕获 setDisplayValue 收到的 value 和 fromUnit 参数 */
+    private static class FromUnitCapturingAttr extends AttributeBase<String> {
+        private final List<String> options;
+        private String value;
+        String capturedValue;
+        UnitInfo capturedFromUnit;
+
+        FromUnitCapturingAttr(String attributeID, List<String> options, String initialValue) {
+            super(attributeID, AttributeClass.MODE, null, null, 0, false, false);
+            this.options = options;
+            this.value = initialValue;
+        }
+
+        @Override public String getDisplayValue(UnitInfo toUnit) { return value; }
+        @Override protected String convertFromUnitImp(String value, UnitInfo fromUnit) { return value; }
+        @Override public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) { return value; }
+        @Override public com.ecat.core.Utils.DynamicConfig.ConfigDefinition getValueDefinition() { return null; }
+        @Override protected com.ecat.core.I18n.I18nKeyPath getI18nPrefixPath() {
+            return new com.ecat.core.I18n.I18nKeyPath("test.", "test");
+        }
+        @Override public AttributeType getAttributeType() { return AttributeType.STRING_SELECT; }
+        @Override public String getValue() { return value; }
+
+        @Override
+        public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
+            this.capturedValue = newDisplayValue;
+            this.capturedFromUnit = fromUnit;
+            this.value = newDisplayValue;
+            return CompletableFuture.completedFuture(true);
+        }
     }
 }

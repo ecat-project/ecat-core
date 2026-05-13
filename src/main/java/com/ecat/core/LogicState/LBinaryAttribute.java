@@ -142,7 +142,7 @@ public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute
     @Override
     public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
         if (bindAttr != null) {
-            return bindAttr.setDisplayValue(newDisplayValue, bindAttr.getNativeUnit());
+            return bindAttr.setDisplayValue(newDisplayValue, fromUnit);
         }
         // Standalone mode: delegate to parent (convertStringToBoolean → setDisplayValueImp → turnOn/turnOff)
         // Caller must pass "on" or "off" as newDisplayValue

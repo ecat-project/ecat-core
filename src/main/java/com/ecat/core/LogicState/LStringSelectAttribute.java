@@ -213,7 +213,7 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
                 throw new IllegalArgumentException(
                     "Standard key '" + newDisplayValue + "' has no mapping to physical value, attrId=" + attributeID);
             }
-            return bindAttr.setDisplayValue(physicalValue, bindAttr.getNativeUnit());
+            return bindAttr.setDisplayValue(physicalValue, fromUnit);
         }
         // Standalone mode: delegate to parent (valueChangeable check + selectOption)
         // Caller must pass an exact option string as newDisplayValue

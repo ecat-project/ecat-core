@@ -136,7 +136,7 @@ public class LTextAttribute extends TextAttribute implements ILogicAttribute<Str
     @Override
     public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
         if (bindAttr != null) {
-            return bindAttr.setDisplayValue(newDisplayValue, bindAttr.getNativeUnit());
+            return bindAttr.setDisplayValue(newDisplayValue, fromUnit);
         }
         // Standalone mode: delegate to parent
         return super.setDisplayValue(newDisplayValue, fromUnit);

@@ -192,7 +192,7 @@ public class LTimeAttribute extends TimeAttribute implements ILogicAttribute<Ins
     @Override
     public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) {
         if (bindAttr != null) {
-            return bindAttr.setDisplayValue(newDisplayValue, bindAttr.getNativeUnit());
+            return bindAttr.setDisplayValue(newDisplayValue, fromUnit);
         }
         return super.setDisplayValue(newDisplayValue, fromUnit);
     }
