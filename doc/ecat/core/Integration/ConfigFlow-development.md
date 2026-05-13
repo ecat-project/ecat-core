@@ -766,7 +766,7 @@ integration/
 
 1. 在 `ecat-core/ConfigFlow/ConfigItem/` 创建新的 ConfigItem 类
 2. 继承 `AbstractConfigItem<T>`
-3. 实现 `getFieldType()`, `validateType()`, `addDefaultValue()`, `getDefaultValue()`
+3. 实现 `getFieldType()`, `validateType()`, `getDefaultValue()`
 4. 在 `ConfigItemBuilder` 添加工厂方法
 5. 在前端添加对应的 FieldRenderer
 

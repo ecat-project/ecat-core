@@ -485,8 +485,7 @@ ConfigSchema 是字段定义的集合，仅包含一个 `fields` 列表。嵌套
 1. 创建 `XxxConfigItem extends AbstractConfigItem<T>`
 2. 实现 `getFieldType()` 返回前端组件标识
 3. 实现 `validateType()` 类型校验
-4. 实现 `addDefaultValue()` 默认值设置
-5. 在前端 `FieldRegistry` 注册对应渲染器
+4. 在前端 `FieldRegistry` 注册对应渲染器
 
 ### 新增集成流程
 

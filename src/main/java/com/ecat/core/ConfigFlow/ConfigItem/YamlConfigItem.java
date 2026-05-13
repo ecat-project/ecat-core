@@ -91,11 +91,6 @@ public class YamlConfigItem extends AbstractConfigItem<String> {
     }
 
     @Override
-    public void addDefaultValue(Map<String, Object> config) {
-        // 只读字段，不参与表单数据
-    }
-
-    @Override
     public String getDefaultValue() {
         return defaultValue;
     }

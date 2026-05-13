@@ -230,7 +230,6 @@
 | `addField(AbstractConfigItem<?> field)` | `ConfigSchema` | 链式调用 |
 | `getFields()` | `List<AbstractConfigItem<?>>` | 不可修改列表 |
 | `validate(Map<String, Object> input)` | `Map<String, String>` | 错误 key=字段名, value=错误信息 |
-| `addDefaults(Map<String, Object> config)` | `void` | 为缺失字段填充默认值 |
 
 ---
 

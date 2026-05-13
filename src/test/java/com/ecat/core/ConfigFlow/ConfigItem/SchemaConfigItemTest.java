@@ -235,66 +235,6 @@ public class SchemaConfigItemTest {
         assertNotNull("Provider should create schema", resolved);
     }
 
-    // ========== addDefaultValue ==========
-
-    @Test
-    public void addDefaultValue_KeyMissing_WithDefault_AddsValue() {
-        Map<String, Object> defaultValue = new HashMap<>();
-        defaultValue.put("k", "v");
-
-        SchemaConfigItem item = new SchemaConfigItem("nested", false, new ConfigSchema());
-        item.setDefaultValue(defaultValue);
-
-        Map<String, Object> config = new HashMap<>();
-        item.addDefaultValue(config);
-
-        assertTrue("Should add default value when key missing", config.containsKey("nested"));
-    }
-
-    @Test
-    public void addDefaultValue_KeyPresent_DoesNotOverride() {
-        Map<String, Object> existingValue = new HashMap<>();
-        existingValue.put("k", "v");
-
-        Map<String, Object> defaultValue = new HashMap<>();
-        defaultValue.put("k", "default");
-
-        SchemaConfigItem item = new SchemaConfigItem("nested", false, new ConfigSchema());
-        item.setDefaultValue(defaultValue);
-
-        Map<String, Object> config = new HashMap<>();
-        config.put("nested", existingValue);
-        item.addDefaultValue(config);
-
-        assertSame("Should not override existing value", existingValue, config.get("nested"));
-    }
-
-    @Test
-    public void addDefaultValue_NoDefault_DoesNothing() {
-        SchemaConfigItem item = new SchemaConfigItem("nested", false, new ConfigSchema());
-        Map<String, Object> config = new HashMap<>();
-        item.addDefaultValue(config);
-        assertFalse("Should not add when no default", config.containsKey("nested"));
-    }
-
-    @Test
-    public void addDefaultValue_NestedDefaultFields() {
-        ConfigSchema nestedSchema = new ConfigSchema()
-                .addField(new TextConfigItem("port", true, "COM1").displayName("端口"))
-                .addField(new NumericConfigItem("baudRate", true, 9600).displayName("波特率"));
-
-        SchemaConfigItem item = new SchemaConfigItem("comm_settings", false, nestedSchema);
-
-        Map<String, Object> config = new HashMap<>();
-        config.put("comm_settings", new HashMap<>());
-        item.addDefaultValue(config);
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> commSettings = (Map<String, Object>) config.get("comm_settings");
-        assertEquals("Should add default port", "COM1", commSettings.get("port"));
-        assertEquals("Should add default baudRate", 9600.0, commSettings.get("baudRate"));
-    }
-
     // ========== ConfigSchema.validate() ==========
 
     @Test

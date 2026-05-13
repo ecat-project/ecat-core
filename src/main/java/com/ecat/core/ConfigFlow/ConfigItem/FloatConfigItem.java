@@ -176,13 +176,6 @@ public class FloatConfigItem extends AbstractConfigItem<Float> {
     }
 
     @Override
-    public void addDefaultValue(Map<String, Object> config) {
-        if (!config.containsKey(key) && defaultValue != null) {
-            config.put(key, defaultValue);
-        }
-    }
-
-    @Override
     public Float getDefaultValue() {
         return defaultValue;
     }

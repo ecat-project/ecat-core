@@ -158,13 +158,6 @@ public class DynamicEnumConfigItem extends AbstractConfigItem<String> {
     }
 
     @Override
-    public void addDefaultValue(Map<String, Object> config) {
-        if (defaultValue != null && !config.containsKey(key)) {
-            config.put(key, defaultValue);
-        }
-    }
-
-    @Override
     public String getDefaultValue() {
         return defaultValue;
     }

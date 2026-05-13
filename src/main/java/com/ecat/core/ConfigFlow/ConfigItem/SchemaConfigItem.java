@@ -159,23 +159,6 @@ public class SchemaConfigItem extends AbstractConfigItem<Map<String, Object>> {
     }
 
     @Override
-    public void addDefaultValue(Map<String, Object> config) {
-        if (!config.containsKey(key) && defaultValue != null) {
-            config.put(key, defaultValue);
-        }
-        // 如果值为空 Map，填充默认值
-        Object existingValue = config.get(key);
-        if (existingValue instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> nestedConfig = (Map<String, Object>) existingValue;
-            ConfigSchema schema = resolveSchema();
-            if (schema != null) {
-                schema.addDefaults(nestedConfig);
-            }
-        }
-    }
-
-    @Override
     public Map<String, Object> getDefaultValue() {
         return defaultValue;
     }

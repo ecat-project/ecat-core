@@ -278,20 +278,6 @@ public class YamlConfigItemTest {
         assertNull("数字值验证应返回 null", item.validate(123));
     }
 
-    @Test
-    public void testAddDefaultValueIsNoop() {
-        Map<String, Object> config = new HashMap<>();
-        config.put("existing", "value");
-
-        YamlConfigItem item = new YamlConfigItem("summary")
-            .setValue(mapOf("key", "value"));
-
-        // addDefaultValue 不应修改 config
-        item.addDefaultValue(config);
-        assertEquals(1, config.size());
-        assertEquals("value", config.get("existing"));
-    }
-
     // ========== setValue 链式调用 ==========
 
     @Test

@@ -95,13 +95,6 @@ public class BooleanConfigItem extends AbstractConfigItem<Boolean> {
     }
 
     @Override
-    public void addDefaultValue(Map<String, Object> config) {
-        if (!config.containsKey(key) && defaultValue != null) {
-            config.put(key, defaultValue);
-        }
-    }
-
-    @Override
     public Boolean getDefaultValue() {
         return defaultValue;
     }

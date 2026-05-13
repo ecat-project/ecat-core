@@ -76,7 +76,9 @@ public class ConfigDefinition {
 
         // 验证新版 AbstractConfigItem
         for (AbstractConfigItem<?> item : flowConfigItems.values()) {
-            item.addDefaultValue(config);
+            if (!config.containsKey(item.getKey()) && item.getDefaultValue() != null) {
+                config.put(item.getKey(), item.getDefaultValue());
+            }
             Object value = config.get(item.getKey());
             Object validationResult = item.validate(value);
             if (validationResult != null) {

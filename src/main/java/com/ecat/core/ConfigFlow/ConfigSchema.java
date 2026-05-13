@@ -85,16 +85,4 @@ public class ConfigSchema {
         return errors;
     }
 
-    /**
-     * 添加默认值
-     * <p>
-     * 如果配置中不存在该键且有默认值，则添加默认值。
-     *
-     * @param config 配置映射
-     */
-    public void addDefaults(Map<String, Object> config) {
-        for (AbstractConfigItem<?> field : fields) {
-            field.addDefaultValue(config);
-        }
-    }
 }

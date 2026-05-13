@@ -30,7 +30,6 @@ import java.util.Map;
  * 子类需要实现：
  * <ul>
  *   <li>{@link #validateType(Object)} - 类型特定的验证逻辑</li>
- *   <li>{@link #addDefaultValue(Map)} - 添加默认值</li>
  *   <li>{@link #getDefaultValue()} - 获取默认值</li>
  *   <li>{@link #getFieldType()} - 获取字段类型（用于前端渲染）</li>
  * </ul>
@@ -203,15 +202,6 @@ public abstract class AbstractConfigItem<T> {
      * @return 类型错误信息，类型正确返回 null
      */
     protected abstract String validateType(Object value);
-
-    /**
-     * 为配置添加默认值
-     * <p>
-     * 如果配置中不存在该键且有默认值，则添加默认值。
-     *
-     * @param config 配置映射
-     */
-    public abstract void addDefaultValue(Map<String, Object> config);
 
     /**
      * 获取默认值

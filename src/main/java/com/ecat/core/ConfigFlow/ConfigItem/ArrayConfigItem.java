@@ -297,13 +297,6 @@ public class ArrayConfigItem<T> extends AbstractConfigItem<List<T>> {
     }
 
     @Override
-    public void addDefaultValue(Map<String, Object> config) {
-        if (!config.containsKey(key) && defaultValue != null) {
-            config.put(key, new ArrayList<>(defaultValue));
-        }
-    }
-
-    @Override
     public List<T> getDefaultValue() {
         return defaultValue != null ? new ArrayList<>(defaultValue) : null;
     }

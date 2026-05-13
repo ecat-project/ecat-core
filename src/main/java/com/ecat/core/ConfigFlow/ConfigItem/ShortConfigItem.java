@@ -220,13 +220,6 @@ public class ShortConfigItem extends AbstractConfigItem<Short> {
     }
 
     @Override
-    public void addDefaultValue(Map<String, Object> config) {
-        if (!config.containsKey(key) && defaultValue != null) {
-            config.put(key, defaultValue);
-        }
-    }
-
-    @Override
     public Short getDefaultValue() {
         return defaultValue;
     }
