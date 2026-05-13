@@ -46,7 +46,22 @@ public class SchemaConfigItem extends AbstractConfigItem<Map<String, Object>> {
     private boolean extend = false;
 
     /**
-     * 创建嵌套 Schema（直接定义）
+     * 创建嵌套 Schema（直接定义 / Builder 定制）
+     * <p>
+     * 直接传入 Schema 实例。Schema 携带 sourceProvider 信息，翻译自动从 Provider 所属集成查找。
+     * <p>
+     * 推荐场景：需要自定义默认值——通过 Provider 的 Builder 构建定制实例。
+     * <pre>
+     * // 自定义默认值 + 自动 i18n
+     * new SchemaConfigItem("comm_settings", true,
+     *     SerialCommConfigSchema.builder()
+     *         .baudrate(BaudRate.BAUD_115200)
+     *         .parity(Parity.ODD)
+     *         .timeout(1000)
+     *         .build()
+     *         .createSchema())
+     *     .displayName("通讯配置")
+     * </pre>
      *
      * @param key      字段名
      * @param required 是否必填
@@ -62,6 +77,16 @@ public class SchemaConfigItem extends AbstractConfigItem<Map<String, Object>> {
 
     /**
      * 创建引用 Schema（通过 Provider 类）
+     * <p>
+     * 运行时通过 Provider 类反射创建实例，使用标准默认值。
+     * Schema 翻译自动从 Provider 所属集成的 strings.json 中查找。
+     * <p>
+     * 推荐场景：不需要自定义默认值的标准复用场景。
+     * <pre>
+     * // 标准默认值 + 自动 i18n
+     * new SchemaConfigItem("comm_settings", true, SerialCommConfigSchema.class)
+     *     .displayName("通讯配置")
+     * </pre>
      *
      * @param key           字段名
      * @param required      是否必填（同上）
