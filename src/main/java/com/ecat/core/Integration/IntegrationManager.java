@@ -22,6 +22,7 @@ import com.ecat.core.State.StateManager;
 import com.ecat.core.Utils.LoadJarUtils;
 import com.ecat.core.Utils.MavenDependencyParser;
 import com.ecat.core.Utils.CustomClassLoader;
+import com.ecat.core.Utils.EcatClassLoader;
 import com.ecat.core.Utils.JarDependencyLoader;
 import com.ecat.core.Utils.JarScanException;
 import com.ecat.core.Utils.LoadJarResult;
@@ -471,7 +472,9 @@ public class IntegrationManager {
                         
                         // 递归查找被依赖集成loadOption是否有childClassloader
                         // TODO:注意这里只能串行执行无法并发，如果并发必须确保被依赖集成必须早于当前集成完成加载
-                        
+
+                        // 隔离包配置：如果集成声明了 isolated_packages，在选定 classloader 外包装隔离层
+                        classLoader = createIsolatedClassLoader(classLoader, info);
 
                         LoadJarResult checkService = loadJarUtils.loadJar(jarFile.getPath(), pathList.toArray(new String[0]), classLoader, className);
 
@@ -1818,7 +1821,29 @@ public class IntegrationManager {
         // 未找到任何可用的childClassLoader
         return null;
     }
-    
+
+    /**
+     * 根据集成的隔离包配置，创建或包装 classloader。
+     * 有隔离配置时，创建一个新的 EcatClassLoader 子节点实现包隔离。
+     * 无隔离配置时，直接使用传入的基础 classloader（向后兼容）。
+     *
+     * @param baseLoader 基础 classloader（来自标准选择逻辑）
+     * @param info 集成信息（包含 isolatedPackages 配置）
+     * @return 最终使用的 classloader
+     */
+    private URLClassLoader createIsolatedClassLoader(URLClassLoader baseLoader, IntegrationInfo info) {
+        if (info.getIsolatedPackages() == null || info.getIsolatedPackages().isEmpty()) {
+            return baseLoader;
+        }
+        try {
+            log.info("集成 " + info.getArtifactId() + " 启用包隔离: " + info.getIsolatedPackages());
+            return new EcatClassLoader(new URL[0], baseLoader, info.getIsolatedPackages());
+        } catch (IOException e) {
+            log.error("创建隔离 classloader 失败，回退到标准 classloader: " + e.getMessage(), e);
+            return baseLoader;
+        }
+    }
+
     /**
      * 根据coordinate从loadOrder列表中查找对应的IntegrationInfo
      *

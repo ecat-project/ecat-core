@@ -81,4 +81,36 @@ public class IntegrationInfoTest {
 
         assertEquals("getCoordinate() 应使用默认 groupId", "com.ecat:test-artifact", info.getCoordinate());
     }
+
+    /**
+     * 测试：isolatedPackages 默认为 null
+     */
+    @Test
+    public void testIsolatedPackages_DefaultNull() {
+        IntegrationInfo info = new IntegrationInfo(
+            "test-artifact", false, null, true, "TestClass",
+            "com.ecat", "1.0.0",
+            new com.ecat.core.Integration.IntegrationSubInfo.WebPlatformSupport(),
+            "^1.0.0"
+        );
+        assertNull("isolatedPackages 默认应为 null", info.getIsolatedPackages());
+    }
+
+    /**
+     * 测试：isolatedPackages setter/getter
+     */
+    @Test
+    public void testIsolatedPackages_SetterGetter() {
+        IntegrationInfo info = new IntegrationInfo(
+            "test-artifact", false, null, true, "TestClass",
+            "com.ecat", "1.0.0",
+            new com.ecat.core.Integration.IntegrationSubInfo.WebPlatformSupport(),
+            "^1.0.0"
+        );
+        List<String> packages = Arrays.asList("com.fasterxml.jackson", "org.slf4j");
+        info.setIsolatedPackages(packages);
+        assertNotNull("设置后不应为 null", info.getIsolatedPackages());
+        assertEquals("应有 2 个元素", 2, info.getIsolatedPackages().size());
+        assertEquals("第一个元素", "com.fasterxml.jackson", info.getIsolatedPackages().get(0));
+    }
 }

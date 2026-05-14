@@ -141,6 +141,12 @@ public class JarDependencyLoader {
                         webPlatform.setStandalonePort(port);
                     }
                 }
+
+                // 填充 isolated_packages（冲突包隔离配置）
+                List<String> isolatedPackages = (List<String>) yamlMap.get("isolated_packages");
+                if (isolatedPackages != null && !isolatedPackages.isEmpty()) {
+                    partialInfo.setIsolatedPackages(isolatedPackages);
+                }
             } finally {
                 inputStream.close();
                 jar.close();

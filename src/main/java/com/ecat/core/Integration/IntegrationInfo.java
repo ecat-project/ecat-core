@@ -77,6 +77,17 @@ public class IntegrationInfo {
     private String requiresCore;
 
     /**
+     * 需要隔离加载的包前缀列表
+     * 匹配这些前缀的类将由子 classloader 自行加载（child-first），
+     * 不委托给父 classloader，避免与父 classloader 中的版本冲突
+     *
+     * <p>配置来源：ecat-config.yml 的 isolated_packages 字段</p>
+     */
+    @Getter
+    @Setter
+    private List<String> isolatedPackages;
+
+    /**
      * 解析后的版本对象（缓存）
      * 使用transient避免序列化
      */

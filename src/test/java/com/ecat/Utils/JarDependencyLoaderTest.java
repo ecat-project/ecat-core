@@ -298,4 +298,24 @@ public class JarDependencyLoaderTest {
             jarPath, JarScanException.ScanFailureType.SCAN_ERROR, "msg3");
         assertEquals(JarScanException.ScanFailureType.SCAN_ERROR, ex3.getFailureType());
     }
+
+    /**
+     * 测试：IntegrationInfo 的 isolatedPackages 数据模型（配合 JarDependencyLoader YAML 解析）
+     */
+    @Test
+    public void testIsolatedPackages_IntegrationInfoModel() {
+        IntegrationInfo info = new IntegrationInfo(
+            "container", false, null, true, "TestClass",
+            "com.ecat", "1.0.0",
+            new WebPlatformSupport(), "^2.0.0"
+        );
+
+        List<String> packages = new ArrayList<>();
+        packages.add("com.fasterxml.jackson");
+        info.setIsolatedPackages(packages);
+
+        assertNotNull("isolatedPackages 不应为 null", info.getIsolatedPackages());
+        assertEquals("应有 1 个元素", 1, info.getIsolatedPackages().size());
+        assertEquals("com.fasterxml.jackson", info.getIsolatedPackages().get(0));
+    }
 }
