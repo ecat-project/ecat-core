@@ -17,9 +17,9 @@
 package com.ecat.core.Bus;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
@@ -35,10 +35,12 @@ import com.ecat.core.Utils.Mdc.MdcExecutorService;
  */
 public class BusRegistry {
 
-    // 使用Map存储主题和对应的订阅者列表，键为主题名称，值为订阅者列表
-    private final Map<String, List<EventSubscriber>> subscribers = new HashMap<>();
+    // 使用ConcurrentHashMap存储主题和对应的订阅者列表，键为主题名称，值为订阅者列表
+    private final Map<String, List<EventSubscriber>> subscribers = new ConcurrentHashMap<>();
     // 创建一个MDC包装的线程池来处理异步任务，保留traceId
-    private final ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(2, new NamedThreadFactory("integration-bus")));
+    // 线程数 8：系统有 38+ LogicDevice × 7+ Bus subscriber = 事件洪流，
+    // 2 线程不足以消化事件积压，导致 Bus 事件延迟 60-120 秒。
+    private final ExecutorService executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(8, new NamedThreadFactory("integration-bus")));
 
     // 订阅方法，返回一个 Subscription 对象用于取消订阅
     public Subscription subscribe(String topic, EventSubscriber subscriber) {
