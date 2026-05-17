@@ -293,8 +293,14 @@ public class JarDependencyLoader {
                     JarEntry entry = entries.nextElement();
                     String entryName = entry.getName();
 
-                    // 只处理 .class 文件，跳过内部类和非类文件
+                    // 只处理 .class 文件，跳过内部类、非类文件和 MR-JAR 版本化条目
                     if (!entryName.endsWith(".class") || entryName.contains("$")) {
+                        continue;
+                    }
+
+                    // 跳过 MR-JAR (Multi-Release JAR) 版本化条目，如 META-INF/versions/9/...
+                    // Java 8 运行时不需要这些 Java 9+ 版本的类，加载会导致 UnsupportedClassVersionError
+                    if (entryName.startsWith("META-INF/versions/")) {
                         continue;
                     }
 
@@ -315,9 +321,9 @@ public class JarDependencyLoader {
                             log.debug("找到集成入口类: " + className);
                             entryClasses.add(className);
                         }
-                    } catch (ClassNotFoundException | NoClassDefFoundError e) {
-                        // 跳过无法加载的类（可能是依赖类）
-                        log.trace("跳过类（缺少依赖）: " + className);
+                    } catch (ClassNotFoundException | NoClassDefFoundError | UnsupportedClassVersionError e) {
+                        // 跳过无法加载的类（缺少依赖或 Java 版本不兼容的 MR-JAR 类）
+                        log.trace("跳过类（无法加载）: " + className + " 原因: " + e.getMessage());
                     }
                 }
 
