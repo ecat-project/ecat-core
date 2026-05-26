@@ -134,6 +134,26 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
     }
 
     /**
+     * Create a standalone (unbound) numeric attribute with persistence support.
+     *
+     * <p>Same as {@link #standalone(String, AttributeClass, UnitInfo, UnitInfo, int)}
+     * but with explicit persistable flag. Persistable attributes save their values
+     * to MapDB and survive service restarts or device reconfigure operations.
+     *
+     * @param attributeID the logic attribute ID
+     * @param attrClass the attribute class
+     * @param nativeUnit the native unit (may be null)
+     * @param displayUnit the display unit (may be null)
+     * @param displayPrecision the number of decimal places to display
+     * @param persistable whether this attribute's value should be persisted
+     * @return a new standalone LNumericAttribute
+     */
+    public static LNumericAttribute standalone(String attributeID, AttributeClass attrClass,
+            UnitInfo nativeUnit, UnitInfo displayUnit, int displayPrecision, boolean persistable) {
+        return new LNumericAttribute(attributeID, attrClass, nativeUnit, displayUnit, displayPrecision, persistable, null);
+    }
+
+    /**
      * When the bound physical attribute value is updated, update this logic attribute's value.
      *
      * <p>Passthrough: reads the bindAttr's display value in this logic attribute's
