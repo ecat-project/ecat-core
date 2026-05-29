@@ -173,11 +173,29 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
     }
 
     /**
+     * 设备侧TurnOn方法，同时设置属性状态
+     * @param status 属性状态
+     * @return
+     */
+    public boolean turnOn(AttributeStatus status){
+        return updateValue(true, status);
+    }
+
+    /**
      * 设备侧TurnOff方法，给设备侧功能使用，记录为关闭状态，无其他联动操作
      * @return
      */
     public boolean turnOff(){
         return updateValue(false);
+    }
+
+    /**
+     * 设备侧TurnOff方法，同时设置属性状态
+     * @param status 属性状态
+     * @return
+     */
+    public boolean turnOff(AttributeStatus status){
+        return updateValue(false, status);
     }
 
     /**
