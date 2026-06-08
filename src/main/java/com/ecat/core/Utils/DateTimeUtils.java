@@ -17,6 +17,7 @@
 package com.ecat.core.Utils;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -27,30 +28,80 @@ import java.time.temporal.ChronoUnit;
  * 时区时间工具类
  * <p>
  * 统一处理时区时间，使用 {@link ZonedDateTime} 替代 {@link java.util.Date}。
+ * 提供 singleton 时区管理，所有时间格式化通过 {@link TimeFormat} 枚举统一管理。
  *
  * @author coffee
  */
 public class DateTimeUtils {
 
-    // ==================== 格式常量 ====================
+    // ==================== 时间格式枚举 ====================
+
+    /**
+     * 时间格式枚举。
+     *
+     * <p>统一管理系统中所有时间输出格式，禁止在业务代码中硬编码格式字符串。
+     * 新增格式只需在此枚举中添加。
+     */
+    public enum TimeFormat {
+        /** ISO 8601 带时区 (如 2026-06-04T16:30:00+08:00) — API 响应默认格式 */
+        ISO("yyyy-MM-dd'T'HH:mm:ssXXX"),
+        /** 日期时间 (如 2026-06-04 16:30:00) — 日志、UI 展示 */
+        DATETIME("yyyy-MM-dd HH:mm:ss"),
+        /** 仅日期 (如 2026-06-04) */
+        DATE("yyyy-MM-dd"),
+        /** 紧凑时间戳 (如 20260604163000) — 文件名、ID */
+        COMPACT("yyyyMMddHHmmss");
+
+        private final String pattern;
+        TimeFormat(String pattern) { this.pattern = pattern; }
+        /** 获取格式模式字符串 */
+        public String getPattern() { return pattern; }
+    }
+
+    // ==================== 旧格式常量（保留向后兼容） ====================
 
     /** ISO 8601 格式 (带时区) */
-    public static final String ISO_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ssXXX";
+    public static final String ISO_DATE_TIME = TimeFormat.ISO.getPattern();
 
     /** 常规格式 */
-    public static final String YYYY_MM_DD = "yyyy-MM-dd";
-    public static final String YYYY_MM_DD_HH_MM_SS = "yyyy-MM-dd HH:mm:ss";
-    public static final String YYYYMMDDHHMMSS = "yyyyMMddHHmmss";
+    public static final String YYYY_MM_DD = TimeFormat.DATE.getPattern();
+    public static final String YYYY_MM_DD_HH_MM_SS = TimeFormat.DATETIME.getPattern();
+    public static final String YYYYMMDDHHMMSS = TimeFormat.COMPACT.getPattern();
+
+    // ==================== Singleton 时区 ====================
+
+    /** ecat 系统时区，默认为 JVM 时区，启动时可通过 {@link #setZone(ZoneId)} 配置 */
+    private static volatile ZoneId ecatZone = ZoneId.systemDefault();
+
+    /**
+     * 获取 ecat 系统时区。
+     *
+     * @return 当前系统时区
+     */
+    public static ZoneId getZone() {
+        return ecatZone;
+    }
+
+    /**
+     * 设置 ecat 系统时区（启动时可从配置加载）。
+     *
+     * @param zone 目标时区，null 则忽略
+     */
+    public static void setZone(ZoneId zone) {
+        if (zone != null) {
+            ecatZone = zone;
+        }
+    }
 
     // ==================== 当前时间 ====================
 
     /**
-     * 获取当前时间 (系统默认时区)
+     * 获取当前时间 (ecat 系统时区)
      *
      * @return 当前时间
      */
     public static ZonedDateTime now() {
-        return ZonedDateTime.now();
+        return ZonedDateTime.now(ecatZone);
     }
 
     /**
@@ -72,7 +123,39 @@ public class DateTimeUtils {
         return ZonedDateTime.now(ZoneOffset.UTC);
     }
 
-    // ==================== 格式化 ====================
+    // ==================== Instant 格式化 ====================
+
+    /**
+     * Instant → ecat 系统时区 ISO 字符串。
+     * 等价于 {@code formatInstant(instant, TimeFormat.ISO)}。
+     *
+     * @param instant 时间对象，null 返回 null
+     * @return ISO 格式字符串，如 "2026-06-04T16:30:00+08:00"
+     */
+    public static String formatInstant(Instant instant) {
+        return formatInstant(instant, TimeFormat.ISO);
+    }
+
+    /**
+     * Instant → ecat 系统时区 + 指定格式的字符串。
+     *
+     * @param instant 时间对象，null 返回 null
+     * @param format  时间格式枚举，不能为 null
+     * @return 格式化字符串，如 "2026-06-04T16:30:00+08:00"
+     * @throws IllegalArgumentException 如果 format 为 null
+     */
+    public static String formatInstant(Instant instant, TimeFormat format) {
+        if (instant == null) {
+            return null;
+        }
+        if (format == null) {
+            throw new IllegalArgumentException("format must not be null");
+        }
+        return DateTimeFormatter.ofPattern(format.getPattern())
+            .format(instant.atZone(ecatZone));
+    }
+
+    // ==================== ZonedDateTime 格式化 ====================
 
     /**
      * 格式化为 ISO 8601 字符串
@@ -81,7 +164,7 @@ public class DateTimeUtils {
      * @return ISO 8601 格式字符串
      */
     public static String formatIso(ZonedDateTime dateTime) {
-        return format(dateTime, ISO_DATE_TIME);
+        return format(dateTime, TimeFormat.ISO.getPattern());
     }
 
     /**

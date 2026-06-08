@@ -26,8 +26,6 @@ import java.util.function.Function;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
-
 import lombok.Getter;
 import lombok.Setter;
 
@@ -77,6 +75,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     protected UnitInfo displayUnit; //显示信号单位，允许为null，显示使用，不存储数据库
     
     protected String displayName; // 用户设置的高优先级显示名称，对外显示displayName优先级>i18n名称
+    private String description; // 属性语义描述，帮助 Agent 和用户理解属性含义
     protected int displayPrecision; // 显示精度，小数位，显示使用不存储数据库
     protected boolean unitChangeable;
 
@@ -844,6 +843,27 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
         }else{
             return getI18nDisplayName();
         }
+    }
+
+    /**
+     * 设置属性的语义描述
+     * 集成开发者在创建属性时提供，说明该属性的作用、单位含义、正常范围等
+     *
+     * @param description 属性语义描述
+     * @return this（支持链式调用）
+     */
+    public AttributeBase<T> setDescription(String description) {
+        this.description = description;
+        return this;
+    }
+
+    /**
+     * 获取属性的语义描述
+     *
+     * @return 属性语义描述，未设置时返回 null
+     */
+    public String getDescription() {
+        return description;
     }
 
     /**

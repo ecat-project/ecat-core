@@ -17,6 +17,9 @@
 package com.ecat.core.Integration;
 
 import com.ecat.core.EcatCore;
+import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.Bus.BusTopic;
+import com.ecat.core.Bus.IntegrationLifecycleEvent;
 import com.ecat.core.Task.NamedThreadFactory;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Utils.LoadJarUtils;
@@ -126,6 +129,33 @@ public class IntegrationManager {
      */
     private ConfigFlowRegistry getFlowRegistry() {
         return core != null ? core.getFlowRegistry() : null;
+    }
+
+    /**
+     * 获取事件总线注册器
+     *
+     * @return BusRegistry，如果 core 不可用则返回 null
+     */
+    private BusRegistry getBusRegistry() {
+        return core != null ? core.getBusRegistry() : null;
+    }
+
+    /**
+     * 发布集成生命周期事件（null-safe）
+     *
+     * @param coordinate 集成标识
+     * @param action     生命周期动作（ADDED/ENABLED/DISABLED/REMOVED/UPGRADED）
+     * @param effect     生命周期效果（ACTIVE/PENDING_RESTART）
+     */
+    private void publishLifecycleEvent(String coordinate,
+                                       IntegrationLifecycleEvent.Action action,
+                                       IntegrationLifecycleEvent.Effect effect) {
+        BusRegistry busRegistry = getBusRegistry();
+        if (busRegistry != null) {
+            busRegistry.publishSync(
+                BusTopic.INTEGRATION_LIFECYCLE.getTopicName(),
+                new IntegrationLifecycleEvent(coordinate, action, effect));
+        }
     }
 
     /**
@@ -535,9 +565,10 @@ public class IntegrationManager {
             loadExistingConfigEntries();
 
             // 发布所有集成加载完成事件（同步），通知逻辑设备子集成可以创建逻辑设备
-            if (core != null && core.getBusRegistry() != null) {
-                core.getBusRegistry().publishSync(
-                    com.ecat.core.Bus.BusTopic.INTEGRATIONS_ALL_LOADED.getTopicName(),
+            BusRegistry busRegistry = getBusRegistry();
+            if (busRegistry != null) {
+                busRegistry.publishSync(
+                    BusTopic.INTEGRATIONS_ALL_LOADED.getTopicName(),
                     java.time.Instant.now()
                 );
                 log.info("Published INTEGRATIONS_ALL_LOADED event");
@@ -825,6 +856,9 @@ public class IntegrationManager {
             saveIntegrationConfig(coordinate, integrationConfig);
 
             if (enabled) {
+                // 发布集成生命周期事件：新增但需要重启才能生效
+                publishLifecycleEvent(coordinate, IntegrationLifecycleEvent.Action.ADDED,
+                    IntegrationLifecycleEvent.Effect.PENDING_RESTART);
                 return IntegrationStatus.builder()
                     .coordinate(coordinate)
                     .state(IntegrationState.PENDING_ADDED)
@@ -860,6 +894,10 @@ public class IntegrationManager {
                 integrationConfig.put("enabled", true);
                 integrationConfig.put("state", IntegrationState.RUNNING.name());
                 saveIntegrationConfig(coordinate, integrationConfig);
+
+                // 发布集成生命周期事件：新增并已立即生效（热加载）
+                publishLifecycleEvent(coordinate, IntegrationLifecycleEvent.Action.ADDED,
+                    IntegrationLifecycleEvent.Effect.ACTIVE);
 
                 return IntegrationStatus.builder()
                     .coordinate(coordinate)
@@ -1012,6 +1050,10 @@ public class IntegrationManager {
                 updateIntegrationsConfig(config);
             }
 
+            // 发布集成生命周期事件：启用但需要重启才能生效
+            publishLifecycleEvent(coordinate, IntegrationLifecycleEvent.Action.ENABLED,
+                IntegrationLifecycleEvent.Effect.PENDING_RESTART);
+
             return IntegrationStatus.builder()
                 .coordinate(coordinate)
                 .state(IntegrationState.PENDING_ADDED)
@@ -1051,6 +1093,10 @@ public class IntegrationManager {
                 }
             }
         }
+
+        // 发布集成生命周期事件：启用并已立即生效
+        publishLifecycleEvent(coordinate, IntegrationLifecycleEvent.Action.ENABLED,
+            IntegrationLifecycleEvent.Effect.ACTIVE);
 
         return getIntegrationStatus(coordinate);
     }
@@ -1285,6 +1331,10 @@ public class IntegrationManager {
             }
         }
 
+        // 发布集成生命周期事件：停用并已立即生效
+        publishLifecycleEvent(coordinate, IntegrationLifecycleEvent.Action.DISABLED,
+            IntegrationLifecycleEvent.Effect.ACTIVE);
+
         return getIntegrationStatus(coordinate);
     }
 
@@ -1373,6 +1423,10 @@ public class IntegrationManager {
             }
         }
 
+        // 发布集成生命周期事件：卸载，待重启后彻底清理
+        publishLifecycleEvent(coordinate, IntegrationLifecycleEvent.Action.REMOVED,
+            IntegrationLifecycleEvent.Effect.PENDING_RESTART);
+
         return IntegrationStatus.builder()
             .coordinate(coordinate)
             .state(IntegrationState.PENDING_REMOVED)
@@ -1458,6 +1512,10 @@ public class IntegrationManager {
         integrationConfig.put("state", IntegrationState.PENDING_UPGRADE.name());
         integrationConfig.put("update", new Date().toString());
         updateIntegrationsConfig(config);
+
+        // 发布集成生命周期事件：升级，待重启后加载新版本
+        publishLifecycleEvent(coordinate, IntegrationLifecycleEvent.Action.UPGRADED,
+            IntegrationLifecycleEvent.Effect.PENDING_RESTART);
 
         return IntegrationStatus.builder()
             .coordinate(coordinate)
