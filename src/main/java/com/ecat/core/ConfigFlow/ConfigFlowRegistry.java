@@ -16,6 +16,7 @@
 
 package com.ecat.core.ConfigFlow;
 
+import com.ecat.core.ConfigEntry.SourceType;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
 
@@ -142,6 +143,17 @@ public class ConfigFlowRegistry {
     }
 
     /**
+     * 幂等注册：flowId 已 tracked 则 no-op；否则注册（记一条 info）。
+     * <p>供 {@code ConfigFlowService.drive} 统一注册——入口的新 flow 注册、submitStep 的已 active flow no-op。
+     */
+    public void registerIfAbsent(String flowId, AbstractConfigFlow flow) {
+        if (!trackedFlows.containsKey(flowId)) {
+            trackedFlows.put(flowId, new TrackedFlow(flow));
+            log.info("Registered active flow: flowId={}, class={}", flowId, flow.getClass().getSimpleName());
+        }
+    }
+
+    /**
      * 获取运行中的 Flow 实例（自动 touch 更新活跃时间）
      */
     public AbstractConfigFlow getActiveFlow(String flowId) {
@@ -160,6 +172,25 @@ public class ConfigFlowRegistry {
         return trackedFlows.entrySet().stream()
                 .filter(e -> !e.getKey().equals(excludeFlowId))
                 .anyMatch(e -> uniqueId.equals(e.getValue().flow.getContext().getEntryUniqueId()));
+    }
+
+    /**
+     * Layer2 matching-flow 去重（R12）：是否存在同 (coordinate, source, discoveryPayload) 的活跃 flow。
+     * <p>对所有 discovery init（IMPORT_FLOW/MQTT/ZEROCONF）生效，防止并发/重复广播对同一 (source,payload)
+     * 重复创建 flow 任务。payload 比较用 {@link Object#equals(Object)}（如 ImportFlowPayload 需自实现 equals）。
+     *
+     * @param coordinate 集成标识
+     * @param source     发现源（IMPORT_FLOW/MQTT/ZEROCONF）
+     * @param payload    discovery payload
+     * @return 若已有同三元组的活跃 flow 则 true
+     */
+    public boolean hasActiveFlowWithDiscoveryPayload(String coordinate, SourceType source, Object payload) {
+        return trackedFlows.values().stream().anyMatch(tracked -> {
+            AbstractConfigFlow f = tracked.flow;
+            return source == f.getSourceType()
+                    && Objects.equals(coordinate, f.getContext().getCoordinate())
+                    && Objects.equals(payload, f.getDiscoveryPayload());
+        });
     }
 
     /**

@@ -85,6 +85,12 @@ public class ConfigEntry {
      */
     private int version;
 
+    /**
+     * 来源类型（记录 entry 的创建来源：USER/IMPORT_FLOW/MQTT/ZEROCONF/IGNORE）。
+     * <p>RECONFIGURE/UNIGNORE 是流程操作，不改写本字段——{@link #withUpdate} / {@link #withReconfigure} 保留原 source。
+     */
+    private SourceType source = SourceType.USER;
+
     // ==================== Builder ====================
 
     /**
@@ -101,6 +107,8 @@ public class ConfigEntry {
         private ZonedDateTime createTime;
         private ZonedDateTime updateTime;
         private int version = 1;
+
+        private SourceType source = SourceType.USER;
 
         public Builder entryId(String entryId) {
             this.entryId = entryId;
@@ -152,6 +160,11 @@ public class ConfigEntry {
             return this;
         }
 
+        public Builder source(SourceType source) {
+            this.source = source;
+            return this;
+        }
+
         public ConfigEntry build() {
             ConfigEntry entry = new ConfigEntry();
             entry.entryId = entryId;
@@ -164,6 +177,7 @@ public class ConfigEntry {
             entry.createTime = createTime;
             entry.updateTime = updateTime;
             entry.version = version;
+            entry.source = source;
             return entry;
         }
     }
@@ -188,6 +202,7 @@ public class ConfigEntry {
                 .createTime(this.createTime)
                 .updateTime(DateTimeUtils.now())
                 .version(this.version + 1)
+                .source(this.source)
                 .build();
     }
 
@@ -211,6 +226,7 @@ public class ConfigEntry {
                 .createTime(this.createTime)
                 .updateTime(DateTimeUtils.now())
                 .version(this.version)  // 保持版本号不变
+                .source(this.source)
                 .build();
     }
 }

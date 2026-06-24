@@ -20,6 +20,7 @@ import com.ecat.core.Bus.BusRegistry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.ConfigEntry.YmlConfigEntryPersistence;
 import com.ecat.core.ConfigFlow.ConfigFlowRegistry;
+import com.ecat.core.ConfigFlow.ConfigFlowService;
 import com.ecat.core.Device.DeviceRegistry;
 import com.ecat.core.Device.UnifiedDeviceStore;
 import com.ecat.core.I18n.I18nProxy;
@@ -77,6 +78,14 @@ public class EcatCore {
      */
     @Getter
     private ConfigFlowRegistry configFlowRegistry;
+
+    /**
+     * ConfigFlow 服务（flow 推进与管理能力）
+     * <p>2026-06-22 下沉自 ecat-core-api：REST（controller）与同进程第三方使用集成（import-flow /
+     * mqtt / zeroconf discovery 监听器）都经 {@link #getConfigFlowService()} 调本能力，只依赖 ecat-core。
+     */
+    @Getter
+    private ConfigFlowService configFlowService;
 
     /**
      * 逻辑设备注册器
@@ -166,6 +175,8 @@ public class EcatCore {
             taskManager.getMdcScheduledExecutorService());
         configFlowRegistry = new ConfigFlowRegistry();
         configEntryRegistry = new ConfigEntryRegistry(this, new YmlConfigEntryPersistence());
+        // flow 推进/管理能力下沉到 core（原在 ecat-core-api）：依赖 integrationRegistry + 两个 registry，均在上方已就绪
+        configFlowService = new ConfigFlowService(this);
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
         deviceRegistry = new DeviceRegistry();
         logicDeviceRegistry = new LogicDeviceRegistry();

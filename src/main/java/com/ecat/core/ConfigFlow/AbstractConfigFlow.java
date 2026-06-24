@@ -34,7 +34,7 @@ import java.util.function.Function;
  * 配置流程基类
  *
  * <p>使用 registerStep() 注册步骤处理器和显示信息
- * <p>支持入口步骤机制：registerStepUser()、registerStepReconfigure()、registerStepDiscovery()
+ * <p>支持入口步骤机制：registerStepUser()、registerStepReconfigure()、registerStepDiscovery()（类型化多 source 发现 step）
  *
  * <p>使用方法：
  * <ol>
@@ -105,6 +105,12 @@ public abstract class AbstractConfigFlow {
     protected SourceType sourceType = SourceType.USER;
 
     /**
+     * 该 flow 的 discovery payload（仅 IMPORT_FLOW/MQTT/ZEROCONF 入口在 executeDiscoveryStep 设置；
+     * 供 Layer2 matching 的 flow 级去重 R12 使用）。USER/RECONFIGURE 为 null。
+     */
+    private Object discoveryPayload;
+
+    /**
      * 重配置时的 entryId
      */
     protected String reconfigureEntryId;
@@ -134,9 +140,12 @@ public abstract class AbstractConfigFlow {
     protected EntryStepDefinition reconfigureStep;
 
     /**
-     * 发现入口步骤 (可选，每类只能注册一个)
+     * 按 SourceType 注册的类型化发现处理器（仅 IMPORT_FLOW/MQTT/ZEROCONF；每 source 一个）。
+     * <p>替换原单 {@code discoveryStep} 弱类型入口——一个 source = 一个类型化 capability（见需求 BD-2）。
+     * <p>peer 模型：core 对 payload 完全 opaque（P 擦除存储），不再保留 payload 类型绑定（原
+     * {@code discoveryPayloadTypes} 已移除——运行时未参与校验）。
      */
-    protected EntryStepDefinition discoveryStep;
+    private final Map<SourceType, DiscoveryHandler<?>> discoveryHandlers = new LinkedHashMap<>();
 
     /**
      * 当前步骤 ID
@@ -257,21 +266,105 @@ public abstract class AbstractConfigFlow {
     }
 
     /**
-     * 注册发现入口步骤 (可选，每个 Flow 只能注册一个)
+     * 注册类型化发现处理器（一个 source 一个；source 必须是携带 payload 的发现源）。
+     * <p>peer 模型（2026-06-23 命名统一）：原 {@code registerDiscoverySource(SourceType, Class<P>, handler)}
+     * 改名为 {@code registerStepDiscovery}（与 {@code registerStepUser}/{@code registerStepReconfigure}
+     * 同族——discovery handler 是 flow 的一个 step），并**去除 {@code Class<P>} 参数**（运行时不需要，
+     * core 对 payload 完全 opaque、P 擦除存储）。
      *
-     * @param stepId 步骤 ID
-     * @param displayName 显示名称
-     * @param handler 处理器 (接收 userInput 和 context)
+     * <p>注册不变式（严格模式）：仅 {@link SourceType#isPayloadDiscoverySource()}（IMPORT_FLOW/MQTT/ZEROCONF）
+     * 可注册；对其余值（USER/RECONFIGURE/IGNORE/UNIGNORE）注册直接抛 {@link IllegalStateException}。
+     * 同一 source 重复注册亦抛异常。
+     *
+     * @param source  发现源（必须 isPayloadDiscoverySource）
+     * @param handler 类型化处理器（接收 P 和 context；P 由 handler 签名推断，core 擦除存储）
+     * @param <P>     payload 类型
      */
-    protected void registerStepDiscovery(String stepId, String displayName,
-                                         BiFunction<Map<String, Object>, FlowContext, ConfigFlowResult> handler) {
-        this.discoveryStep = new EntryStepDefinition(stepId, displayName, handler);
-        // 同时加入 stepDefinitions，这样 handleStep() 能自然找到
+    protected final <P> void registerStepDiscovery(SourceType source, DiscoveryHandler<P> handler) {
+        Objects.requireNonNull(source, "source 不能为 null");
+        Objects.requireNonNull(handler, "handler 不能为 null");
+        if (!source.isPayloadDiscoverySource()) {
+            throw new IllegalStateException(
+                    "仅 IMPORT_FLOW/MQTT/ZEROCONF 可注册 DiscoveryHandler，收到: " + source);
+        }
+        if (discoveryHandlers.containsKey(source)) {
+            throw new IllegalStateException("该 source 已注册 handler: " + source);
+        }
+        discoveryHandlers.put(source, handler);
+
+        // 同步进 stepDefinitions（与 registerStepUser 同构），让 handleStep 能跑 discovery——
+        // discovery handler 的 payload 不从 handleStep 的 input(Map) 拿，而从 flow 的 discoveryPayload 字段读
+        //（discovery 入口在 drive 前 stash）。这样 handleStep 成为唯一"跑一步"原语，discovery 不再自成一套。
+        String stepId = discoveryStepId(source);
+        if (stepDefinitions.containsKey(stepId)) {
+            throw new IllegalStateException("discovery stepId 与已注册 step 碰撞: " + stepId);
+        }
+        final DiscoveryHandler<P> typed = handler;
         stepDefinitions.put(stepId, new StepDefinition(
-            input -> handler.apply(input, context),
-            StepInfo.of(displayName)
+            input -> invokeDiscoveryHandlerUnchecked(typed, this.discoveryPayload),
+            StepInfo.of("discovery:" + source)
         ));
-        log.debug("Registered discovery entry step: {}", stepId);
+        log.debug("Registered discovery step handler (synced to stepDefinitions): {}", source);
+    }
+
+    /**
+     * discovery start 节点的 stepId（内部派生，保留前缀防与用户 stepId 碰撞）。
+     * <p>由 {@link #registerStepDiscovery} 注册时用作 stepDefinitions 的 key，供 {@link #handleStep} 路由。
+     */
+    static String discoveryStepId(SourceType source) {
+        return "$discovery:" + source.name();
+    }
+
+    /**
+     * 是否注册了指定 discovery source 的 handler。
+     *
+     * @param source 发现源
+     * @return 若该 source 已注册 handler 则 true
+     */
+    public boolean hasDiscoverySource(SourceType source) {
+        return discoveryHandlers.containsKey(source);
+    }
+
+    /**
+     * 已注册的所有 discovery source（不可变快照）。
+     *
+     * @return 已注册 SourceType 集合
+     */
+    public Set<SourceType> getRegisteredDiscoverySources() {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(discoveryHandlers.keySet()));
+    }
+
+    /**
+     * 执行发现入口步骤（类型化 handler）。
+     * <p>设置 {@link #sourceType} + stash {@link #discoveryPayload} 后，<b>走 {@link #handleStep}</b>
+     * （discovery start 节点已由 {@link #registerStepDiscovery} 同步进 stepDefinitions，key =
+     * {@link #discoveryStepId(SourceType)}）。SHOW_FORM 后处理由 handleStep 统一完成。
+     *
+     * <p>本方法保留为 flow 级公有测试 API（众多集成单测直接调用）；内部已统一委托 handleStep，
+     * 与 {@link #executeUserStep}/{@link #executeReconfigureStep} 同构。
+     *
+     * @param source  发现源（必须已注册 handler，否则抛 IllegalStateException）
+     * @param payload provider 投递的 payload（须为注册时绑定的类型 P）
+     * @return 流程结果（SHOW_FORM / CREATE_ENTRY / ABORT）
+     * @throws IllegalStateException 若该 source 未注册 handler
+     */
+    public ConfigFlowResult executeDiscoveryStep(SourceType source, Object payload) {
+        if (!discoveryHandlers.containsKey(source)) {
+            throw new IllegalStateException("Flow 未注册该 discovery source: " + source);
+        }
+        this.sourceType = source;
+        this.discoveryPayload = payload;                  // stash，供 stepDefinitions adapter 读
+        return handleStep(discoveryStepId(source), null); // ← 走 handleStep（SHOW_FORM 后处理统一）
+    }
+
+    /**
+     * core 内部唯一的 raw/unchecked 调用点（Java 泛型擦除所致）。
+     * <p>安全由注册不变式保证：handler 注册时 P 与 source 绑定，provider 投递的 payload 必为该类型。
+     * 该 unchecked 仅在 core 内部、对集成不可见——集成侧始终是强类型（P 直接入参）。
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private ConfigFlowResult invokeDiscoveryHandlerUnchecked(DiscoveryHandler handler, Object payload) {
+        return handler.handle(payload, context);
     }
 
     // ========== 能力查询接口 ==========
@@ -291,10 +384,10 @@ public abstract class AbstractConfigFlow {
     }
 
     /**
-     * 是否支持发现入口
+     * 是否注册了任意 discovery source handler（兼容旧能力查询；新代码用 {@link #hasDiscoverySource(SourceType)}）。
      */
     public boolean hasDiscoveryStep() {
-        return discoveryStep != null;
+        return !discoveryHandlers.isEmpty();
     }
 
     // ========== 入口获取方法 ==========
@@ -313,13 +406,6 @@ public abstract class AbstractConfigFlow {
         return reconfigureStep;
     }
 
-    /**
-     * 获取发现入口步骤
-     */
-    public EntryStepDefinition getDiscoveryStep() {
-        return discoveryStep;
-    }
-
     // ========== SourceType 管理 ==========
 
     /**
@@ -334,6 +420,15 @@ public abstract class AbstractConfigFlow {
      */
     public SourceType getSourceType() {
         return sourceType;
+    }
+
+    /**
+     * 获取该 flow 的 discovery payload（仅 discovery 入口设置；供 Layer2 matching 去重用）。
+     *
+     * @return discovery payload，USER/RECONFIGURE 为 null
+     */
+    public Object getDiscoveryPayload() {
+        return discoveryPayload;
     }
 
     /**
@@ -376,6 +471,35 @@ public abstract class AbstractConfigFlow {
         this.sourceType = SourceType.RECONFIGURE;
         String stepId = reconfigureStep.getStepId();
         return handleStep(stepId, userInput);
+    }
+
+    /**
+     * 按 {@link #sourceType} 返回当前 start 节点的 stepId（start 节点路由沉到 flow——DAG owner 内聚）。
+     * <p>供 {@code ConfigFlowService.drive} 用：入口设好 sourceType + setup 后，drive(flow, startStepId(), ...)
+     * 即可统一驱动 start 步（user/reconfigure/discovery），无需 service 感知 stepId 命名约定。
+     *
+     * @return 当前 sourceType 对应的 start 节点 stepId
+     */
+    public String startStepId() {
+        switch (sourceType) {
+            case RECONFIGURE:
+                return reconfigureStep.getStepId();
+            case IMPORT_FLOW:
+            case MQTT:
+            case ZEROCONF:
+                return discoveryStepId(sourceType);
+            case USER:
+            default:
+                return userStep.getStepId();
+        }
+    }
+
+    /**
+     * 设置 discovery payload（discovery 入口在 drive 前 stash，供 stepDefinitions 内的 discovery adapter 读）。
+     * <p>与 {@link #setSourceType} 配合，由 {@code ConfigFlowService.startDiscoveryFlow} 在 setup 阶段调用。
+     */
+    public void setDiscoveryPayload(Object payload) {
+        this.discoveryPayload = payload;
     }
 
     // ========== 步骤信息获取 ==========
@@ -512,11 +636,12 @@ public abstract class AbstractConfigFlow {
         builder.stepInputs(context.getStepInputs());
 
         if (sourceType == SourceType.RECONFIGURE && reconfigureEntryId != null) {
-            // 更新模式: 需要保留原 entryId
+            // 更新模式: 需要保留原 entryId（entry.source 由 withReconfigure 保留原值，此处不改写）
             builder.entryId(reconfigureEntryId);
             return ConfigFlowResult.updateEntry(builder.build(), context);
         } else {
-            // 创建模式
+            // 创建模式：记录创建来源（USER/IMPORT_FLOW/MQTT/ZEROCONF/IGNORE）
+            builder.source(sourceType);
             return ConfigFlowResult.createEntry(builder.build(), context);
         }
     }

@@ -16,6 +16,8 @@
 
 package com.ecat.core.State;
 
+import com.alibaba.fastjson2.JSON;
+
 import org.junit.Before;
 import org.junit.Test;
 
@@ -187,5 +189,41 @@ public class TimeAttributeTest {
     @Test(expected = UnsupportedOperationException.class)
     public void testConvertValueToUnitThrows() {
         attr.convertValueToUnit(1.0, null, null);
+    }
+
+    // ========== Instant 数值持久化往返测试（修复 O1：write(String)/read(Number) 不对称）==========
+
+    /**
+     * 验证 Instant 属性经 StateManager 写路径（修复后：Instant→epoch 毫秒归一）
+     * 持久化为数值，并经 restore 读侧（convertObjectToTargetType 的 Instant+Number 分支）无损还原。
+     *
+     * <p>修复前：state.value 直接存 Instant 对象 → fastjson2 序列化为 ISO-8601 String
+     * → restore 时只认 Number → 抛 IllegalArgumentException（O1）。
+     * <p>修复后：写侧归一为 Long(epoch 毫秒) → 存数值 → 读侧 Number 分支还原。
+     */
+    @Test
+    public void instantAttribute_persistsAsNumeric_roundTrips() {
+        TimeAttribute a = new TimeAttribute("last_change_time", AttributeClass.TIME,
+                null, null, 0, false, false);
+        Instant original = Instant.parse("2026-06-23T10:27:15.642Z");
+        a.updateValue(original, AttributeStatus.NORMAL);
+
+        // 模拟 StateManager.saveState 写逻辑（含本次修复的 Instant→epoch 毫秒归一）
+        PersistedState state = new PersistedState();
+        Object v = a.getValue();
+        state.value = (v instanceof Instant) ? ((Instant) v).toEpochMilli() : v;
+        state.statusCode = AttributeStatus.NORMAL.getId();
+        state.updateTimeEpochMs = original.toEpochMilli();
+        String json = JSON.toJSONString(state);
+
+        // 断言：持久化为数值，而非 ISO-8601 String（这正是 O1 的根源）
+        Object persistedValue = JSON.parseObject(json).get("value");
+        assertFalse("Instant 应以数值（epoch 毫秒）持久化，而非 ISO-8601 String",
+                persistedValue instanceof String);
+        assertTrue("持久化值应为 Number", persistedValue instanceof Number);
+
+        // 读回：经 convertObjectToTargetType 的 Instant+Number 分支还原
+        a.restore(JSON.parseObject(json, PersistedState.class));
+        assertEquals("Instant 经数值持久化往返应无损还原", original, a.getValue());
     }
 }

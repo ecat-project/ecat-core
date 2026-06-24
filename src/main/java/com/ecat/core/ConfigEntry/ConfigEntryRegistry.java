@@ -54,8 +54,16 @@ public class ConfigEntryRegistry {
      * 唯一 ID 重复异常
      */
     public static class DuplicateUniqueIdException extends RuntimeException {
+        private final String uniqueId;
+
         public DuplicateUniqueIdException(String uniqueId) {
             super("Unique ID already exists: " + uniqueId);
+            this.uniqueId = uniqueId;
+        }
+
+        /** 重复命中的 uniqueId（供调用方区分 ALREADY_CONFIGURED vs ALREADY_IN_PROGRESS）。 */
+        public String getUniqueId() {
+            return uniqueId;
         }
     }
 
@@ -182,6 +190,53 @@ public class ConfigEntryRegistry {
                 entry.getEntryId(), entry.getUniqueId());
 
         return entry;
+    }
+
+    // ==================== IGNORE / UNIGNORE（req2 抑制 / req3 召回）====================
+
+    /**
+     * req2 抑制：创建 source=IGNORE 的 ConfigEntry。
+     * <p>建立后，同 uniqueId 的后续发现经 R5（uniqueId 去重）静默 abort——复用 ConfigEntry，零新存储。
+     * IGNORE entry 不触发设备加载（{@link #notifyIntegrationCreate} 跳过控制源 entry）。
+     *
+     * @param coordinate 目标集成标识（被忽略设备的归属集成）
+     * @param uniqueId   被忽略设备的业务唯一标识
+     * @param title      标题（可空，缺省 ignored:&lt;uniqueId&gt;）
+     * @return 创建的 IGNORE entry
+     */
+    public ConfigEntry createIgnoreEntry(String coordinate, String uniqueId, String title) {
+        ConfigEntry ignore = new ConfigEntry.Builder()
+                .coordinate(coordinate)
+                .uniqueId(uniqueId)
+                .title(title != null && !title.isEmpty() ? title : ("ignored:" + uniqueId))
+                .source(SourceType.IGNORE)
+                .build();
+        return createEntry(ignore);
+    }
+
+    /**
+     * 查询某 uniqueId 是否处于 IGNORE 状态（存在 source=IGNORE 的 entry）。
+     *
+     * @return IGNORE entry；不存在或非 IGNORE 则 null
+     */
+    public ConfigEntry getIgnoreEntry(String uniqueId) {
+        ConfigEntry e = getByUniqueId(uniqueId);
+        return (e != null && e.getSource() == SourceType.IGNORE) ? e : null;
+    }
+
+    /**
+     * req3 召回：删除 IGNORE entry（使后续发现不再被 R5 拦截，下次广播可重新发现）。
+     * <p>仅删除 source=IGNORE 的 entry；非 IGNORE entry（已配置的真实设备）不动，避免误删真实配置。
+     *
+     * @return 是否删除了 IGNORE entry
+     */
+    public boolean removeIgnoreEntry(String uniqueId) {
+        ConfigEntry e = getByUniqueId(uniqueId);
+        if (e != null && e.getSource() == SourceType.IGNORE) {
+            removeEntry(e.getEntryId());
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -388,6 +443,13 @@ public class ConfigEntryRegistry {
      */
     private void notifyIntegrationCreate(ConfigEntry entry) {
         if (core == null) return;
+
+        // 控制源 entry（IGNORE/UNIGNORE）不触发设备加载——它们是 core 管理的抑制/召回标记，无对应设备
+        if (entry.getSource() == SourceType.IGNORE || entry.getSource() == SourceType.UNIGNORE) {
+            log.debug("Skip device-load notify for control-source entry: source={}, uniqueId={}",
+                    entry.getSource(), entry.getUniqueId());
+            return;
+        }
 
         String coordinate = entry.getCoordinate();
         IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();

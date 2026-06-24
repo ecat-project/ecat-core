@@ -295,6 +295,19 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
             builder.version(Integer.parseInt((String) versionObj));
         }
 
+        // 处理 source 字段（向后兼容：旧 yml 无 source → Builder 默认 USER）
+        Object sourceObj = map.get("source");
+        if (sourceObj instanceof String && !((String) sourceObj).isEmpty()) {
+            try {
+                builder.source(SourceType.valueOf((String) sourceObj));
+            } catch (IllegalArgumentException e) {
+                // 持久化数据中的 source 值损坏——记错误并回退 USER（不阻断 core 启动）
+                log.error("持久化 entry 的 source 值非法，回退 USER: {} (entryId={})",
+                        sourceObj, map.get("entryId"));
+                builder.source(SourceType.USER);
+            }
+        }
+
         return builder.build();
     }
 
@@ -317,6 +330,8 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         map.put("createTime", formatTime(entry.getCreateTime()));
         map.put("updateTime", formatTime(entry.getUpdateTime()));
         map.put("version", entry.getVersion());
+        // source（来源类型，序列化为 enum name；旧 entry 无此字段，加载时默认 USER——向后兼容）
+        map.put("source", entry.getSource() != null ? entry.getSource().name() : SourceType.USER.name());
 
         return map;
     }

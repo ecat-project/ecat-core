@@ -17,6 +17,7 @@
 package com.ecat.core.State;
 
 import java.io.File;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Collection;
 import java.util.Map;
@@ -88,7 +89,15 @@ public class StateManager {
             ConcurrentMap<String, String> map = getOrCreateMap(device);
 
             PersistedState state = new PersistedState();
-            state.value = attr.getValue();
+            // 统一数值存储：Instant 属性归一为 epoch 毫秒（Long），与 updateTimeEpochMs 一致。
+            // 避免 fastjson2 把 Instant 序列化为 ISO-8601 String（如 "2026-06-23T10:27:15.642Z"），
+            // 导致 restore 时 convertObjectToTargetType 的 Instant+Number 分支无法匹配（read 只认 Number）。
+            // 读侧复用 AttributeBase.convertObjectToTargetType 现有 Instant+Number 分支，保持单一分支、读写对称。
+            Object persistValue = attr.getValue();
+            if (persistValue instanceof Instant) {
+                persistValue = ((Instant) persistValue).toEpochMilli();
+            }
+            state.value = persistValue;
             state.statusCode = attr.getStatus().getId();
             state.updateTimeEpochMs = attr.getUpdateTime() != null
                 ? attr.getUpdateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()

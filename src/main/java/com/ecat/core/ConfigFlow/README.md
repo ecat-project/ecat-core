@@ -49,6 +49,8 @@ ConfigSchemaProvider (可复用的 Schema 定义)
   → step handler 返回 createEntry() → 根据 sourceType 创建新 ConfigEntry 或更新已有 ConfigEntry
 ```
 
+> **Discovery 路径**（IMPORT_FLOW/ZEROCONF/MQTT）走同一 `handleStep`，入口换为 `ConfigFlowService.startDiscoveryFlow(coordinate, source, payload)` → `handleStep("$discovery:<SOURCE>", payload)` 跑 discovery handler，之后同样经 `showForm` / `createEntry` 推进。详见 [DISCOVERY.md](DISCOVERY.md)。
+
 ---
 
 ## 快速开始：创建一个 ConfigFlow
@@ -708,6 +710,20 @@ registerStepReconfigure("reconfigure", "重新配置设备", (userInput, ctx) ->
 
 **注意**：重配置时不要改变设备类型（如从串口改为 Modbus），这会导致数据结构不兼容。
 
+### Discovery 多源接入（IMPORT_FLOW / ZEROCONF / MQTT）
+
+除 USER（人工向导）/ RECONFIGURE 外，ConfigFlow 支持**多源设备发现**——外部（同进程 SDK / 协议 broker）触发 flow，跳过型号选择等前置 step、直达连接配置。三源共用 core **一个入口** `ConfigFlowService.startDiscoveryFlow(coordinate, source, payload)`（`source` 参数区分类型）：
+
+| Source | 触发方 | payload（core 不透明） | 典型场景 |
+|--------|--------|------------------------|----------|
+| `IMPORT_FLOW` | 同进程 SDK | `ImportFlowPayload{coordinate, version, data}` | 外部已知设备身份，程序化接入 |
+| `ZEROCONF` | integration-zeroconf broker（mDNS） | `ZeroconfDiscoveryPayload`（集成侧定义） | 网络自动发现 |
+| `MQTT` | integration-mqtt broker | `MqttDiscoveryPayload`（集成侧定义） | MQTT 发现 |
+
+注册：`registerStepDiscovery(SourceType, DiscoveryHandler<P>)`（每发现源最多 1 个）；core 对 payload 完全不透明，data 格式由各集成自定（如 saimosen v1 = `class|model|sn|name`）。
+
+> discovery 机制详情（统一入口用法、执行统一 `drive`/`applyResult`、重复发现去重 clean ABORT + `AbortReason`、peer broker 模型、HA 对齐理念、参考实现）见同目录 **[DISCOVERY.md](DISCOVERY.md)**。
+
 ### 保留额外字段
 
 如果 ConfigEntry 有手动添加的字段（如 register_mappings），重配置时需要保留：
@@ -759,6 +775,8 @@ private ConfigFlowResult stepFinalConfirm(Map<String, Object> userInput) {
 | `removeEntry(context)` | `REMOVE_ENTRY` | 删除 ConfigEntry |
 
 步骤 handler **不要**直接调用 `ConfigFlowResult` 的静态方法，始终使用 `showForm()` / `createEntry()` / `abort()`。
+
+> **去重 ABORT 的 reason 词表**：框架 R5 去重命中时用 `AbortReason.ALREADY_CONFIGURED`（entry 已存在）/ `ALREADY_IN_PROGRESS`（同 uniqueId 活跃 flow）——由 `ConfigFlowService.drive` 内部产生，集成无需关心；集成自身 `abort(reason)` 用自定义 reason 串。
 
 ---
 
@@ -872,4 +890,4 @@ public class MyConfigFlow extends AbstractConfigFlow {
 |------|------|
 | ConfigFlow 垂直领域维护指南 | `.claude/skills/maintain-vertical-skill/skills/config-flow/SKILL.md` |
 | ConfigFlow 升级指南 | `.claude/skills/upgrade-config-flow/SKILL.md` |
-| SchemaConversionService i18n 设计文档 | `docs/plans/2026-05-13-schema-conversion-i18n-fallback.md` |
+| 多源设备发现（discovery 机制 / 执行统一 drive·applyResult / 去重 AbortReason） | 同目录 [DISCOVERY.md](DISCOVERY.md) |

@@ -378,6 +378,36 @@ public class YmlConfigEntryPersistenceTest {
         }
     }
 
+    @Test
+    public void testRoundTrip_Source() {
+        persistence = new YmlConfigEntryPersistence();
+
+        ConfigEntry original = new ConfigEntry.Builder()
+                .entryId("test-id-source")
+                .coordinate("com.ecat.integration:demo")
+                .uniqueId("demo_import")
+                .title("Imported")
+                .source(SourceType.IMPORT_FLOW)
+                .build();
+
+        persistence.save(original);
+
+        List<ConfigEntry> entries = persistence.loadAll();
+        ConfigEntry loaded = entries.stream()
+            .filter(e -> "test-id-source".equals(e.getEntryId()))
+            .findFirst()
+            .orElse(null);
+
+        assertNotNull("应该找到 entry", loaded);
+        assertEquals("source 应往返保持 IMPORT_FLOW", SourceType.IMPORT_FLOW, loaded.getSource());
+
+        // 清理
+        File dir = new File(".ecat-data/core/config_entries/com.ecat.integration/demo");
+        if (dir.exists()) {
+            try { deleteDirectory(dir); } catch (IOException e) { /* ignore */ }
+        }
+    }
+
     // ==================== 边界情况测试 ====================
 
     @Test

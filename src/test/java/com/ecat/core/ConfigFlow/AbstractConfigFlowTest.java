@@ -64,18 +64,52 @@ public class AbstractConfigFlowTest {
     }
 
     @Test
-    public void testRegisterStepDiscovery() {
+    public void testRegisterDiscoverySource() {
         TestConfigFlow flow = new TestConfigFlow();
 
-        flow.registerStepDiscovery("discovery", "设备发现", (input, context) -> {
-            FlowContext ctx = new FlowContext("test-flow");
-            return ConfigFlowResult.showForm("next", new ConfigSchema(), new HashMap<>(), ctx);
+        flow.registerStepDiscovery(SourceType.IMPORT_FLOW, (payload, context) ->
+                ConfigFlowResult.showForm("next", new ConfigSchema(), new HashMap<>(), context));
+
+        assertTrue("应该支持 discovery（任一 source）", flow.hasDiscoveryStep());
+        assertTrue("应该注册了 IMPORT_FLOW", flow.hasDiscoverySource(SourceType.IMPORT_FLOW));
+        assertTrue("已注册源集合应包含 IMPORT_FLOW",
+                flow.getRegisteredDiscoverySources().contains(SourceType.IMPORT_FLOW));
+    }
+
+    @Test
+    public void testRegisterDiscoverySource_RejectsNonPayloadSource() {
+        TestConfigFlow flow = new TestConfigFlow();
+        try {
+            // USER 不是携带 payload 的发现源，注册必须抛异常（严格模式注册不变式）
+            flow.registerStepDiscovery(SourceType.USER, (payload, ctx) ->
+                    ConfigFlowResult.showForm("x", new ConfigSchema(), new HashMap<>(), ctx));
+            fail("对 USER 注册 DiscoveryHandler 应抛 IllegalStateException");
+        } catch (IllegalStateException e) {
+            assertTrue("异常消息应提示仅 IMPORT_FLOW/MQTT/ZEROCONF 可注册",
+                    e.getMessage().contains("IMPORT_FLOW/MQTT/ZEROCONF"));
+        }
+    }
+
+    @Test
+    public void testExecuteDiscoveryStep() {
+        TestConfigFlow flow = new TestConfigFlow();
+        FlowContext context = new FlowContext("test-flow");
+        flow.setContext(context);
+
+        flow.registerStepDiscovery(SourceType.IMPORT_FLOW, (payload, ctx) -> {
+            // 模拟 import-flow handler：预填 entryData 并落地到连接配置步
+            ctx.setEntryData("from", "import-flow");
+            return ConfigFlowResult.showForm("comm_config", new ConfigSchema(), new HashMap<>(), ctx);
         });
 
-        assertTrue("应该支持发现入口", flow.hasDiscoveryStep());
-        assertNotNull("发现入口步骤不应为 null", flow.getDiscoveryStep());
-        assertEquals("步骤 ID 应该匹配", "discovery", flow.getDiscoveryStep().getStepId());
-        assertEquals("显示名称应该匹配", "设备发现", flow.getDiscoveryStep().getDisplayName());
+        ConfigFlowResult result = flow.executeDiscoveryStep(SourceType.IMPORT_FLOW,
+                new ImportFlowPayload("com.ecat:integration-test", 1, "so2|SN001"));
+
+        assertEquals("应 SHOW_FORM", ConfigFlowResult.ResultType.SHOW_FORM, result.getType());
+        assertEquals("应落地到 comm_config", "comm_config", result.getStepId());
+        assertEquals("sourceType 应被设为 IMPORT_FLOW", SourceType.IMPORT_FLOW, flow.getSourceType());
+        assertEquals("currentStep 应对齐到 comm_config", "comm_config", flow.getCurrentStep());
+        assertEquals("handler 应已预填 entryData", "import-flow", context.getEntryData("from"));
     }
 
     @Test
@@ -172,8 +206,8 @@ public class AbstractConfigFlowTest {
         flow.setSourceType(SourceType.RECONFIGURE);
         assertEquals("sourceType 应该更新", SourceType.RECONFIGURE, flow.getSourceType());
 
-        flow.setSourceType(SourceType.DISCOVERY);
-        assertEquals("sourceType 应该更新", SourceType.DISCOVERY, flow.getSourceType());
+        flow.setSourceType(SourceType.IMPORT_FLOW);
+        assertEquals("sourceType 应该更新", SourceType.IMPORT_FLOW, flow.getSourceType());
     }
 
     @Test
@@ -207,6 +241,25 @@ public class AbstractConfigFlowTest {
         assertEquals("coordinate 应该匹配", "com.ecat.integration:demo", result.getEntry().getCoordinate());
         assertEquals("title 应该匹配", "Test Entry", result.getEntry().getTitle());
         assertEquals("uniqueId 应该匹配", "demo_123", result.getEntry().getUniqueId());
+        assertEquals("source 应该是 USER", SourceType.USER, result.getEntry().getSource());
+    }
+
+    @Test
+    public void testCreateEntry_ImportFlowSource() {
+        TestConfigFlow flow = new TestConfigFlow();
+        FlowContext context = new FlowContext("test-flow");
+        context.setCoordinate("com.ecat.integration:demo");
+        flow.setContext(context);
+
+        flow.setSourceType(SourceType.IMPORT_FLOW);
+        context.getEntryData().put("model", "XHSO2");
+        context.setEntryTitle("Imported SO2");
+        context.setEntryUniqueId("demo_import_001");
+
+        ConfigFlowResult result = flow.createEntry();
+
+        assertEquals("结果类型应该是 CREATE_ENTRY", ConfigFlowResult.ResultType.CREATE_ENTRY, result.getType());
+        assertEquals("source 应该是 IMPORT_FLOW", SourceType.IMPORT_FLOW, result.getEntry().getSource());
     }
 
     @Test

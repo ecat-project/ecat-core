@@ -16,6 +16,8 @@
 
 package com.ecat.core.ConfigFlow;
 
+import com.ecat.core.ConfigEntry.SourceType;
+
 import org.junit.Before;
 import org.junit.Test;
 
@@ -87,6 +89,33 @@ public class ConfigFlowRegistryTest {
 
         // 后注册的应该覆盖先注册的
         assertTrue("应该使用后注册的 Flow", registration.hasUserStep());
+    }
+
+    @Test
+    public void testLayer2Matching_DiscoveryPayloadDedup() {
+        String coordinate = "com.ecat.integration:demo";
+        TestConfigFlowWithSteps flow = new TestConfigFlowWithSteps();
+        flow.getContext().setCoordinate(coordinate);
+
+        ImportFlowPayload payload = new ImportFlowPayload(coordinate, 1, "so2|SN001|name");
+        // executeDiscoveryStep 设置 sourceType=IMPORT_FLOW + discoveryPayload
+        flow.executeDiscoveryStep(SourceType.IMPORT_FLOW, payload);
+        registry.registerActiveFlow(flow.getFlowId(), flow);
+
+        // 同 (coordinate, IMPORT_FLOW, payload) 的活跃 flow 已存在 → 命中
+        assertTrue("同三元组应命中 Layer2 去重",
+                registry.hasActiveFlowWithDiscoveryPayload(coordinate, SourceType.IMPORT_FLOW, payload));
+        // 语义等价的 payload（ImportFlowPayload.equals 成立）也应命中
+        ImportFlowPayload samePayload = new ImportFlowPayload(coordinate, 1, "so2|SN001|name");
+        assertTrue("equals 等价的 payload 也应命中",
+                registry.hasActiveFlowWithDiscoveryPayload(coordinate, SourceType.IMPORT_FLOW, samePayload));
+        // 不同 payload → 不命中
+        ImportFlowPayload otherPayload = new ImportFlowPayload(coordinate, 1, "no2|SN002");
+        assertFalse("不同 payload 不应命中",
+                registry.hasActiveFlowWithDiscoveryPayload(coordinate, SourceType.IMPORT_FLOW, otherPayload));
+        // 无活跃 flow 的 coordinate → 不命中
+        assertFalse("无活跃 flow 的 coordinate 不应命中",
+                registry.hasActiveFlowWithDiscoveryPayload("com.ecat:nope", SourceType.IMPORT_FLOW, payload));
     }
 
     // ==================== unregisterFlow() 测试 ====================
@@ -549,9 +578,8 @@ public class ConfigFlowRegistryTest {
                 return ConfigFlowResult.showForm("next", new ConfigSchema(), new java.util.HashMap<>(), context);
             });
 
-            registerStepDiscovery("discovery", "设备发现", (input, context) -> {
-                return ConfigFlowResult.showForm("next", new ConfigSchema(), new java.util.HashMap<>(), context);
-            });
+            registerStepDiscovery(SourceType.IMPORT_FLOW, (payload, context) ->
+                    ConfigFlowResult.showForm("next", new ConfigSchema(), new java.util.HashMap<>(), context));
         }
     }
 

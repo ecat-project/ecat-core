@@ -99,6 +99,62 @@ public class ConfigEntryRegistryTest {
         }
     }
 
+    // ==================== IGNORE / UNIGNORE 测试（req2/req3，R13/R14）====================
+
+    @Test
+    public void testCreateIgnoreEntry_SourceIsIgnore() {
+        ConfigEntry ignore = registry.createIgnoreEntry("com.ecat:integration-saimosen",
+                "saimosen_so2_SN001", null);
+        assertEquals("IGNORE entry source 应为 IGNORE", SourceType.IGNORE, ignore.getSource());
+        assertEquals("缺省 title 应为 ignored:<uniqueId>", "ignored:saimosen_so2_SN001", ignore.getTitle());
+        assertNotNull("应生成 entryId", ignore.getEntryId());
+    }
+
+    @Test
+    public void testCreateIgnoreEntry_BlocksRediscoveryViaR5() {
+        // 建 IGNORE entry（模拟用户忽略某发现）
+        registry.createIgnoreEntry("com.ecat:integration-saimosen", "saimosen_so2_SN001", "ignored device");
+        // 再以同 uniqueId 创建真实 entry → 应被 R5（uniqueId 唯一性）拦截
+        try {
+            registry.createEntry(new ConfigEntry.Builder()
+                    .coordinate("com.ecat:integration-saimosen")
+                    .uniqueId("saimosen_so2_SN001")
+                    .title("real")
+                    .source(SourceType.MQTT)
+                    .build());
+            fail("IGNORE 后同 uniqueId 创建应抛 DuplicateUniqueIdException（R5 拦截）");
+        } catch (ConfigEntryRegistry.DuplicateUniqueIdException e) {
+            // 期望：IGNORE entry 复用 R5 抑制同 uniqueId 的后续发现
+        }
+    }
+
+    @Test
+    public void testGetIgnoreEntry() {
+        registry.createIgnoreEntry("com.ecat:c", "uid-x", null);
+        assertNotNull("存在 IGNORE entry 时 getIgnoreEntry 应非 null", registry.getIgnoreEntry("uid-x"));
+        assertNull("非 IGNORE 的 uniqueId 应返回 null", registry.getIgnoreEntry("not-ignored"));
+    }
+
+    @Test
+    public void testRemoveIgnoreEntry_Unblocks() {
+        registry.createIgnoreEntry("com.ecat:c", "uid-y", null);
+        assertTrue("删除 IGNORE entry 应返回 true", registry.removeIgnoreEntry("uid-y"));
+        assertNull("删除后 getIgnoreEntry 应为 null", registry.getIgnoreEntry("uid-y"));
+        // 召回后可重新创建（R5 不再拦截）—— req3 召回语义
+        registry.createEntry(new ConfigEntry.Builder()
+                .coordinate("com.ecat:c").uniqueId("uid-y").title("real").build());
+        assertNotNull("召回后可创建真实 entry", registry.getByUniqueId("uid-y"));
+    }
+
+    @Test
+    public void testRemoveIgnoreEntry_DoesNotTouchRealEntry() {
+        // 真实 entry（非 IGNORE）不应被 removeIgnoreEntry 误删
+        registry.createEntry(new ConfigEntry.Builder()
+                .coordinate("com.ecat:c").uniqueId("real-uid").title("real").build());
+        assertFalse("removeIgnoreEntry 对真实 entry 应返回 false", registry.removeIgnoreEntry("real-uid"));
+        assertNotNull("真实 entry 不应被误删", registry.getByUniqueId("real-uid"));
+    }
+
     // ==================== createEntry() 测试 ====================
 
     @Test
