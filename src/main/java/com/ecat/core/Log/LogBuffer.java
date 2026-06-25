@@ -16,13 +16,13 @@
 
 package com.ecat.core.Log;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -32,9 +32,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>设计原则：
  * <ul>
- *   <li>LogEntry 只存储一份（单一引用），避免内存泄漏</li>
- *   <li>超出容量时自动淘汰旧日志</li>
- *   <li>支持 SSE 订阅者，put() 时直接同步推送</li>
+ *   <li>LogEntry 只存储一份（单一引用，ring 为唯一长期引用），避免内存泄漏</li>
+ *   <li>超出容量时自动淘汰旧日志（ring 容量即 SSE 投递背压上界，投递跟不上时丢最旧）</li>
+ *   <li>支持 SSE 订阅者：put() 只写 ring + 发唤醒信号，由懒启动的单写者投递线程异步推送，
+ *       与 put 解耦——慢/阻塞的 SSE 订阅者不阻塞日志热路径，且投递时不持任何 ecat 锁
+ *       （消除旧的 CopyOnWrite 锁 ↔ SSE 连接锁 顺序反转死锁）</li>
  * </ul>
  *
  * @author coffee
@@ -46,6 +48,18 @@ public class LogBuffer implements AutoCloseable {
     private final ConcurrentHashMap<LogSubscriber, Long> subscriberTimestamps;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
+    // ========== 异步投递（ring 驱动的信号式单写者，与 put 解耦） ==========
+    // 投递唤醒信号：put 时 release（不携带 LogEntry，保持「ring 为 LogEntry 唯一长期引用」的不变量，
+    // 避免历史广播队列的双引用内存泄漏）；单写者投递线程 acquire 后读 ring 增量投递。
+    private final Semaphore deliverySignal = new Semaphore(0);
+    // 单写者投递线程，懒启动（首个订阅者到来才起）；null 表示从未启动。volatile 供双检。
+    private volatile Thread broadcasterThread;
+    // ensureBroadcasterStarted 的幂等临界区锁
+    private final Object broadcasterStartLock = new Object();
+    // 已投递高水位（已投递条目的最大时间戳）：仅由单写者投递线程维护，避免重复投递同一增量。
+    // 新订阅者靠「订阅时间过滤 + 订阅时历史拉取」补齐，与本字段正交。
+    private volatile long lastDeliveredTimestamp = 0L;
+
     public LogBuffer(int maxCapacity) {
         this.maxCapacity = maxCapacity;
         this.buffer = new ConcurrentLinkedQueue<>();
@@ -54,7 +68,10 @@ public class LogBuffer implements AutoCloseable {
     }
 
     /**
-     * 添加日志条目到缓冲区，并直接推送给 SSE 订阅者
+     * 添加日志条目到缓冲区，并唤醒投递线程异步推送给 SSE 订阅者。
+     *
+     * <p>本方法不阻塞、不做 I/O：只写 ring + 发信号。投递由单写者线程在另一线程完成，
+     * 慢/阻塞的 SSE 订阅者不会卡住 put（日志热路径），且 ring 容量即背压上界（投递跟不上时丢最旧）。
      *
      * @param entry 日志条目
      */
@@ -63,37 +80,121 @@ public class LogBuffer implements AutoCloseable {
             return;
         }
         buffer.add(entry);
-        // 超出容量时移除旧日志
+        // 超出容量时移除旧日志（ring 自带丢最旧背压）
         while (buffer.size() > maxCapacity) {
             buffer.poll();
         }
-        // 直接推送给 SSE 订阅者
+        // 有订阅者时唤醒投递线程：只发信号（不携带 LogEntry），投递与 put 解耦
         if (!subscribers.isEmpty()) {
-            pushToSubscribers(entry);
+            deliverySignal.release();
         }
     }
 
     /**
-     * 推送日志到所有 SSE 订阅者
+     * 投递 ring 增量到所有订阅者（仅由单写者投递线程调用）。
      *
-     * @param entry 日志条目
+     * <p>关键不变量（消除 SSE 广播死锁根因）：
+     * <ul>
+     *   <li>调用 {@code subscriber.send}（取 Undertow SSE 连接锁）时，不持有任何 ecat 锁。
+     *       旧实现用 {@code subscribers.removeIf} 在持 CopyOnWrite 锁期间做 I/O，
+     *       与 SSE 连接关闭回调（持 SSE 连接锁）里的 {@code subscribers.remove}（取 CopyOnWrite 锁）
+     *       形成 CopyOnWrite 锁 ↔ SSE 连接锁的锁顺序反转死锁。本实现先无锁快照订阅者、再逐个 send，
+     *       send 时一锁不持，即便与 SSE 关闭路径争连接锁也只是普通竞争、无环。</li>
+     *   <li>ring 为 LogEntry 唯一长期引用（防双引用内存泄漏）；{@code toDeliver} 仅本方法栈上暂存，
+     *       返回即释放，不引入第二份长期引用。</li>
+     * </ul>
+     *
+     * <p>丢最旧：投递慢于生产时，ring 按容量淘汰最旧，本方法只投递还留在 ring 里的增量，被淘汰的即丢弃。
      */
-    private void pushToSubscribers(LogEntry entry) {
+    private void deliverDelta() {
         if (subscribers.isEmpty() || closed.get()) {
             return;
         }
-        subscribers.removeIf(subscriber -> {
-            try {
-                Long subscribeTime = subscriberTimestamps.get(subscriber);
-                if (subscribeTime == null || entry.getTimestamp() >= subscribeTime) {
-                    subscriber.send(entry);
+        long fromTs = lastDeliveredTimestamp;
+        List<LogEntry> toDeliver = new ArrayList<>();
+        long maxTs = fromTs;
+        for (LogEntry e : buffer) { // ConcurrentLinkedQueue 弱一致快照，仅栈上暂存
+            long ts = e.getTimestamp();
+            if (ts > fromTs) {
+                toDeliver.add(e);
+                if (ts > maxTs) {
+                    maxTs = ts;
                 }
-                return false;
-            } catch (IOException e) {
-                subscriberTimestamps.remove(subscriber);
-                return true;
             }
-        });
+        }
+        if (toDeliver.isEmpty()) {
+            return;
+        }
+        LogSubscriber[] snapshot = subscribers.toArray(new LogSubscriber[0]);
+        List<LogSubscriber> dead = null;
+        boolean interrupted = Thread.currentThread().isInterrupted();
+        for (LogSubscriber sub : snapshot) {
+            if (closed.get() || interrupted) {
+                break; // close 中断时尽快退出，剩余订阅者随 close 终止
+            }
+            Long subscribeTime = subscriberTimestamps.get(sub);
+            for (LogEntry e : toDeliver) {
+                // 订阅时间过滤：只发订阅后产生的日志，避免与订阅时历史拉取重复
+                if (subscribeTime != null && e.getTimestamp() < subscribeTime) {
+                    continue;
+                }
+                try {
+                    sub.send(e);
+                } catch (Throwable t) {
+                    // 任一订阅者发送失败（IOException 或运行时异常）不得拖死投递线程：记录后踢出
+                    if (dead == null) {
+                        dead = new ArrayList<>();
+                    }
+                    dead.add(sub);
+                    break;
+                }
+            }
+            interrupted = Thread.currentThread().isInterrupted();
+        }
+        lastDeliveredTimestamp = maxTs;
+        if (dead != null) {
+            for (LogSubscriber s : dead) {
+                subscribers.remove(s);
+                subscriberTimestamps.remove(s);
+            }
+        }
+    }
+
+    /**
+     * 单写者投递线程主循环：阻塞等信号 → 排空累积信号（合并多次 put 为一次投递）→ 投递 ring 增量。
+     */
+    private void runBroadcaster() {
+        while (!closed.get()) {
+            deliverySignal.acquireUninterruptibly();
+            if (closed.get()) {
+                return;
+            }
+            deliverySignal.drainPermits(); // 合并：多次唤醒只触发一次增量投递
+            try {
+                deliverDelta();
+            } catch (Throwable t) {
+                // deliverDelta 已对单订阅者异常兜底；此处仅防御性保命——投递线程绝不能因任何异常退出，
+                // 否则后续日志将无人投递。吞掉并继续等下一轮信号。
+            }
+        }
+    }
+
+    /**
+     * 懒启动单写者投递线程（首个订阅者到来时调用）。幂等：已存活则跳过。
+     */
+    private void ensureBroadcasterStarted() {
+        if (broadcasterThread != null && broadcasterThread.isAlive()) {
+            return;
+        }
+        synchronized (broadcasterStartLock) {
+            if (broadcasterThread != null && broadcasterThread.isAlive()) {
+                return;
+            }
+            Thread t = new Thread(this::runBroadcaster, "log-broadcast");
+            t.setDaemon(true);
+            t.start();
+            broadcasterThread = t;
+        }
     }
 
     /**
@@ -149,6 +250,8 @@ public class LogBuffer implements AutoCloseable {
             if (added) {
                 subscriberTimestamps.put(subscriber, System.currentTimeMillis());
             }
+            // 懒启动单写者投递线程：有订阅者才有投递需求；线程守护，无订阅者时本就不会启动
+            ensureBroadcasterStarted();
         }
     }
 
@@ -174,6 +277,17 @@ public class LogBuffer implements AutoCloseable {
     @Override
     public void close() {
         if (closed.compareAndSet(false, true)) {
+            // 先唤醒并停止投递线程（若已懒启动），避免它在关闭过程中继续 send
+            deliverySignal.release();
+            Thread t = broadcasterThread;
+            if (t != null) {
+                t.interrupt(); // 解除投递线程可能在 subscriber.send 上的阻塞
+                try {
+                    t.join(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             for (LogSubscriber subscriber : subscribers) {
                 try {
                     subscriber.close();
