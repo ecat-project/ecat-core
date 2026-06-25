@@ -19,6 +19,9 @@ package com.ecat.core.ConfigFlow;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.ConfigEntry.SourceType;
+import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.Bus.BusTopic;
+import com.ecat.core.Bus.NotificationEvent;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Integration.IntegrationRegistry;
@@ -50,6 +53,12 @@ public class ConfigFlowService {
      * 流程过期时间（毫秒）：30 分钟
      */
     private static final long FLOW_EXPIRATION_MS = 30 * 60 * 1000;
+
+    /**
+     * 待处理 discovery（pending）容量上限：防止异常/恶意发现源刷爆内存。
+     * 超出则拒绝新发现入列，等用户处理（添加/忽略）腾位后再放行。
+     */
+    private static final int PENDING_DISCOVERY_LIMIT = 100;
 
     /**
      * 流程实例包装类
@@ -457,9 +466,24 @@ public class ConfigFlowService {
             throw new ConfigFlowException("ConfigEntryRegistry 未初始化，core 未就绪（owner 可重试）");
         }
 
-        // Layer2 matching（R12）：同 (coordinate, source, payload) 活跃 flow 去重
-        if (flowRegistry.hasActiveFlowWithDiscoveryPayload(coordinate, source, payload)) {
-            throw new ConfigFlowException("已有同 (coordinate, " + source + ", payload) 的活跃 flow，拒绝重复创建: " + coordinate);
+        // pending 容量上限（防泛洪）：仅数 discovery 源待处理 flow（终态 flow 已从 registry 移除，留存即 SHOW_FORM 待处理）。
+        // 超出则拒绝新发现入列，等用户处理（添加/忽略）腾位后再放行。
+        long pending = flowRegistry.getActiveFlowSnapshots().stream()
+                .filter(s -> s.getFlow().getSourceType() != null
+                        && s.getFlow().getSourceType().isPayloadDiscoverySource())
+                .count();
+        if (pending >= PENDING_DISCOVERY_LIMIT) {
+            throw new ConfigFlowException("待处理发现已达上限（" + PENDING_DISCOVERY_LIMIT
+                    + "），请先处理现有发现后再触发新 discovery: " + coordinate);
+        }
+
+        // Layer2 matching（R12）：同 (coordinate, source, payload) 已有活跃 flow → 续期现有 flow 并返回
+        // （不重建 flow、不重发提示）。续期由 getStatus 内部 getActiveFlow 的 touch 完成（刷新 30min 过期）。
+        // 语义：重复广播（如 zeroconf 周期 reannounce）= 设备仍在线 → 续期保留；设备消失 → 30min 无续期自动清除。
+        String existingFlowId = flowRegistry.findDiscoveryFlowId(coordinate, source, payload);
+        if (existingFlowId != null) {
+            log.info("R12 去重命中，续期现有 discovery flow: flowId={}, coordinate={}", existingFlowId, coordinate);
+            return getStatus(existingFlowId);
         }
 
         AbstractConfigFlow flow = flowRegistry.createFlow(coordinate);
@@ -475,7 +499,106 @@ public class ConfigFlowService {
         flow.setSourceType(source);
         flow.setDiscoveryPayload(payload);
         log.info("触发 discovery: flowId={}, coordinate={}, source={}", flow.getFlowId(), coordinate, source);
-        return drive(flow, flow.startStepId(), null);   // source=discovery → startStepId=discoveryStepId
+        ConfigFlowInstance instance = drive(flow, flow.startStepId(), null);
+        notifyDiscoveryIfPending(flow, instance);   // 落 SHOW_FORM 时发 actionable 提示（前端实时收到）
+        return instance;
+    }
+
+    // ==================== Discovery flow 暴露（前端"待处理发现"列表）====================
+
+    /**
+     * 列出所有"待用户处理"的 discovery flow（只读快照，对外 DTO）。
+     * <p>遍历 active flow，过滤 {@link SourceType#isPayloadDiscoverySource()} 的非终态 flow
+     * （终态 ABORT/CREATE_ENTRY 已从 registry 移除，故留存即待处理 SHOW_FORM）。
+     * <p><b>不调</b> {@code getStatus()}（会重跑步骤）；直接从 {@code FlowContext} 读字段构造 {@link DiscoveryFlowInfo}。
+     * 普适 IMPORT_FLOW/ZEROCONF/MQTT 三源——前端据 source 区分展示，据 flowId 进向导。
+     *
+     * @return 待处理 discovery flow 快照列表（空列表若无）
+     */
+    public List<DiscoveryFlowInfo> listDiscoveryFlows() {
+        ConfigFlowRegistry flowRegistry = core.getFlowRegistry();
+        if (flowRegistry == null) {
+            return Collections.emptyList();
+        }
+        List<DiscoveryFlowInfo> list = new ArrayList<>();
+        for (ConfigFlowRegistry.ActiveFlowSnapshot snap : flowRegistry.getActiveFlowSnapshots()) {
+            AbstractConfigFlow flow = snap.getFlow();
+            SourceType st = flow.getSourceType();
+            if (st == null || !st.isPayloadDiscoverySource()) {
+                continue;   // 仅 discovery 源
+            }
+            FlowContext ctx = flow.getContext();
+            String coordinate = ctx.getCoordinate();
+            list.add(new DiscoveryFlowInfo(
+                    snap.getFlowId(),
+                    st.name(),
+                    coordinate,
+                    resolveIntegrationName(coordinate),
+                    resolveDiscoveryTitle(ctx, coordinate),
+                    ctx.getEntryUniqueId(),
+                    ctx.getCurrentStep(),
+                    snap.getLastUpdateTime()));
+        }
+        return list;
+    }
+
+    /** discovery 标题：优先 entryData.name，否则 coordinate 兜底。 */
+    private String resolveDiscoveryTitle(FlowContext ctx, String coordinate) {
+        Map<String, Object> entryData = ctx.getEntryData();
+        if (entryData != null) {
+            Object name = entryData.get("name");
+            if (name != null && !name.toString().isEmpty()) {
+                return name.toString();
+            }
+        }
+        return coordinate;
+    }
+
+    /** 集成显示名（查不到则回退 coordinate）；遍历查询容错——单集成异常不影响整列表。 */
+    private String resolveIntegrationName(String coordinate) {
+        if (coordinate == null || coordinate.isEmpty()) {
+            return null;
+        }
+        try {
+            IntegrationBase integration = integrationRegistry.getIntegration(coordinate);
+            return integration != null ? integration.getName() : coordinate;
+        } catch (RuntimeException e) {
+            log.warn("listDiscoveryFlows 解析集成名失败，回退 coordinate: {}", coordinate, e);
+            return coordinate;
+        }
+    }
+
+    /**
+     * discovery flow 落 SHOW_FORM（待用户处理）时发 actionable notification，
+     * 让前端实时收到"发现新设备"提示 + flowId（点击进向导）。
+     * <p>仅 SHOW_FORM 发（ABORT 去重/CREATE_ENTRY 已完成不发）；去重规则保证同 uniqueId 不重复建 flow → 不重复通知。
+     * bus 未就绪则跳过（discovery 本身不受影响，仅无前端提示）。
+     * <p>action 用强类型 {@link DiscoveryNotificationAction}（非 Map 透传）——消费方有类型保障。
+     */
+    private void notifyDiscoveryIfPending(AbstractConfigFlow flow, ConfigFlowInstance instance) {
+        if (instance == null || instance.getResult() == null) {
+            return;
+        }
+        if (instance.getResult().getType() != ConfigFlowResult.ResultType.SHOW_FORM) {
+            return;   // 仅待处理（SHOW_FORM）发；ABORT(去重)/CREATE_ENTRY(已完成)不发
+        }
+        BusRegistry bus = core.getBusRegistry();
+        if (bus == null) {
+            log.debug("BusRegistry 未就绪，discovery 提示未发（flow 仍正常）: flowId={}", flow.getFlowId());
+            return;
+        }
+        FlowContext ctx = flow.getContext();
+        String title = resolveDiscoveryTitle(ctx, ctx.getCoordinate());
+        // sourceType 在 startDiscoveryFlow 中已 Objects.requireNonNull 保证非 null（discovery flow 必有源）
+        DiscoveryNotificationAction action = new DiscoveryNotificationAction(
+                flow.getFlowId(),
+                flow.getSourceType().name(),
+                ctx.getCoordinate(),
+                ctx.getEntryUniqueId(),
+                title);
+        bus.publish(BusTopic.NOTIFICATION.getTopicName(),
+                new NotificationEvent("INFO", "discovery", "发现新设备：" + title, action));
+        log.info("已发送 discovery 提示: flowId={}, coordinate={}", flow.getFlowId(), ctx.getCoordinate());
     }
 
     // ==================== 终态结果持久化（CREATE_ENTRY / REMOVE_ENTRY 统一在 service）====================

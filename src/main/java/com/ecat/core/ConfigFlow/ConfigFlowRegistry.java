@@ -77,6 +77,35 @@ public class ConfigFlowRegistry {
         }
     }
 
+    /**
+     * Active flow 只读快照（不 touch、不暴露内部 map 引用）。
+     * <p>供 {@code listDiscoveryFlows} 等遍历查询——遍历**不**更新活跃时间，
+     * 避免查询本身刷新 lastUpdateTime 从而干扰过期判断（{@link #getActiveFlow} 会 touch）。
+     */
+    public static final class ActiveFlowSnapshot {
+        private final String flowId;
+        private final AbstractConfigFlow flow;
+        private final long lastUpdateTime;
+
+        ActiveFlowSnapshot(String flowId, AbstractConfigFlow flow, long lastUpdateTime) {
+            this.flowId = flowId;
+            this.flow = flow;
+            this.lastUpdateTime = lastUpdateTime;
+        }
+
+        public String getFlowId() {
+            return flowId;
+        }
+
+        public AbstractConfigFlow getFlow() {
+            return flow;
+        }
+
+        public long getLastUpdateTime() {
+            return lastUpdateTime;
+        }
+    }
+
     // ========== Flow 注册 ==========
 
     /**
@@ -194,6 +223,26 @@ public class ConfigFlowRegistry {
     }
 
     /**
+     * Layer2 matching-flow 查询（R12 续期用）：返回同 (coordinate, source, discoveryPayload) 的活跃 flow 的 flowId。
+     * <p>与 {@link #hasActiveFlowWithDiscoveryPayload} 同一套三元组匹配，但返回 flowId 供调用方续期（经
+     * {@code ConfigFlowService.getStatus} 内部的 {@link #getActiveFlow} 触发 touch）。<b>本方法不 touch</b>——
+     * 仅查询，避免"查找即续期"掩盖过期判断；续期由调用方显式完成。
+     *
+     * @return 命中 flow 的 flowId；无则 null
+     */
+    public String findDiscoveryFlowId(String coordinate, SourceType source, Object payload) {
+        for (Map.Entry<String, TrackedFlow> e : trackedFlows.entrySet()) {
+            AbstractConfigFlow f = e.getValue().flow;
+            if (source == f.getSourceType()
+                    && Objects.equals(coordinate, f.getContext().getCoordinate())
+                    && Objects.equals(payload, f.getDiscoveryPayload())) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
      * 正常完成 flow（CREATE_ENTRY / UPDATE_ENTRY / REMOVE_ENTRY）
      */
     public void finishActiveFlow(String flowId) {
@@ -227,6 +276,22 @@ public class ConfigFlowRegistry {
      */
     public int getActiveFlowCount() {
         return trackedFlows.size();
+    }
+
+    /**
+     * 列出所有 active flow 的只读快照（**不 touch 活跃时间**，不影响过期判断）。
+     * <p>供 {@code ConfigFlowService.listDiscoveryFlows} 等遍历查询使用——
+     * 调用方不应通过返回的 {@link AbstractConfigFlow} 修改状态（仅供读取 context 字段构造快照 DTO）。
+     *
+     * @return 快照列表（副本，遍历安全）
+     */
+    public List<ActiveFlowSnapshot> getActiveFlowSnapshots() {
+        List<ActiveFlowSnapshot> list = new ArrayList<>();
+        for (Map.Entry<String, TrackedFlow> e : trackedFlows.entrySet()) {
+            TrackedFlow t = e.getValue();
+            list.add(new ActiveFlowSnapshot(e.getKey(), t.flow, t.lastUpdateTime));
+        }
+        return list;
     }
 
     /**

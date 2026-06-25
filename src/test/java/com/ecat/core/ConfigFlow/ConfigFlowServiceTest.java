@@ -16,6 +16,10 @@
 
 package com.ecat.core.ConfigFlow;
 
+import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.Bus.BusTopic;
+import com.ecat.core.Bus.NotificationAction;
+import com.ecat.core.Bus.NotificationEvent;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.ConfigEntry.SourceType;
@@ -27,6 +31,7 @@ import com.ecat.core.Task.TaskManager;
 
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -96,6 +101,8 @@ public class ConfigFlowServiceTest {
         // cleanupExpiredFlows / abortAllActiveFlows 默认返回 0 / doNothing
         when(mockFlowRegistry.cleanupExpiredFlows(anyLong())).thenReturn(0);
         doNothing().when(mockFlowRegistry).abortAllActiveFlows();
+        // pending 容量检查用：默认无待处理 flow（各测试可覆盖）
+        when(mockFlowRegistry.getActiveFlowSnapshots()).thenReturn(new ArrayList<>());
 
         // 创建实际的测试 Provider
         testProvider = new TestConfigFlowProvider();
@@ -212,20 +219,64 @@ public class ConfigFlowServiceTest {
     }
 
     @Test
-    public void testStartDiscoveryFlow_Layer2Duplicate() {
+    public void testStartDiscoveryFlow_R12RenewsExistingFlow() {
+        // R12 命中(同 coordinate+source+payload 已有活跃 flow)→ 续期现有 flow 并返回,不重建、不重发提示。
+        // 语义:重复广播=设备仍在线→续期保留;设备消失→30min 无续期自动清除。
         String coordinate = "com.ecat.integration:zeroconf-device";
         ConfigEntryRegistry mockEntryRegistry = mock(ConfigEntryRegistry.class);
+        BusRegistry mockBus = mock(BusRegistry.class);
         when(mockCore.getEntryRegistry()).thenReturn(mockEntryRegistry);
-        // Layer2 命中：已有同 (coordinate, ZEROCONF, payload) 活跃 flow
-        when(mockFlowRegistry.hasActiveFlowWithDiscoveryPayload(eq(coordinate), eq(SourceType.ZEROCONF), any()))
-                .thenReturn(true);
+        when(mockCore.getBusRegistry()).thenReturn(mockBus);
+
+        // 已存在的 discovery flow(findDiscoveryFlowId 命中它)
+        final AbstractConfigFlow existingFlow = new AbstractConfigFlow() {{
+            registerStepDiscovery(SourceType.ZEROCONF,
+                    (payload, ctx) -> ConfigFlowResult.showForm("probe", new ConfigSchema(), new HashMap<>(), ctx));
+        }};
+        existingFlow.getContext().setCoordinate(coordinate);
+        existingFlow.setSourceType(SourceType.ZEROCONF);
+        String existingFlowId = existingFlow.getFlowId();
+        when(mockFlowRegistry.findDiscoveryFlowId(eq(coordinate), eq(SourceType.ZEROCONF), any()))
+                .thenReturn(existingFlowId);
+        // getStatus 续期链路:getActiveFlow(touch 续期 30min)+ getStatus(重跑当前步拿 SHOW_FORM)
+        when(mockFlowRegistry.getActiveFlow(existingFlowId)).thenReturn(existingFlow);
+        when(mockFlowRegistry.getStatus(existingFlowId)).thenReturn(
+                ConfigFlowResult.showForm("probe", new ConfigSchema(), new HashMap<>(), existingFlow.getContext()));
+
+        ConfigFlowService.ConfigFlowInstance instance = service.startDiscoveryFlow(coordinate, SourceType.ZEROCONF, "dup-payload");
+
+        assertEquals("R12 命中应返回现有 flowId(续期,非新建)", existingFlowId, instance.getFlowId());
+        verify(mockFlowRegistry, never()).createFlow(any());               // 不建新 flow
+        verify(mockFlowRegistry, times(1)).getActiveFlow(existingFlowId);   // getStatus 经 getActiveFlow touch 续期
+        verify(mockBus, never()).publish(anyString(), any());               // R12 命中不重发 discovery 提示
+    }
+
+    @Test
+    public void testStartDiscoveryFlow_PendingLimitRejects() {
+        // pending 容量上限(100):满则拒绝新发现入列,不建 flow(防泛洪)。
+        String coordinate = "com.ecat.integration:flood";
+        ConfigEntryRegistry mockEntryRegistry = mock(ConfigEntryRegistry.class);
+        when(mockCore.getEntryRegistry()).thenReturn(mockEntryRegistry);
+        // 灌满 100 个 discovery pending 快照(同一 IMPORT_FLOW flow × 100,filter count=100)
+        AbstractConfigFlow discFlow = new AbstractConfigFlow() {{
+            registerStepDiscovery(SourceType.IMPORT_FLOW,
+                    (payload, ctx) -> ConfigFlowResult.showForm("c", new ConfigSchema(), new HashMap<>(), ctx));
+        }};
+        discFlow.setSourceType(SourceType.IMPORT_FLOW);
+        List<ConfigFlowRegistry.ActiveFlowSnapshot> full = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            full.add(new ConfigFlowRegistry.ActiveFlowSnapshot("flow-flood-" + i, discFlow, 1000L));
+        }
+        when(mockFlowRegistry.getActiveFlowSnapshots()).thenReturn(full);
 
         try {
-            service.startDiscoveryFlow(coordinate, SourceType.ZEROCONF, "dup-payload");
-            fail("Layer2 命中应抛 ConfigFlowException");
+            service.startDiscoveryFlow(coordinate, SourceType.IMPORT_FLOW,
+                    new ImportFlowPayload(coordinate, 1, "m|s|n"));
+            fail("pending 满(100)应抛 ConfigFlowException");
         } catch (ConfigFlowException e) {
-            assertTrue("异常消息应提示拒绝重复创建", e.getMessage().contains("拒绝重复创建"));
+            assertTrue("异常消息应提示容量上限", e.getMessage().contains("上限"));
         }
+        verify(mockFlowRegistry, never()).createFlow(any());   // 满则拒绝,不建 flow
     }
 
     @Test
@@ -317,6 +368,122 @@ public class ConfigFlowServiceTest {
         assertTrue("应包含 test-provider", providers.containsKey("com.ecat.integration:test-provider"));
     }
 
+    // ========== listDiscoveryFlows() 测试（待处理发现 DTO 暴露）==========
+
+    @Test
+    public void testListDiscoveryFlows_FiltersPayloadDiscoverySourcesOnly() {
+        // 待处理 IMPORT_FLOW flow（SHOW_FORM，sourceType=IMPORT_FLOW）
+        final AbstractConfigFlow discFlow = new AbstractConfigFlow() {
+            {
+                registerStepDiscovery(SourceType.IMPORT_FLOW,
+                        (payload, ctx) -> ConfigFlowResult.showForm("confirm", new ConfigSchema(), new HashMap<>(), ctx));
+            }
+        };
+        discFlow.getContext().setCoordinate("com.ecat.integration:disc");
+        discFlow.setSourceType(SourceType.IMPORT_FLOW);
+        discFlow.getContext().setEntryUniqueId("uid-disc-001");
+        discFlow.getContext().setEntryData("name", "发现设备A");
+
+        // USER flow（非 discovery 源，应被过滤）
+        final AbstractConfigFlow userFlow = testProvider.createFlow();
+        userFlow.getContext().setCoordinate("com.ecat.integration:user");
+
+        when(mockFlowRegistry.getActiveFlowSnapshots()).thenReturn(Arrays.asList(
+                new ConfigFlowRegistry.ActiveFlowSnapshot("flow-disc", discFlow, 1000L),
+                new ConfigFlowRegistry.ActiveFlowSnapshot("flow-user", userFlow, 2000L)));
+
+        List<DiscoveryFlowInfo> list = service.listDiscoveryFlows();
+
+        assertEquals("仅 1 个 discovery flow（USER 被过滤）", 1, list.size());
+        DiscoveryFlowInfo info = list.get(0);
+        assertEquals("flowId", "flow-disc", info.getFlowId());
+        assertEquals("source", "IMPORT_FLOW", info.getSource());
+        assertEquals("coordinate", "com.ecat.integration:disc", info.getCoordinate());
+        assertEquals("uniqueId", "uid-disc-001", info.getUniqueId());
+        assertEquals("title 取 entryData.name", "发现设备A", info.getTitle());
+    }
+
+    @Test
+    public void testListDiscoveryFlows_EmptyWhenNoActiveFlow() {
+        when(mockFlowRegistry.getActiveFlowSnapshots()).thenReturn(new ArrayList<>());
+        assertTrue("无活跃 flow 返回空列表", service.listDiscoveryFlows().isEmpty());
+    }
+
+    @Test
+    public void testListDiscoveryFlows_EmptyWhenRegistryNull() {
+        when(mockCore.getFlowRegistry()).thenReturn(null);
+        // 重新构造 service 让 null 生效
+        ConfigFlowService svc = new ConfigFlowService(mockCore);
+        assertTrue("flowRegistry 为 null 返回空列表（不抛异常）", svc.listDiscoveryFlows().isEmpty());
+    }
+
+    // ========== notifyDiscoveryIfPending() 测试（落 SHOW_FORM 发强类型 action 通知）==========
+
+    @Test
+    public void testStartDiscoveryFlow_PublishesActionableNotificationOnShowForm() {
+        String coordinate = "com.ecat.integration:notify-provider";
+        final AbstractConfigFlow flow = new AbstractConfigFlow() {
+            {
+                registerStepDiscovery(SourceType.IMPORT_FLOW,
+                        (payload, ctx) -> {
+                            ctx.setEntryData("name", "新发现设备");
+                            ctx.setEntryUniqueId("uid-notify-001");
+                            return ConfigFlowResult.showForm("confirm", new ConfigSchema(), new HashMap<>(), ctx);
+                        });
+            }
+        };
+
+        ConfigEntryRegistry mockEntryRegistry = mock(ConfigEntryRegistry.class);
+        BusRegistry mockBus = mock(BusRegistry.class);
+        when(mockCore.getEntryRegistry()).thenReturn(mockEntryRegistry);
+        when(mockCore.getBusRegistry()).thenReturn(mockBus);
+        when(mockFlowRegistry.hasActiveFlowWithDiscoveryPayload(eq(coordinate), eq(SourceType.IMPORT_FLOW), any()))
+                .thenReturn(false);
+        when(mockFlowRegistry.createFlow(coordinate)).thenReturn(flow);
+
+        service.startDiscoveryFlow(coordinate, SourceType.IMPORT_FLOW,
+                new ImportFlowPayload(coordinate, 1, "model|SN|新发现设备"));
+
+        // 捕获 publish 的 NotificationEvent，断言其携带强类型 DiscoveryNotificationAction（非 Map）
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(mockBus).publish(eq(BusTopic.NOTIFICATION.getTopicName()), captor.capture());
+        Object published = captor.getValue();
+        assertTrue("应发布 NotificationEvent", published instanceof NotificationEvent);
+        NotificationEvent evt = (NotificationEvent) published;
+        NotificationAction action = evt.getAction();
+        assertNotNull("应携带 action", action);
+        assertTrue("action 应为强类型 DiscoveryNotificationAction", action instanceof DiscoveryNotificationAction);
+        DiscoveryNotificationAction da = (DiscoveryNotificationAction) action;
+        assertEquals("action.category", "discovery", da.getCategory());
+        assertEquals("action.flowId", flow.getFlowId(), da.getFlowId());
+        assertEquals("action.source", "IMPORT_FLOW", da.getSource());
+        assertEquals("action.coordinate", coordinate, da.getCoordinate());
+        assertEquals("action.uniqueId", "uid-notify-001", da.getUniqueId());
+        assertEquals("action.title", "新发现设备", da.getTitle());
+    }
+
+    @Test
+    public void testStartDiscoveryFlow_NoNotificationWhenBusNotReady() {
+        String coordinate = "com.ecat.integration:no-bus-provider";
+        final AbstractConfigFlow flow = new AbstractConfigFlow() {
+            {
+                registerStepDiscovery(SourceType.IMPORT_FLOW,
+                        (payload, ctx) -> ConfigFlowResult.showForm("confirm", new ConfigSchema(), new HashMap<>(), ctx));
+            }
+        };
+        ConfigEntryRegistry mockEntryRegistry = mock(ConfigEntryRegistry.class);
+        when(mockCore.getEntryRegistry()).thenReturn(mockEntryRegistry);
+        when(mockCore.getBusRegistry()).thenReturn(null);   // bus 未就绪
+        when(mockFlowRegistry.hasActiveFlowWithDiscoveryPayload(eq(coordinate), eq(SourceType.IMPORT_FLOW), any()))
+                .thenReturn(false);
+        when(mockFlowRegistry.createFlow(coordinate)).thenReturn(flow);
+
+        service.startDiscoveryFlow(coordinate, SourceType.IMPORT_FLOW,
+                new ImportFlowPayload(coordinate, 1, "m|s|n"));
+        // bus 为 null 时不发通知、不抛异常（flow 本身正常 SHOW_FORM）
+        // —— 这里无法 verify(null) ，仅断言流程未因 bus null 而抛异常（走到此行即通过）
+    }
+
     // ========== startFlow() 测试 ==========
 
     @Test
@@ -361,6 +528,7 @@ public class ConfigFlowServiceTest {
 
     // ========== submitStep() 测试 ==========
 
+    @SuppressWarnings("unchecked")
     @Test
     public void testSubmitStep_Success() {
         // 先启动流程
@@ -385,6 +553,7 @@ public class ConfigFlowServiceTest {
         assertEquals("flowId 应一致", flowId, instance.getFlowId());
     }
 
+    @SuppressWarnings("unchecked")
     @Test
     public void testSubmitStep_FlowNotFound() {
         when(mockFlowRegistry.submitStep(eq("non-existent-flow"), anyString(), any(Map.class)))
