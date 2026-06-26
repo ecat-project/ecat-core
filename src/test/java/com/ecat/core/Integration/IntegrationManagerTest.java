@@ -6,6 +6,9 @@ import com.ecat.core.State.StateManager;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
+import com.ecat.core.ConfigFlow.AbstractConfigFlow;
+import com.ecat.core.ConfigFlow.ConfigFlowRegistry;
+import com.ecat.core.Utils.LoadJarResult;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -174,7 +177,7 @@ public class IntegrationManagerTest {
         // 验证加载结果
         assertNotNull(loadedConfig);
         assertEquals("value1", loadedConfig.get("key1"));
-        Map nestedMap = (Map) loadedConfig.get("nested");
+        Map<?, ?> nestedMap = (Map<?, ?>) loadedConfig.get("nested");
         assertNotNull(nestedMap);
         assertEquals(123, nestedMap.get("key2"));
 
@@ -236,10 +239,10 @@ public class IntegrationManagerTest {
         assertEquals("newValue", config.get("existingKey"));
         
         // 测试嵌套属性
-        Map nested = new HashMap<>();
+        Map<String, Object> nested = new HashMap<>();
         config.put("nested", nested);
         integrationManager.setProperty(config, "nested.deepKey", "deepValue");
-        assertEquals("deepValue", ((Map) config.get("nested")).get("deepKey"));
+        assertEquals("deepValue", ((Map<?, ?>) config.get("nested")).get("deepKey"));
     }
     
     // 测试removeProperty方法 - 单级路径
@@ -277,7 +280,7 @@ public class IntegrationManagerTest {
         // 删除嵌套键
         boolean removed = integrationManager.removeProperty(config, "level1.level2.keyToRemove");
         assertTrue(removed);
-        assertNull(((Map)((Map)config.get("level1")).get("level2")).get("keyToRemove"));
+        assertNull(((Map<?, ?>)((Map<?, ?>)config.get("level1")).get("level2")).get("keyToRemove"));
         
         // 删除不存在的嵌套键
         removed = integrationManager.removeProperty(config, "level1.level2.nonexistent");
@@ -355,6 +358,7 @@ public class IntegrationManagerTest {
     /**
      * 测试 getInitialDependents() - 获取初始依赖者
      */
+    @SuppressWarnings("unchecked")
     @Test
     public void testGetInitialDependents() throws Exception {
         // 设置 initialDependencyGraph
@@ -377,6 +381,7 @@ public class IntegrationManagerTest {
     /**
      * 测试 getInitialDependents() - 无依赖者的情况
      */
+    @SuppressWarnings("unchecked")
     @Test
     public void testGetInitialDependents_NoDependents() throws Exception {
         // 设置空的 initialDependencyGraph
@@ -393,6 +398,7 @@ public class IntegrationManagerTest {
     /**
      * 测试 getInitialDependents() - 快照未保存的情况
      */
+    @SuppressWarnings("unchecked")
     @Test
     public void testGetInitialDependents_NoSnapshot() throws Exception {
         // 设置 initialDependencyGraph 为 null
@@ -673,5 +679,113 @@ public class IntegrationManagerTest {
 
         // 验证第二个集成 ready 为 true
         assertTrue("Normal integration should be ready", normalIntegration.isReady());
+    }
+
+    // ========== 运行时加载集成（loadSingleIntegration）相关测试 ==========
+
+    /**
+     * 验证 loadSingleIntegration 对「从未加载的集成」执行完整生命周期：
+     * instantiateIntegration → onLoad → integrationRegistry.register → registerConfigFlow → onInit → onStart。
+     *
+     * <p>背景：启动时 disabled 的集成没有实例；旧的 enableIntegration 只写 yml + 发事件，从不真正加载，
+     * 导致启用后无实例、无设备、ConfigFlow 不注册（向导页看不到），需重启才出现。
+     * 抽取 loadSingleIntegration 后必须保证完整生命周期被触发、ConfigFlow 被注册。
+     *
+     * <p>测试手法：子类覆盖 protected instantiateIntegration 缝隙跳过真实 JAR/ClassLoader 加载
+     * （真实多态，规避 Mockito spy 无法拦截 this 内部调用的问题）。
+     */
+    @Test
+    public void testLoadSingleIntegration_InvokesFullLifecycleAndRegisters() throws Exception {
+        final boolean[] onInitCalled = {false};
+        final boolean[] onStartCalled = {false};
+        final AbstractConfigFlow stubFlow = new AbstractConfigFlow() {};  // 无抽象方法，空实现即可
+        final IntegrationBase stubIntegration = new IntegrationBase() {
+            @Override public void onInit() { onInitCalled[0] = true; }
+            @Override public void onStart() { onStartCalled[0] = true; }
+            @Override public void onPause() {}
+            @Override public AbstractConfigFlow getConfigFlow() { return stubFlow; }
+        };
+
+        ConfigFlowRegistry flowRegistry = mock(ConfigFlowRegistry.class);
+        when(core.getFlowRegistry()).thenReturn(flowRegistry);
+
+        final LoadJarResult stubResult = new LoadJarResult(stubIntegration, mock(URLClassLoader.class));
+
+        // 子类覆盖 instantiateIntegration，跳过真实 jar 加载
+        IntegrationManager manager = new IntegrationManager(core, integrationRegistry, stateManager) {
+            @Override
+            protected LoadJarResult instantiateIntegration(IntegrationInfo info, List<IntegrationInfo> loadOrder) {
+                return stubResult;
+            }
+        };
+
+        IntegrationInfo info = new IntegrationInfo(
+            "integration-stub", false, null, true,
+            "com.test.Stub", "com.test", "1.0.0", null, null);
+
+        IntegrationBase result = (IntegrationBase) invokePrivateMethod(manager, "loadSingleIntegration", info);
+
+        assertSame("应返回加载得到的集成实例", stubIntegration, result);
+        assertTrue("onInit 必须被调用", onInitCalled[0]);
+        assertTrue("onStart 必须被调用", onStartCalled[0]);
+        verify(integrationRegistry).register(eq("com.test:integration-stub"), same(stubIntegration));
+        verify(flowRegistry).registerFlow(eq("com.test:integration-stub"), any(AbstractConfigFlow.class));
+    }
+
+    /**
+     * 验证 loadSingleIntegration 在实例化失败时向上抛出（不静默吞掉）。
+     * 这是严格模式的前提：enableIntegration/addIntegration 据此感知失败并回滚 yml 状态，
+     * 避免「加载失败但 yml 标 RUNNING」的僵尸态。
+     */
+    @Test
+    public void testLoadSingleIntegration_PropagatesInstantiateFailure() throws Exception {
+        IntegrationManager manager = new IntegrationManager(core, integrationRegistry, stateManager) {
+            @Override
+            protected LoadJarResult instantiateIntegration(IntegrationInfo info, List<IntegrationInfo> loadOrder) {
+                throw new RuntimeException("simulated jar load failure");
+            }
+        };
+        IntegrationInfo info = new IntegrationInfo(
+            "integration-stub", false, null, true,
+            "com.test.Stub", "com.test", "1.0.0", null, null);
+        try {
+            invokePrivateMethod(manager, "loadSingleIntegration", info);
+            fail("loadSingleIntegration 应向上抛出实例化异常");
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            assertNotNull(e.getCause());
+            assertTrue("异常原因应为模拟的加载失败", e.getCause() instanceof RuntimeException);
+            assertTrue(e.getCause().getMessage().contains("simulated jar load failure"));
+        }
+    }
+
+    /**
+     * 验证 updateInitialDependencySnapshotForAdded：运行时新加载的集成会成为其各依赖的新 dependent，
+     * 必须同步进 initialDependencyGraph 快照，否则后续 requiresClassLoaderHierarchyChange
+     * 判定会与实际依赖结构漂移（客户确认的第 2 点）。
+     */
+    @Test
+    public void testUpdateInitialDependencySnapshotForAdded_RecordsNewDependent() throws Exception {
+        // 初始快照：integration-serial 已被 saimosen 依赖
+        Map<String, List<String>> graph = new HashMap<>();
+        List<String> existingDependents = new ArrayList<>(Arrays.asList("com.ecat:integration-saimosen"));
+        graph.put("com.ecat:integration-serial", existingDependents);
+        setPrivateField(integrationManager, "initialDependencyGraph", graph);
+
+        // 新启用的 sailhero（coordinate=com.ecat:integration-sailhero）依赖 integration-serial
+        DependencyInfo depOnSerial = new DependencyInfo("integration-serial");
+        IntegrationInfo info = new IntegrationInfo(
+            "integration-sailhero", false, Arrays.asList(depOnSerial), true,
+            "x", "com.ecat", "2.0.0", null, null);
+
+        invokePrivateMethod(integrationManager, "updateInitialDependencySnapshotForAdded", info);
+
+        @SuppressWarnings("unchecked")
+        Map<String, List<String>> after = (Map<String, List<String>>) getPrivateField(integrationManager, "initialDependencyGraph");
+        assertNotNull(after);
+        assertTrue("serial 的 dependent 列表应存在", after.containsKey("com.ecat:integration-serial"));
+        assertTrue("应新增 sailhero 为 serial 的 dependent",
+            after.get("com.ecat:integration-serial").contains("com.ecat:integration-sailhero"));
+        assertTrue("原有的 saimosen dependent 不能丢失",
+            after.get("com.ecat:integration-serial").contains("com.ecat:integration-saimosen"));
     }
 }

@@ -44,6 +44,19 @@ public class IntegrationRegistry {
     }
 
     /**
+     * 注销集成实例
+     *
+     * <p>用于运行时加载失败的严格回滚：当 onLoad/register 之后、onInit/onStart 之前发生异常时，
+     * 避免半加载实例残留在注册表中（否则后续 getIntegration 会返回一个未完成生命周期的实例）。
+     *
+     * @param coordinate 集成的唯一标识 (groupId:artifactId)
+     * @return 被移除的集成实例，若不存在则返回 null
+     */
+    public IntegrationBase unregister(String coordinate) {
+        return registry.remove(coordinate);
+    }
+
+    /**
      * 根据坐标查找集成实例
      *
      * 支持两种格式：

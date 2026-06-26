@@ -82,6 +82,7 @@ public class IntegrationInfo {
      * 不委托给父 classloader，避免与父 classloader 中的版本冲突
      *
      * <p>配置来源：ecat-config.yml 的 isolated_packages 字段</p>
+     * !!!20260627:目前没有使用，最好不要使用，因为隔离加载可能导致类加载器冲突，除非精通隔离包的加载机制。
      */
     @Getter
     @Setter

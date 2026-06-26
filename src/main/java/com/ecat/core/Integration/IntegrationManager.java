@@ -50,6 +50,7 @@ import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -178,6 +179,245 @@ public class IntegrationManager {
             log.info("Registered config flow for: {} -> {}", coordinate, flow.getClass().getSimpleName());
         } else {
             log.debug("No config flow provided by: {}", coordinate);
+        }
+    }
+
+    // ==================== 运行时单集成加载（enable/add 共用）====================
+
+    /**
+     * 运行时加载单个集成（单参数便捷重载）。
+     *
+     * <p>应用场景：enableIntegration 启用一个「启动时 disabled、从未加载」的集成时，
+     * 需要就地完成与启动期等价的加载（实例化 + onLoad + register + registerConfigFlow + onInit + onStart）。
+     *
+     * <p>loadOrder 仅含自身即可——前提是已通过 requiresClassLoaderHierarchyChange=false 校验：
+     * 它保证该集成的每个直接依赖都是已发布 childClassLoader 的共享节点，
+     * findParentClassloader 会从 live registry 直接命中，无需 loadOrder 递归。
+     * 若 requiresClassLoaderHierarchyChange=true，调用方必须走 PENDING_ADDED/重启分支，不应进入此处。
+     *
+     * @param info 集成信息（groupId/artifactId/version/className/dependencies 齐全）
+     * @return 加载完成的 IntegrationBase 实例
+     */
+    private IntegrationBase loadSingleIntegration(IntegrationInfo info) throws Exception {
+        return loadSingleIntegration(info, Collections.singletonList(info));
+    }
+
+    /**
+     * 加载单个集成的完整生命周期：instantiateIntegration → onLoad → register → registerConfigFlow → onInit → onStart。
+     *
+     * <p>启动期与运行时共用此方法，差异仅在 loadOrder 范围：
+     * 启动期传入完整 loadOrder（含所有待加载集成，供 findParentClassloader 递归未注册的依赖链）；
+     * 运行时由 {@link #loadSingleIntegration(IntegrationInfo)} 传入仅含自身的列表。
+     *
+     * <p>严格模式：任意环节失败即向上抛出，由调用方（enable/add）负责回滚 yml 状态，
+     * 避免出现「yml 标 RUNNING 但无实例/无 flow」的僵尸态。
+     *
+     * @param info      集成信息
+     * @param loadOrder 用于 findParentClassloader 递归的 IntegrationInfo 列表
+     * @return 加载完成的 IntegrationBase 实例
+     */
+    private IntegrationBase loadSingleIntegration(IntegrationInfo info, List<IntegrationInfo> loadOrder) throws Exception {
+        LoadJarResult checkService = instantiateIntegration(info, loadOrder);
+        IntegrationBase integration = checkService.getIntegration();
+        IntegrationLoadOption loadOption = new IntegrationLoadOption(checkService.getClassLoader());
+        loadOption.setIntegrationInfo(info);
+
+        integration.onLoad(core, loadOption);
+        integrationRegistry.register(info.getCoordinate(), integration);
+        registerConfigFlow(info.getCoordinate(), integration);
+        integration.onInit();
+        integration.onStart();
+        return integration;
+    }
+
+    /**
+     * 物理加载：解析 JAR 路径、收集依赖 JAR、选择 ClassLoader、反射构造 IntegrationBase。
+     *
+     * <p>protected 以便单元测试通过子类覆盖此缝隙跳过真实 JAR 加载，仅验证生命周期编排。
+     *
+     * @param info      集成信息
+     * @param loadOrder 用于 ClassLoader 选择的 IntegrationInfo 列表
+     * @return LoadJarResult（IntegrationBase 实例 + 其 ClassLoader）
+     */
+    protected LoadJarResult instantiateIntegration(IntegrationInfo info, List<IntegrationInfo> loadOrder) throws Exception {
+        String groupId = info.getGroupId();
+        String artifactId = info.getArtifactId();
+        String version = info.getVersion();
+        String className = info.getClassName();
+
+        String localRepoPath = System.getProperty("user.home") + "/.m2/repository";
+        String jarPath = localRepoPath + "/" + groupId.replace('.', '/') + "/" + artifactId + "/" + version + "/" + artifactId + "-" + version + ".jar";
+        File jarFile = new File(jarPath);
+        if (!jarFile.exists()) {
+            throw new RuntimeException("JAR 文件 " + jarPath + " 不存在，请检查本地 Maven 仓库。");
+        }
+
+        // 收集依赖 JAR 路径并透传给 loadJar。
+        // 注意：MavenDependencyParser 会解析出部分无效路径（如 junit/null、未解析的 ${project.version} 测试依赖），
+        // loadJar 实际只从主 jarPath 解析嵌套 jar、不使用 depJarPath，因此这些无效路径必须容忍——
+        // 若在此抛异常会导致几乎所有集成加载失败（历史教训：此处不能做强校验）。
+        List<String> pathList = new ArrayList<>();
+        for (String djarpath : MavenDependencyParser.getDependencyJarPaths(jarPath)) {
+            pathList.add(djarpath);
+        }
+
+        URLClassLoader classLoader = selectClassLoader(info, loadOrder);
+        return loadJarUtils.loadJar(jarFile.getPath(), pathList.toArray(new String[0]), classLoader, className);
+    }
+
+    /**
+     * 选择集成的 ClassLoader（与启动期 loadIntegrations 内联逻辑一致）。
+     *
+     * <p>优先使用被依赖集成的 childClassLoader（findParentClassloader 在 live registry 中 BFS 查找）；
+     * 被依赖节点(isDepended) 与叶子节点走不同分支；最后按 isolatedPackages 配置包隔离层。
+     */
+    private URLClassLoader selectClassLoader(IntegrationInfo info, List<IntegrationInfo> loadOrder) throws IOException {
+        URLClassLoader classLoader = null;
+
+        URLClassLoader childClassLoader = findParentClassloader(loadOrder, integrationRegistry, info);
+
+        if (info.isDepended()) {
+            if (childClassLoader == null) {
+                // find a tree root classloader node, merge to ecat core classloader as child node
+                // Ecat Common Dependencies
+                // i.e integration-ecat-common
+                classLoader = loadJarUtils.getEcatCoreClassLoader();
+            } else {
+                if (childClassLoader.equals(loadJarUtils.getEcatCoreClassLoader())) {
+                    // Ecat Core Dependencies + Ecat Common Dependencies
+                    // i.e integration-ecat-core-ruoyi integration-modbus
+                    classLoader = loadJarUtils.getEcatDependentClassLoader();
+                } else {
+                    // method 1
+                    // find middle node between parent and other Ecat Dependent integration
+                    // i.e integration-env-data-manager
+                    // 适用于springboot被架的被依赖集成加载，因为引用关系被springboot的bean处理好了
+                    // 如果是一个父节点有多个依赖子节点，且子节点间存在相互依赖，并且被依赖的子节点还依赖第三方jar
+                    // 则需要抽取公共依赖jar到common或父节点下新建一个公共依赖集成，在此集成下再挂载子节点，确保依赖关系正确
+                    // classLoader = new CustomClassLoader(new URL[0], childClassLoader);
+
+                    // method 2
+                    // for common dependencies import using, this integration can be loaded by parent's childClassLoader
+                    // other leaf integration which depended this integration will be loaded by parent childClassLoader's CustomClassLoader
+                    // i.e integration-env-data-manager
+                    classLoader = childClassLoader;
+                }
+            }
+        } else {
+            // use parent's childClassLoader first
+            // if not found, then use the base class loader as parent class loader or directly using the base class loader
+            if (childClassLoader != null) {
+                if (childClassLoader.equals(loadJarUtils.getEcatCoreClassLoader())) {
+                    // find root classloader leaf node, but root classloader child node must be a trunk for design (like dependent classloader)
+                    // this mean this integration is a leaf node and parent don't have childClassLoader,
+                    // so change to dependent classloader leaf node
+                    // i.e integration-saimosen‘s childClassLoader is found by integration-ecat-common
+                    classLoader = new CustomClassLoader(new URL[0], loadJarUtils.getEcatDependentClassLoader());
+                } else {
+                    // find non root classloader leaf node
+                    // i.e env-device-manager's childClassLoader is found by integration-ecat-core-ruoyi
+                    // 为了让基于框架如ruoyi的集成内部Controller使用自己Integration内所有代码包括IntegrationBase子类代码，需要将此类场景的集成加载方式交给框架集成自己负责，
+                    // 比如springboot框架需要用LaunchedURLClassLoader来处理下属集成的class加载，其他框架不一定。
+                    // 因此parent需要控制返回的childClassLoader是LaunchedURLClassLoader还是new CustomClassLoader(new URL[0], launchedURLClassLoader);
+                    classLoader = childClassLoader;
+                }
+            } else {
+                // Single Integration without any depended integration, temporarily use the dependent classloader
+                // i.e integration-env-device-calibration
+                classLoader = loadJarUtils.getEcatDependentClassLoader();
+            }
+        }
+
+        // 递归查找被依赖集成loadOption是否有childClassloader
+        // TODO:注意这里只能串行执行无法并发，如果并发必须确保被依赖集成必须早于当前集成完成加载
+
+        // 隔离包配置：如果集成声明了 isolated_packages，在选定 classloader 外包装隔离层
+        classLoader = createIsolatedClassLoader(classLoader, info);
+        return classLoader;
+    }
+
+    /**
+     * 为运行时加载构造 IntegrationInfo：扫描 JAR 入口类 + 读取依赖信息 + 计算 isDepended。
+     *
+     * <p>镜像启动期构造：readPartialIntegrationInfoFromJar + 主配置字段（groupId/artifactId/version/className）。
+     * isDepended 复用 {@link #findDependents}（扫描其他已启用集成的 JAR 依赖），与启动期 getLoadOrder 的
+     * isDepended 计算（dependencyMap 中是否被任何集成依赖）语义一致。
+     *
+     * @param groupId    Maven groupId
+     * @param artifactId Maven artifactId
+     * @param version    Maven version
+     * @return 齐备的 IntegrationInfo
+     */
+    private IntegrationInfo buildIntegrationInfo(String groupId, String artifactId, String version) throws Exception {
+        String jarPath = getJarPath(groupId, artifactId, version);
+        File jarFile = new File(jarPath);
+        if (!jarFile.exists()) {
+            throw new RuntimeException("JAR 文件不存在: " + jarPath);
+        }
+
+        String className = JarDependencyLoader.scanIntegrationEntryClass(jarFile);
+        IntegrationInfo info = JarDependencyLoader.readPartialIntegrationInfoFromJar(jarFile);
+        info.setArtifactId(artifactId);
+        info.setGroupId(groupId);
+        info.setVersion(version);
+        info.setClassName(className);
+        info.setEnabled(true);
+        info.setDepended(!findDependents(info.getCoordinate()).isEmpty());
+        return info;
+    }
+
+    /**
+     * 运行时加载新集成后，将其作为新 dependent 同步进初始依赖快照。
+     *
+     * <p>否则 initialDependencyGraph 会与实际依赖结构漂移，导致后续 enable/remove 的
+     * requiresClassLoaderHierarchyChange 判定不准确。
+     *
+     * @param info 新加载集成的 IntegrationInfo（含其依赖列表）
+     */
+    private void updateInitialDependencySnapshotForAdded(IntegrationInfo info) {
+        if (initialDependencyGraph == null) {
+            initialDependencyGraph = new HashMap<>();
+        }
+        String coordinate = info.getCoordinate();
+        List<DependencyInfo> deps = info.getDependencyInfoList();
+        if (deps == null || deps.isEmpty()) {
+            return;
+        }
+        for (DependencyInfo dep : deps) {
+            String depCoordinate = dep.getCoordinate();
+            List<String> dependents = initialDependencyGraph.computeIfAbsent(depCoordinate, k -> new ArrayList<>());
+            if (!dependents.contains(coordinate)) {
+                dependents.add(coordinate);
+            }
+        }
+        log.info("运行时加载集成 {}，已更新初始依赖快照", coordinate);
+    }
+
+    /**
+     * 尽力回滚：卸载已部分加载的集成。
+     *
+     * <p>当 loadSingleIntegration 在 register/registerConfigFlow 之后、onInit/onStart 之前失败时调用，
+     * 清除半加载残留（注销实例 + 注销 flow + onPause）。二级异常被吞掉仅记日志，避免掩盖原始失败原因。
+     *
+     * @param coordinate 集成坐标
+     */
+    private void unloadIntegration(String coordinate) {
+        try {
+            IntegrationBase integration = integrationRegistry.getIntegration(coordinate);
+            if (integration != null) {
+                try {
+                    integration.onPause();
+                } catch (Exception pe) {
+                    log.warn("回滚 onPause 失败 {}: {}", coordinate, pe.getMessage());
+                }
+            }
+            integrationRegistry.unregister(coordinate);
+            ConfigFlowRegistry flowRegistry = getFlowRegistry();
+            if (flowRegistry != null) {
+                flowRegistry.unregisterFlow(coordinate);
+            }
+        } catch (Exception e) {
+            log.warn("回滚卸载集成 {} 失败: {}", coordinate, e.getMessage());
         }
     }
 
@@ -381,164 +621,14 @@ public class IntegrationManager {
 
         for (IntegrationInfo info : loadOrder) {
             if (info.isEnabled()) {
-                String className = info.getClassName();
-                String groupId = info.getGroupId();
-                String artifactId = info.getArtifactId();
-                String version = info.getVersion();
-
                 executorService.execute(() -> {
+                    // 启动期与运行时共用 loadSingleIntegration（ClassLoader 选择 + 实例化 + 完整生命周期）。
+                    // 启动期传入完整 loadOrder，供 findParentClassloader 递归未注册的依赖链。
+                    // 启动期容忍单个集成加载失败（仅记日志，不中断其他集成加载）。
                     try {
-                        // 构建本地 Maven 仓库中 JAR 文件的路径
-                        String localRepoPath = System.getProperty("user.home") + "/.m2/repository";
-                        String jarPath = localRepoPath + "/" + groupId.replace('.', '/') + "/" + artifactId + "/" + version + "/" + artifactId + "-" + version + ".jar";
-                        File jarFile = new File(jarPath);
-                        if (!jarFile.exists()) {
-                            throw new RuntimeException("JAR 文件 " + jarPath + " 不存在，请检查本地 Maven 仓库。");
-                        }
-
-                        ArrayList<URL> urlList = new ArrayList<>();
-                        urlList.add(jarFile.toURI().toURL());
-                        ArrayList<String> pathList = new ArrayList<>();
-                        
-                        List<String> dependencyJarPaths = MavenDependencyParser.getDependencyJarPaths(jarPath);
-                        for (String djarpath : dependencyJarPaths) {
-                            File dJarFile = new File(djarpath);
-                            if (!jarFile.exists()) {
-                                throw new RuntimeException("JAR 文件 " + jarPath + " 不存在，请检查本地 Maven 仓库。");
-                            }
-                            urlList.add(dJarFile.toURI().toURL());
-                            pathList.add(dJarFile.getPath());
-                            
-                            // loadJarUtils.loadJar(dJarFile.getPath(),restartClassLoader);
-                        }
-
-                        // ClassLoader classLoader =restartClassLoader;
-                        // ClassLoader classLoader = loadJarUtils.getBaseEcatClassLoader();
-                        // if(jarFile.getPath().indexOf("integration-mock-timer-tick") >=0){
-                        //     classLoader = null;
-                        // }
-                        // if(info.isDepended()){
-                        //     classLoader = null;
-                        // }
-                        // else{
-                        //     URLClassLoader childClassLoader = findParentClassloader(loadOrder, integrationRegistry, info);
-                        //     if(childClassLoader != null) {
-                        //         classLoader = childClassLoader;
-                        //     }
-                        // }
-                        
-                        // use parent's childClassLoader first
-                        // if not found, then use the base class loader as parent class loader or directly using the base class loader
-                        // URLClassLoader childClassLoader = findParentClassloader(loadOrder, integrationRegistry, info);
-                        // if(childClassLoader != null) {
-                        //     classLoader = childClassLoader;
-                        // }
-
-                        URLClassLoader classLoader = null;
-
-                        URLClassLoader childClassLoader = findParentClassloader(loadOrder, integrationRegistry, info);
-
-
-                        if(info.isDepended()){
-                            if(childClassLoader == null){
-                                // find a tree root classloader node, merge to ecat core classloader as child node
-                                // Ecat Common Dependencies
-                                // i.e integration-ecat-common
-                                classLoader = loadJarUtils.getEcatCoreClassLoader();
-                            }
-                            else{
-                                if(childClassLoader.equals(loadJarUtils.getEcatCoreClassLoader())){
-                                    // Ecat Core Dependencies + Ecat Common Dependencies
-                                    // i.e integration-ecat-core-ruoyi integration-modbus 
-                                    classLoader = loadJarUtils.getEcatDependentClassLoader();
-                                }
-                                else{
-                                    // method 1
-                                    // find middle node between parent and other Ecat Dependent integration
-                                    // i.e integration-env-data-manager
-                                    // 适用于springboot被架的被依赖集成加载，因为引用关系被springboot的bean处理好了
-                                    // 如果是一个父节点有多个依赖子节点，且子节点间存在相互依赖，并且被依赖的子节点还依赖第三方jar
-                                    // 则需要抽取公共依赖jar到common或父节点下新建一个公共依赖集成，在此集成下再挂载子节点，确保依赖关系正确
-                                    // classLoader = new CustomClassLoader(new URL[0], childClassLoader);
-
-
-
-                                    // method 2
-                                    // for common dependencies import using, this integration can be loaded by parent's childClassLoader
-                                    // other leaf integration which depended this integration will be loaded by parent childClassLoader's CustomClassLoader
-                                    // i.e integration-env-data-manager
-                                    classLoader = childClassLoader;
-                                    
-                                }
-                            }
-                        }
-                        else{
-                            // use parent's childClassLoader first
-                            // if not found, then use the base class loader as parent class loader or directly using the base class loader
-                            if(childClassLoader != null){
-                                if(childClassLoader.equals(loadJarUtils.getEcatCoreClassLoader())){
-                                    // find root classloader leaf node, but root classloader child node must be a trunk for design (like dependent classloader)
-                                    // this mean this integration is a leaf node and parent don't have childClassLoader,
-                                    // so change to dependent classloader leaf node
-                                    // i.e integration-saimosen‘s childClassLoader is found by integration-ecat-common
-                                    classLoader = new CustomClassLoader(new URL[0], loadJarUtils.getEcatDependentClassLoader());
-                                }
-                                else{
-                                    // find non root classloader leaf node
-                                    // i.e env-device-manager's childClassLoader is found by integration-ecat-core-ruoyi
-                                    // 为了让基于框架如ruoyi的集成内部Controller使用自己Integration内所有代码包括IntegrationBase子类代码，需要将此类场景的集成加载方式交给框架集成自己负责，
-                                    // 比如springboot框架需要用LaunchedURLClassLoader来处理下属集成的class加载，其他框架不一定。
-                                    // 因此parent需要控制返回的childClassLoader是LaunchedURLClassLoader还是new CustomClassLoader(new URL[0], launchedURLClassLoader);
-
-                                    classLoader = childClassLoader;
-                                }
-                            }
-                            else{
-                                // Single Integration without any depended integration, temporarily use the dependent classloader
-                                // i.e integration-env-device-calibration
-                                classLoader = loadJarUtils.getEcatDependentClassLoader();
-                            }
-                        }
-                        
-                        // 递归查找被依赖集成loadOption是否有childClassloader
-                        // TODO:注意这里只能串行执行无法并发，如果并发必须确保被依赖集成必须早于当前集成完成加载
-
-                        // 隔离包配置：如果集成声明了 isolated_packages，在选定 classloader 外包装隔离层
-                        classLoader = createIsolatedClassLoader(classLoader, info);
-
-                        LoadJarResult checkService = loadJarUtils.loadJar(jarFile.getPath(), pathList.toArray(new String[0]), classLoader, className);
-
-                        try {
-                            // LoadJarUtils.loadJar(jarFile.getPath(), restartClassLoader);
-                            // Class<?> clazz = restartClassLoader.loadClass(className);
-                            // System.out.println("MockIntegration 类加载器: " + clazz.getClassLoader());
-                            // Class<?> baseClass = restartClassLoader.loadClass("com.ecat.core.Integration.IntegrationBase");
-                            // System.out.println("IntegrationBase 类加载器: " + baseClass.getClassLoader());
-
-                            // Object checkService = clazz.getDeclaredConstructor().newInstance();
-                            IntegrationBase integration = checkService.getIntegration();
-                            IntegrationLoadOption loadOption = new IntegrationLoadOption(checkService.getClassLoader());
-                            loadOption.setIntegrationInfo(info);
-
-                            try{
-                                integration.onLoad(core, loadOption);
-                                integrationRegistry.register(info.getCoordinate(), integration);
-                                // 注册 ConfigFlow
-                                registerConfigFlow(info.getCoordinate(), integration);
-                                integration.onInit();
-                                integration.onStart();
-
-                            }
-                            catch (Exception e) {
-                                log.error("集成 " + artifactId + " 加载失败: " + e.getMessage(), e);
-                            }
-
-                        } catch (Exception e) {
-                            log.error("集成加载异常: " + e.getMessage(), e);
-                        }
-
+                        loadSingleIntegration(info, loadOrder);
                     } catch (Exception e) {
-                        log.error(e.getStackTrace().toString());
+                        log.error("集成 " + info.getArtifactId() + " 加载失败: " + e.getMessage(), e);
                     }
                 });
 
@@ -890,7 +980,36 @@ public class IntegrationManager {
         } else {
             // 不需要类加载器调整时，根据 enabled 状态决定
             if (enabled) {
-                // 热加载 → RUNNING
+                // 严格模式：先热加载集成（实例化 + 完整生命周期），成功后再提交 yml 状态；
+                // 失败则回滚。修复「集成已成功加载」的假成功（旧逻辑只写 yml 不真正加载，
+                // 与 enableIntegration 是同一缺陷）。
+                try {
+                    IntegrationInfo info = buildIntegrationInfo(groupId, artifactId, version);
+                    loadSingleIntegration(info);
+                    loadExistingConfigEntriesForCoordinate(coordinate);
+                    updateInitialDependencySnapshotForAdded(info);
+                } catch (Exception e) {
+                    log.error("热加载集成失败: {} - {}", coordinate, e.getMessage(), e);
+                    unloadIntegration(coordinate);
+                    integrationConfig.put("enabled", false);
+                    integrationConfig.put("state", IntegrationState.STOPPED.name());
+                    saveIntegrationConfig(coordinate, integrationConfig);
+                    return IntegrationStatus.builder()
+                        .coordinate(coordinate)
+                        .state(IntegrationState.STOPPED)
+                        .message("热加载失败: " + e.getMessage())
+                        .dependencies(dependencies)
+                        .dependents(new ArrayList<>())
+                        .version(version)
+                        .isLocked(false)
+                        .canEnable(true)
+                        .canDisable(false)
+                        .canRemove(true)
+                        .canUpgrade(true)
+                        .build();
+                }
+
+                // 热加载成功 → RUNNING
                 integrationConfig.put("enabled", true);
                 integrationConfig.put("state", IntegrationState.RUNNING.name());
                 saveIntegrationConfig(coordinate, integrationConfig);
@@ -1069,29 +1188,57 @@ public class IntegrationManager {
                 .build();
         }
 
-        // 4. 正常启用流程
+        // 4. 正常启用流程（requiresClassLoaderHierarchyChange=false）
         Map<String, Map<String, Object>> config = loadIntegrationsConfig();
         Map<String, Object> integrations = config.getOrDefault("integrations", new HashMap<>());
         @SuppressWarnings("unchecked")
         Map<String, Object> integrationConfig = (Map<String, Object>) integrations.get(coordinate);
 
         if (integrationConfig != null) {
+            // 严格模式：先加载/启动集成，成功后再提交 yml 状态；失败则回滚，
+            // 避免「yml 标 RUNNING 但无实例/无 flow」的僵尸态（即本次修复的客户反馈缺陷）。
+            IntegrationBase integration = integrationRegistry.getIntegration(coordinate);
+            try {
+                if (integration == null) {
+                    // 启动时未加载（disabled at boot，无实例）→ 运行时完整加载：
+                    // 扫描 JAR + 选择 ClassLoader + 实例化 + onLoad/register/registerConfigFlow/onInit/onStart
+                    String groupId = (String) integrationConfig.get("groupId");
+                    String artifactId = (String) integrationConfig.get("artifactId");
+                    String version = (String) integrationConfig.get("version");
+                    IntegrationInfo info = buildIntegrationInfo(groupId, artifactId, version);
+                    loadSingleIntegration(info);
+                    // 实例已注册，加载其现有 ConfigEntries 并同步初始依赖快照
+                    loadExistingConfigEntriesForCoordinate(coordinate);
+                    updateInitialDependencySnapshotForAdded(info);
+                } else {
+                    // 已加载（disable→re-enable）→ 仅恢复运行
+                    integration.onStart();
+                    loadExistingConfigEntriesForCoordinate(coordinate);
+                }
+            } catch (Exception e) {
+                log.error("启用集成失败: {} - {}", coordinate, e.getMessage(), e);
+                // 回滚半加载残留，保持 disabled/STOPPED（不写 RUNNING、不发 ACTIVE 事件）
+                unloadIntegration(coordinate);
+                return IntegrationStatus.builder()
+                    .coordinate(coordinate)
+                    .state(IntegrationState.STOPPED)
+                    .message("启用失败: " + e.getMessage())
+                    .isLocked(false)
+                    .canEnable(true)
+                    .canDisable(false)
+                    .canRemove(true)
+                    .canUpgrade(true)
+                    .dependencies(currentStatus.getDependencies())
+                    .dependents(currentStatus.getDependents())
+                    .version(currentStatus.getVersion())
+                    .build();
+            }
+
+            // 加载/启动成功 → 提交 yml 状态
             integrationConfig.put("enabled", true);
             integrationConfig.put("state", IntegrationState.RUNNING.name());
             integrationConfig.put("update", new Date().toString());
             updateIntegrationsConfig(config);
-
-            // TODO: 调用 integration.onStart()
-            IntegrationBase integration = integrationRegistry.getIntegration(coordinate);
-            if (integration != null) {
-                try {
-                    integration.onStart();
-                    // 加载该集成的现有 ConfigEntries
-                    loadExistingConfigEntriesForCoordinate(coordinate);
-                } catch (Exception e) {
-                    log.error("启动集成失败: {} - {}", coordinate, e.getMessage());
-                }
-            }
         }
 
         // 发布集成生命周期事件：启用并已立即生效
