@@ -14,22 +14,22 @@
  * limitations under the License.
  */
 
-package com.ecat.core.Bus;
+package com.ecat.core.Bus.event;
 
 import java.time.Instant;
 
 /**
- * 异步操作执行信息（不可变快照）
+ * 异步操作执行事件（不可变快照）—— async.execution.* topic 的载荷。
  *
  * <p>在 Bus 事件中传递异步操作的状态信息。
  * 与 ecat-core-api 的 AsyncExecution 类解耦，
  * 仅包含事件消费者需要的字段。
  *
- * <p>ecat-core-api 的 AsyncExecution 提供 toInfo() 方法转换为此类。
+ * <p>ecat-core-api 的 AsyncExecution 提供 toInfo() 方法转换为此类（方法名保留，仅返回类型改为本类）。
  *
  * @author coffee
  */
-public class AsyncExecutionInfo {
+public class AsyncExecutionEvent implements BusPayload {
 
     /** 异步操作唯一标识，格式 "async-{序号}"，如 "async-1" */
     private final String asyncExecutionId;
@@ -108,7 +108,7 @@ public class AsyncExecutionInfo {
      * @param completedAt 完成时间（UTC，可为 null）
      * @throws IllegalArgumentException 如果 asyncExecutionId、operationType、targetPath、status、createdAt 为 null
      */
-    public AsyncExecutionInfo(String asyncExecutionId, String operationType, String targetPath,
+    public AsyncExecutionEvent(String asyncExecutionId, String operationType, String targetPath,
                               String clientId, Status status,
                               String errorMessage, Instant createdAt, Instant completedAt) {
         if (asyncExecutionId == null || operationType == null
@@ -184,7 +184,7 @@ public class AsyncExecutionInfo {
 
     @Override
     public String toString() {
-        return "AsyncExecutionInfo{id=" + asyncExecutionId + ", status=" + status +
+        return "AsyncExecutionEvent{id=" + asyncExecutionId + ", status=" + status +
                ", operationType=" + operationType + "}";
     }
 }

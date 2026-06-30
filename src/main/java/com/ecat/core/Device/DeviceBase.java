@@ -32,6 +32,7 @@ import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.I18n.I18nHelper;
 import com.ecat.core.I18n.I18nKeyPath;
 import com.ecat.core.Integration.IntegrationBase;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.Utils.LogFactory;
@@ -164,7 +165,11 @@ public abstract class DeviceBase implements DeviceControl {
     private DeviceStatus scanWorstAttributeStatus() {
         DeviceStatus worst = null;
         for (AttributeBase<?> attr : getAttrs().values()) {
-            AttributeStatus attrStatus = attr.getStatus();
+            // attr.getStatus() 已降为 protected：跨类经不可变 AttrState 读取。
+            // attr.getState() 在属性首次 updateValue 前为 null，按无状态跳过
+            // （保持原 getStatus() 返回 EMPTY 时的跳过语义）。
+            AttrState<?> attrState = attr.getState();
+            AttributeStatus attrStatus = attrState != null ? attrState.getStatus() : null;
             if (attrStatus != null && attrStatus != AttributeStatus.EMPTY) {
                 DeviceStatus ds = mapAttributeStatusToDeviceStatus(attrStatus);
                 if (ds != null) {
@@ -185,9 +190,13 @@ public abstract class DeviceBase implements DeviceControl {
      * @return true 如果至少有一个属性的 updateTime 在 60 秒内
      */
     private boolean hasRecentUpdate() {
-        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusSeconds(60);
+        // updateTime 已统一为 Instant（跨时区）；cutoff 用同一时钟比较。
+        java.time.Instant cutoff = java.time.Instant.now().minusSeconds(60);
         for (AttributeBase<?> attr : getAttrs().values()) {
-            java.time.LocalDateTime ut = attr.getUpdateTime();
+            // 跨类经不可变 AttrState 读 lastUpdated（公开访问，单次 volatile 读防撕裂）。
+            // attr.getState() 在属性从未 updateValue 时为 null，按未更新跳过。
+            AttrState<?> attrState = attr.getState();
+            java.time.Instant ut = attrState != null ? attrState.getLastUpdated() : null;
             if (ut != null && ut.isAfter(cutoff)) {
                 return true;
             }

@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.StringCommandAttribute;
@@ -171,10 +172,10 @@ public class LCommandAttribute extends StringCommandAttribute implements ILogicA
      * <p>Bound mode: reads the bindAttr's display value and updates the command value.
      * Standalone mode: no-op.
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
+    public void updateBindAttrValue(AttrState<?> sourceState) {
         if (bindAttr == null) return;
 
         String displayVal = bindAttr.getDisplayValue(bindAttr.getNativeUnit());

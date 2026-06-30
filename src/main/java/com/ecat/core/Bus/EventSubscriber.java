@@ -14,13 +14,18 @@
  * limitations under the License.
  */
 
-package com.ecat.core.Bus; 
+package com.ecat.core.Bus;
+
+import com.ecat.core.Bus.event.BusEvent;
+
 /**
- * 事件订阅者接口
- * 
+ * 事件订阅者接口——订阅者接收强类型 {@link BusEvent} 信封：
+ * 从 {@code event.getPayload()} 取领域载荷、{@code event.getType()} 取 topic、
+ * {@code event.getContext()} 取溯源。总线是同步扇出的哑管道（见 {@link BusRegistry}）。
+ *
  * @author coffee
  */
 public interface EventSubscriber {
 
-    void handleEvent(String topic, Object eventData);
+    void handleEvent(BusEvent<?> event);
 }

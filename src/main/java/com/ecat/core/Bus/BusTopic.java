@@ -16,9 +16,12 @@
 
 package com.ecat.core.Bus;
 
-import com.ecat.core.State.AttributeBase;
-
-import java.time.Instant;
+import com.ecat.core.Bus.event.AllLoadedEvent;
+import com.ecat.core.Bus.event.AsyncExecutionEvent;
+import com.ecat.core.Bus.event.ConfigEntryEvent;
+import com.ecat.core.Bus.event.DeviceDataChangedEvent;
+import com.ecat.core.Bus.event.IntegrationLifecycleEvent;
+import com.ecat.core.Bus.event.NotificationEvent;
 
 /**
  * Enum for topic management
@@ -26,12 +29,12 @@ import java.time.Instant;
  * @author coffee
  */
 public enum BusTopic {
-    DEVICE_DATA_UPDATE("device.data.update", AttributeBase.class),
-    INTEGRATIONS_ALL_LOADED("integration.all_loaded", Instant.class),
-    LOGIC_DEVICES_ALL_LOADED("logic_device.all_loaded", Instant.class),
+    DEVICE_DATA_UPDATE("device.data.update", DeviceDataChangedEvent.class),
+    INTEGRATIONS_ALL_LOADED("integration.all_loaded", AllLoadedEvent.class),
+    LOGIC_DEVICES_ALL_LOADED("logic_device.all_loaded", AllLoadedEvent.class),
     CONFIG_ENTRY_LIFECYCLE("config.entry.lifecycle", ConfigEntryEvent.class),
-    ASYNC_EXECUTION_COMPLETED("async.execution.completed", AsyncExecutionInfo.class),
-    ASYNC_EXECUTION_STATUS_CHANGED("async.execution.status_changed", AsyncExecutionInfo.class),
+    ASYNC_EXECUTION_COMPLETED("async.execution.completed", AsyncExecutionEvent.class),
+    ASYNC_EXECUTION_STATUS_CHANGED("async.execution.status_changed", AsyncExecutionEvent.class),
     INTEGRATION_LIFECYCLE("integration.lifecycle", IntegrationLifecycleEvent.class),
     NOTIFICATION("notification", NotificationEvent.class);
 

@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
 
@@ -63,14 +64,18 @@ public class LRunningStatusAttribute extends LStringSelectAttribute {
      * <p>Reads the physical attribute's status name and updates the logic attribute's value.
      * If the status name is not in the options list, the value is not updated.
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
+    public void updateBindAttrValue(AttrState<?> sourceState) {
         AttributeBase<?> bindAttr = getBindAttr();
         if (bindAttr == null) return;
 
-        AttributeStatus status = bindAttr.getStatus();
+        // bindAttr.getStatus() 已降为 protected：跨类经不可变 AttrState 读取。
+        // bindAttr.getState() 在首次 updateValue 前为 null，按无状态返回
+        // （保持原 getStatus() 返回 null/EMPTY 时的跳过语义）。
+        AttrState<?> bindState = bindAttr.getState();
+        AttributeStatus status = bindState != null ? bindState.getStatus() : null;
         if (status == null || status == AttributeStatus.EMPTY) return;
 
         String statusName = status.getName();

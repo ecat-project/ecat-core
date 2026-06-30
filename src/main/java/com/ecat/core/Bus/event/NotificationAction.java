@@ -7,7 +7,7 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
-package com.ecat.core.Bus;
+package com.ecat.core.Bus.event;
 
 /**
  * 类型化通知 action 负载标记接口——让 {@link NotificationEvent} 携带<strong>强类型</strong>、

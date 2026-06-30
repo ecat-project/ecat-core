@@ -19,7 +19,7 @@ package com.ecat.core.LogicDevice;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.LogicState.ILogicAttribute;
-import com.ecat.core.State.AttributeAbility;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.AttributeStatus;
@@ -105,7 +105,7 @@ public class LogicDeviceRegistryTest {
         }
 
         @Override
-        public void updateBindAttrValue(AttributeBase<?> updatedAttr) {}
+        public void updateBindAttrValue(AttrState<?> sourceState) {}
 
         @Override
         public void initAttributeID(String attrID) { this.attributeID = attrID; }
@@ -140,8 +140,6 @@ public class LogicDeviceRegistryTest {
         @Override public int getDisplayPrecision() { return 0; }
         @Override public boolean canValueChange() { return false; }
         @Override public boolean setStatus(AttributeStatus newStatus) { return false; }
-        @Override public AttributeStatus getStatus() { return AttributeStatus.EMPTY; }
-        @Override public Double getValue() { return null; }
         @Override public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue) { return CompletableFuture.completedFuture(false); }
         @Override public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue, UnitInfo fromUnit) { return CompletableFuture.completedFuture(false); }
         @Override public String getDisplayValue() { return null; }

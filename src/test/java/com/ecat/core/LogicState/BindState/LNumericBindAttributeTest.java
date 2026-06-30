@@ -16,12 +16,14 @@
 
 package com.ecat.core.LogicState.BindState;
 
+import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.LogicState.LNumericAttribute;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.AttributeType;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.NumericAttribute;
 import com.ecat.core.State.UnitInfo;
 import org.junit.Before;
@@ -62,6 +64,16 @@ public class LNumericBindAttributeTest {
         public void doUpdateValue(Double value, AttributeStatus status) {
             updateValue(value, status);
         }
+    }
+
+    /**
+     * 绑定一个返回固定 id 的 mock 设备，使 AttributeBase.updateValue 能构建非 null 的 AttrState
+     * （getState() 在未绑定设备或 device.getId() 为 null 时返回 null）。
+     */
+    private static void bindDevice(AttributeBase<?> attr) {
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        when(mockDevice.getId()).thenReturn("testDevice");
+        attr.setDevice(mockDevice);
     }
 
     // ========== 构造函数和基本属性测试 ==========
@@ -134,17 +146,22 @@ public class LNumericBindAttributeTest {
         // 创建一个 LNumericAttribute 包装物理 NumericAttribute
         NumericAttribute phyAttr = new NumericAttribute(
                 "source_power", mockAttrClass, null, null, 2, false, false);
+        bindDevice(phyAttr);
         phyAttr.updateValue(42.5, AttributeStatus.NORMAL);
-        LNumericAttribute sourceAttr = new TestableLNumericAttr(
-                "source_power", mockAttrClass, null, null, 2);
 
-        // LNumericAttribute 的 updateBindAttrValue 检查 instanceof LNumericAttribute
-        // 我们需要用一个真实的 LNumericAttribute（绑定模式）来测试
+        // 用一个真实的 LNumericAttribute（绑定模式）作为源逻辑属性。
+        // updateBindAttrValue 现按 AttrState 取值：源逻辑属性自身值非空时直接透传，
+        // 否则回退到其绑定物理属性的 state。这里通过 updateBindAttrValue 让源逻辑属性
+        // 从物理属性取到 42.5，自身 state 即携带该值。
         LNumericAttribute boundSource = new LNumericAttribute(phyAttr);
+        bindDevice(boundSource);
+        boundSource.updateBindAttrValue(phyAttr.getState());
 
-        attr.updateBindAttrValue(boundSource);
-        assertNotNull(attr.getValue());
-        assertEquals(42.5, attr.getValue(), 0.01);
+        attr.resolveSource(boundSource);
+        bindDevice(attr);
+        attr.updateBindAttrValue(boundSource.getState());
+        assertNotNull(attr.getState());
+        assertEquals(42.5, (Double) attr.getState().getValue(), 0.01);
     }
 
     @Test
@@ -152,12 +169,19 @@ public class LNumericBindAttributeTest {
         LNumericBindAttribute attr = new LNumericBindAttribute(
                 "power", mockAttrClass, null, null, 2, "dev1", "attr1");
 
-        // LNumericAttribute 绑定未设值的物理属性 - displayValue returns null
-        NumericAttribute phyAttr = new NumericAttribute(
-                "source", mockAttrClass, null, null, 2, false, false);
-        LNumericAttribute sourceAttr = new LNumericAttribute(phyAttr);
-        attr.updateBindAttrValue(sourceAttr);
-        assertNull(attr.getValue());
+        // 源逻辑属性自身值为 null（displayValue 为 null 的等价场景）。
+        // 用 standalone 的 TestableLNumericAttr 直接置 null 值：state 非 null、value 为 null，
+        // 且 getBindedAttrs() 为空 → updateBindAttrValue 无可取值，应跳过不更新。
+        TestableLNumericAttr sourceAttr = new TestableLNumericAttr(
+                "source", mockAttrClass, null, null, 2);
+        bindDevice(sourceAttr);
+        sourceAttr.doUpdateValue(null, AttributeStatus.NORMAL);
+
+        attr.resolveSource(sourceAttr);
+        bindDevice(attr);
+        attr.updateBindAttrValue(sourceAttr.getState());
+        AttrState<?> state = attr.getState();
+        assertNull(state == null ? null : state.getValue());
     }
 
     @Test
@@ -165,10 +189,18 @@ public class LNumericBindAttributeTest {
         LNumericBindAttribute attr = new LNumericBindAttribute(
                 "power", mockAttrClass, null, null, 2, "dev1", "attr1");
 
-        // 创建一个非 LNumericAttribute 的 AttributeBase
+        // 非 LNumericAttribute 类型的源：用一个 mock 的 ILogicAttribute 作为 resolvedSource，
+        // 传入任意非 null AttrState。生产端 instanceof LNumericAttribute 判别为 false → 不更新。
         AttributeBase<String> nonNumeric = createMockStringAttr("other", AttributeClass.TEXT);
-        attr.updateBindAttrValue(nonNumeric);
-        assertNull(attr.getValue());
+        bindDevice(nonNumeric);
+        nonNumeric.updateValue("ignored", AttributeStatus.NORMAL);
+        ILogicAttribute<?> nonNumericSource = mock(ILogicAttribute.class);
+
+        attr.resolveSource(nonNumericSource);
+        bindDevice(attr);
+        attr.updateBindAttrValue(nonNumeric.getState());
+        AttrState<?> state = attr.getState();
+        assertNull(state == null ? null : state.getValue());
     }
 
     // ========== setDisplayValue 测试 ==========

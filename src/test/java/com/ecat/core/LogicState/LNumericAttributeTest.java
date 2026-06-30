@@ -16,14 +16,15 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.AttributeType;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.NumericAttribute;
 import com.ecat.core.State.Unit.LiterFlowUnit;
 import com.ecat.core.State.Unit.PressureUnit;
-import com.ecat.core.State.UnitInfo;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
@@ -33,6 +34,7 @@ import java.util.concurrent.CompletableFuture;
 
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -50,6 +52,20 @@ public class LNumericAttributeTest {
         MockitoAnnotations.openMocks(this);
         when(mockAttrClass.getDisplayName()).thenReturn("TestAttrClass");
         when(mockAttrClass.isValidUnit(any())).thenReturn(true);
+    }
+
+    /**
+     * 绑定 mock 设备到属性，使 updateValue 后 getState() 返回非 null 不可变状态。
+     *
+     * <p>背景：状态封装重构后，跨包测试不能再直接读 protected getValue()/getStatus()，
+     * 须改走 getState()；而 getState() 仅在属性已绑定设备且设备 getId() 非空时才构建。
+     * mock 设备的 getCore() 返回 null —— publicState 在 try/catch 中安全吞掉 NPE，
+     * 不影响值已写入；这些属性均非 persistable，updateValue 内的持久化分支也被跳过。
+     */
+    private static void bindDevice(AttributeBase<?> attr) {
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        when(mockDevice.getId()).thenReturn("testDevice");
+        attr.setDevice(mockDevice);
     }
 
     // =====================================================================
@@ -71,6 +87,7 @@ public class LNumericAttributeTest {
                 "phy_pressure", mockAttrClass,
                 PressureUnit.PA, PressureUnit.PA,
                 1, false, true, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(PressureUnit.KPA);
@@ -80,7 +97,7 @@ public class LNumericAttributeTest {
         CompletableFuture<Boolean> result = logicAttr.setDisplayValue("5.0", PressureUnit.KPA);
 
         assertTrue(result.isDone());
-        assertEquals(5000.0, phyAttr.getValue(), 0.001);
+        assertEquals(5000.0, (Double) phyAttr.getState().getValue(), 0.001);
     }
 
     /**
@@ -93,6 +110,7 @@ public class LNumericAttributeTest {
                 "phy_pressure", mockAttrClass,
                 PressureUnit.KPA, PressureUnit.KPA,
                 2, false, true, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(PressureUnit.PA);
@@ -102,7 +120,7 @@ public class LNumericAttributeTest {
         CompletableFuture<Boolean> result = logicAttr.setDisplayValue("3000.0", PressureUnit.PA);
 
         assertTrue(result.isDone());
-        assertEquals(3.0, phyAttr.getValue(), 0.001);
+        assertEquals(3.0, (Double) phyAttr.getState().getValue(), 0.001);
     }
 
     /**
@@ -115,6 +133,7 @@ public class LNumericAttributeTest {
                 "phy_flow", mockAttrClass,
                 LiterFlowUnit.L_PER_HOUR, LiterFlowUnit.L_PER_HOUR,
                 2, false, true, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(LiterFlowUnit.L_PER_MINUTE);
@@ -124,7 +143,7 @@ public class LNumericAttributeTest {
         CompletableFuture<Boolean> result = logicAttr.setDisplayValue("0.5", LiterFlowUnit.L_PER_MINUTE);
 
         assertTrue(result.isDone());
-        assertEquals(30.0, phyAttr.getValue(), 0.01);
+        assertEquals(30.0, (Double) phyAttr.getState().getValue(), 0.01);
     }
 
     /**
@@ -136,6 +155,7 @@ public class LNumericAttributeTest {
                 "phy_pressure", mockAttrClass,
                 PressureUnit.KPA, PressureUnit.KPA,
                 1, false, true, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         // logic attr 也使用 KPA
@@ -144,7 +164,7 @@ public class LNumericAttributeTest {
         CompletableFuture<Boolean> result = logicAttr.setDisplayValue("5.0", PressureUnit.KPA);
 
         assertTrue(result.isDone());
-        assertEquals(5.0, phyAttr.getValue(), 0.001);
+        assertEquals(5.0, (Double) phyAttr.getState().getValue(), 0.001);
     }
 
     // =====================================================================
@@ -179,11 +199,12 @@ public class LNumericAttributeTest {
                 "threshold", mockAttrClass,
                 PressureUnit.KPA, PressureUnit.KPA, 2);
         attr.initValueChangeable(true);
+        bindDevice(attr);
 
         CompletableFuture<Boolean> result = attr.setDisplayValue("5.0", PressureUnit.KPA);
 
         assertTrue(result.isDone());
-        assertEquals(5.0, attr.getValue(), 0.001);
+        assertEquals(5.0, (Double) attr.getState().getValue(), 0.001);
     }
 
     // =====================================================================
@@ -199,15 +220,17 @@ public class LNumericAttributeTest {
                 "phy_pressure", mockAttrClass,
                 PressureUnit.PA, PressureUnit.PA,
                 1, false, false, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(PressureUnit.KPA);
+        bindDevice(logicAttr);
 
         phyAttr.updateValue(5000.0, AttributeStatus.NORMAL);
-        logicAttr.updateBindAttrValue(phyAttr);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
 
-        assertEquals(5.0, logicAttr.getValue(), 0.001);
-        assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
+        assertEquals(5.0, (Double) logicAttr.getState().getValue(), 0.001);
+        assertEquals(AttributeStatus.NORMAL, logicAttr.getState().getStatus());
     }
 
     /**
@@ -219,14 +242,16 @@ public class LNumericAttributeTest {
                 "phy_flow", mockAttrClass,
                 LiterFlowUnit.L_PER_HOUR, LiterFlowUnit.L_PER_HOUR,
                 2, false, false, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(LiterFlowUnit.L_PER_MINUTE);
+        bindDevice(logicAttr);
 
         phyAttr.updateValue(30.0, AttributeStatus.NORMAL);
-        logicAttr.updateBindAttrValue(phyAttr);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
 
-        assertEquals(0.5, logicAttr.getValue(), 0.01);
+        assertEquals(0.5, (Double) logicAttr.getState().getValue(), 0.01);
     }
 
     /**
@@ -238,14 +263,16 @@ public class LNumericAttributeTest {
                 "phy_pressure", mockAttrClass,
                 PressureUnit.KPA, PressureUnit.KPA,
                 1, false, false, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(PressureUnit.KPA);
+        bindDevice(logicAttr);
 
         phyAttr.updateValue(5.0, AttributeStatus.NORMAL);
-        logicAttr.updateBindAttrValue(phyAttr);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
 
-        assertEquals(5.0, logicAttr.getValue(), 0.001);
+        assertEquals(5.0, (Double) logicAttr.getState().getValue(), 0.001);
     }
 
     /**
@@ -257,14 +284,16 @@ public class LNumericAttributeTest {
                 "phy_pressure", mockAttrClass,
                 PressureUnit.PA, PressureUnit.PA,
                 1, false, false, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(PressureUnit.KPA);
+        bindDevice(logicAttr);
 
         phyAttr.updateValue(null, AttributeStatus.EMPTY);
-        logicAttr.updateBindAttrValue(phyAttr);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
 
-        assertNull(logicAttr.getValue());
+        assertNull(logicAttr.getState().getValue());
     }
 
     /**
@@ -277,8 +306,8 @@ public class LNumericAttributeTest {
                 PressureUnit.KPA, PressureUnit.KPA, 2);
 
         // 不会抛异常
-        attr.updateBindAttrValue(null);
-        assertNull(attr.getValue());
+        attr.updateBindAttrValue((AttrState<?>) null);
+        assertNull(attr.getState());
     }
 
     // =====================================================================
@@ -294,18 +323,20 @@ public class LNumericAttributeTest {
                 "phy_pressure", mockAttrClass,
                 PressureUnit.PA, PressureUnit.PA,
                 1, false, true, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(PressureUnit.KPA);
         logicAttr.initDisplayUnit(PressureUnit.KPA);
+        bindDevice(logicAttr);
 
         // Write: 5.0 kPa
         logicAttr.setDisplayValue("5.0", PressureUnit.KPA);
-        assertEquals(5000.0, phyAttr.getValue(), 0.001);
+        assertEquals(5000.0, (Double) phyAttr.getState().getValue(), 0.001);
 
         // Read: 物理属性 5000 Pa → 逻辑属性读回
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertEquals(5.0, logicAttr.getValue(), 0.001);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        assertEquals(5.0, (Double) logicAttr.getState().getValue(), 0.001);
     }
 
     /**
@@ -317,18 +348,20 @@ public class LNumericAttributeTest {
                 "phy_flow", mockAttrClass,
                 LiterFlowUnit.L_PER_HOUR, LiterFlowUnit.L_PER_HOUR,
                 2, false, true, null);
+        bindDevice(phyAttr);
 
         LNumericAttribute logicAttr = new LNumericAttribute(phyAttr);
         logicAttr.initNativeUnit(LiterFlowUnit.L_PER_MINUTE);
         logicAttr.initDisplayUnit(LiterFlowUnit.L_PER_MINUTE);
+        bindDevice(logicAttr);
 
         // Write: 0.5 L/min
         logicAttr.setDisplayValue("0.5", LiterFlowUnit.L_PER_MINUTE);
-        assertEquals(30.0, phyAttr.getValue(), 0.01);
+        assertEquals(30.0, (Double) phyAttr.getState().getValue(), 0.01);
 
         // Read: 30 L/h → 读回 L/min
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertEquals(0.5, logicAttr.getValue(), 0.01);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        assertEquals(0.5, (Double) logicAttr.getState().getValue(), 0.01);
     }
 
     // =====================================================================

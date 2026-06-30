@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.NumericAttribute;
@@ -159,10 +160,10 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
      * <p>Passthrough: reads the bindAttr's display value in this logic attribute's
      * native unit and parses it as a Double.
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
+    public void updateBindAttrValue(AttrState<?> sourceState) {
         if (bindAttr == null) return;
 
         String displayVal;
@@ -175,14 +176,14 @@ public class LNumericAttribute extends NumericAttribute implements ILogicAttribu
             displayVal = bindAttr.getDisplayValue(bindAttr.getNativeUnit());
         }
         if (displayVal == null) {
-            updateValue(null, updatedAttr.getStatus());
+            updateValue(null, sourceState.getStatus());
         } else {
             try {
                 Double newValue = Double.parseDouble(displayVal);
-                updateValue(newValue, updatedAttr.getStatus());
+                updateValue(newValue, sourceState.getStatus());
             } catch (NumberFormatException e) {
                 // If parsing fails, set null with the source status
-                updateValue(null, updatedAttr.getStatus());
+                updateValue(null, sourceState.getStatus());
             }
         }
     }

@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeAbility;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
@@ -55,13 +56,13 @@ public class ILogicAttributeTest {
         private int displayPrecision;
         private UnitInfo displayUnit;
         private final List<AttributeBase<?>> bindedAttrs = new ArrayList<>();
-        private AttributeBase<?> lastUpdatedAttr;
+        private AttrState<?> lastUpdatedState;
 
         // --- ILogicAttribute 方法 ---
 
         @Override
-        public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
-            this.lastUpdatedAttr = updatedAttr;
+        public void updateBindAttrValue(AttrState<?> sourceState) {
+            this.lastUpdatedState = sourceState;
         }
 
         @Override
@@ -144,16 +145,6 @@ public class ILogicAttributeTest {
         }
 
         @Override
-        public AttributeStatus getStatus() {
-            return AttributeStatus.EMPTY;
-        }
-
-        @Override
-        public Double getValue() {
-            return null;
-        }
-
-        @Override
         public CompletableFuture<Boolean> setDisplayValue(String newDisplayValue) {
             return CompletableFuture.completedFuture(false);
         }
@@ -213,8 +204,8 @@ public class ILogicAttributeTest {
             return displayUnit;
         }
 
-        public AttributeBase<?> getLastUpdatedAttr() {
-            return lastUpdatedAttr;
+        public AttrState<?> getLastUpdatedState() {
+            return lastUpdatedState;
         }
     }
 
@@ -290,8 +281,17 @@ public class ILogicAttributeTest {
             }
         };
 
-        attr.updateBindAttrValue(mockBase);
-        assertSame(mockBase, attr.getLastUpdatedAttr());
+        // updateBindAttrValue 现接收不可变 AttrState（不再传 AttributeBase 引用）。
+        // 构造一个最小 AttrState 模拟物理属性更新事件，验证 mock 记录了传入的状态。
+        AttrState<?> state = AttrState.builder()
+                .deviceId("testDevice")
+                .attrId(mockBase.getAttributeID())
+                .status(AttributeStatus.NORMAL)
+                .context(com.ecat.core.Bus.event.EventContext.root(
+                        com.ecat.core.Bus.event.EventContext.Source.DEVICE_POLL, null))
+                .build();
+        attr.updateBindAttrValue(state);
+        assertSame(state, attr.getLastUpdatedState());
     }
 
     @Test

@@ -16,16 +16,13 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.TimeAttribute;
 import com.ecat.core.State.UnitInfo;
 
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -58,9 +55,6 @@ import java.util.concurrent.CompletableFuture;
  * @author coffee
  */
 public class LTimeAttribute extends TimeAttribute implements ILogicAttribute<Instant> {
-
-    private static final DateTimeFormatter DISPLAY_FORMATTER =
-        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /** 绑定的物理 TimeAttribute；null 表示 standalone 模式 */
     private final TimeAttribute bindAttr;
@@ -111,17 +105,15 @@ public class LTimeAttribute extends TimeAttribute implements ILogicAttribute<Ins
     /**
      * 当绑定的物理时间属性值更新时，同步更新本逻辑属性的值。
      *
-     * @param updatedAttr 值已更新的物理属性
+     * @param sourceState 值已更新的物理属性状态（不可变 AttrState）
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
+    public void updateBindAttrValue(AttrState<?> sourceState) {
         if (bindAttr == null) return;
 
-        if (updatedAttr instanceof TimeAttribute) {
-            TimeAttribute source = (TimeAttribute) updatedAttr;
-            if (source.getValue() != null) {
-                updateValue(source.getValue());
-            }
+        Object rawValue = sourceState.getValue();
+        if (rawValue instanceof Instant) {
+            updateValue((Instant) rawValue);
         }
     }
 

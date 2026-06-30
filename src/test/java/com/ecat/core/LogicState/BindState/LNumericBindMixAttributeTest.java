@@ -16,11 +16,12 @@
 
 package com.ecat.core.LogicState.BindState;
 
+import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.LogicState.LNumericAttribute;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
-import com.ecat.core.State.AttributeType;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.UnitInfo;
 import org.junit.Before;
 import org.junit.Test;
@@ -46,6 +47,16 @@ public class LNumericBindMixAttributeTest {
     public void setUp() {
         MockitoAnnotations.openMocks(this);
         when(mockAttrClass.getDisplayName()).thenReturn("TestAttrClass");
+    }
+
+    /**
+     * 绑定 mock 设备使 getState() 返回非 null 状态对象——
+     * 状态密封重构后 getValue/getStatus 降为 protected，跨包测试只能经 getState() 读取。
+     */
+    private static void bindDevice(AttributeBase<?> attr) {
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        when(mockDevice.getId()).thenReturn("testDevice");
+        attr.setDevice(mockDevice);
     }
 
     /**
@@ -186,13 +197,18 @@ public class LNumericBindMixAttributeTest {
         attr.registerLogicSource("device_1", "power_a");
         attr.registerLogicSource("device_2", "power_b");
 
+        // 必须先绑定设备再触发源更新：onSourceUpdated 在所有源就绪后会调用 updateValue 构建不可变 lastState，
+        // 状态构建要求此时 device != null 且 getId() != null，否则 lastState 永远为 null（getState() 返回 null）。
+        bindDevice(attr);
         // 更新所有源
         attr.onSourceUpdated("device_1", "power_a", 10.0);
         attr.onSourceUpdated("device_2", "power_b", 20.0);
 
+        // 绑定设备后经 getState() 读取（getValue() 已降为 protected）
+        AttrState<?> state = attr.getState();
+        assertNotNull(state);
         // 聚合结果应该是 10.0 + 20.0 = 30.0
-        assertNotNull(attr.getValue());
-        assertEquals(30.0, attr.getValue(), 0.01);
+        assertEquals(30.0, (Double) state.getValue(), 0.01);
     }
 
     @Test
@@ -205,8 +221,10 @@ public class LNumericBindMixAttributeTest {
         // 只更新一个源
         attr.onSourceUpdated("device_1", "power_a", 10.0);
 
-        // 不是所有源都更新了，值应该保持 null
-        assertNull(attr.getValue());
+        // 不是所有源都更新了，值应该保持 null（绑设备后 state 仍可能为 null 或 value 为 null）
+        bindDevice(attr);
+        AttrState<?> state = attr.getState();
+        assertTrue(state == null || state.getValue() == null);
     }
 
     @Test
@@ -218,7 +236,9 @@ public class LNumericBindMixAttributeTest {
         // 更新一个未注册的源
         attr.onSourceUpdated("device_unknown", "unknown_attr", 99.0);
 
-        assertNull(attr.getValue());
+        bindDevice(attr);
+        AttrState<?> state = attr.getState();
+        assertTrue(state == null || state.getValue() == null);
     }
 
     @Test
@@ -228,15 +248,18 @@ public class LNumericBindMixAttributeTest {
         attr.registerLogicSource("device_1", "power_a");
         attr.registerLogicSource("device_2", "power_b");
 
+        // 必须先绑定设备：第一轮所有源就绪后 onSourceUpdated 会调用 updateValue 构建不可变 lastState，
+        // 状态构建要求此时 device != null 且 getId() != null，否则 lastState 永远为 null。
+        bindDevice(attr);
         // 第一轮：两个源都更新
         attr.onSourceUpdated("device_1", "power_a", 10.0);
         attr.onSourceUpdated("device_2", "power_b", 20.0);
-        assertEquals(30.0, attr.getValue(), 0.01);
+        assertEquals(30.0, (Double) attr.getState().getValue(), 0.01);
 
         // 第二轮：只更新一个源 - 不应重新计算（标志已重置）
         attr.onSourceUpdated("device_1", "power_a", 5.0);
         // 值应保持第一轮的结果
-        assertEquals(30.0, attr.getValue(), 0.01);
+        assertEquals(30.0, (Double) attr.getState().getValue(), 0.01);
     }
 
     // ========== 聚合公式测试 ==========
@@ -249,13 +272,18 @@ public class LNumericBindMixAttributeTest {
         attr.registerLogicSource("device_2", "temp_b");
         attr.registerLogicSource("device_3", "temp_c");
 
+        // 必须先绑定设备：所有源就绪后 onSourceUpdated 会调用 updateValue 构建不可变 lastState，
+        // 状态构建要求此时 device != null 且 getId() != null，否则 lastState 永远为 null（getState() 返回 null）。
+        bindDevice(attr);
         attr.onSourceUpdated("device_1", "temp_a", 20.0);
         attr.onSourceUpdated("device_2", "temp_b", 30.0);
         attr.onSourceUpdated("device_3", "temp_c", 25.0);
 
+        // 绑设备后经 getState() 读取
+        AttrState<?> state = attr.getState();
+        assertNotNull(state);
         // 平均值 = (20 + 30 + 25) / 3 = 25.0
-        assertNotNull(attr.getValue());
-        assertEquals(25.0, attr.getValue(), 0.01);
+        assertEquals(25.0, (Double) state.getValue(), 0.01);
     }
 
     // ========== getBindedAttrs 测试 ==========

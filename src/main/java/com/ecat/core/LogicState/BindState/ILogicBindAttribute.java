@@ -27,7 +27,7 @@ import com.ecat.core.LogicState.ILogicAttribute;
  *
  * <p>所有方法继承自 {@link ILogicAttribute}：
  * <ul>
- *   <li>{@link ILogicAttribute#updateBindAttrValue(com.ecat.core.State.AttributeBase)} -
+ *   <li>{@link ILogicAttribute#updateBindAttrValue(com.ecat.core.State.AttrState)} -
  *       物理源和逻辑源统一复用此方法进行值更新</li>
  *   <li>{@link ILogicAttribute#getBindedAttrs()} -
  *       用于 buildReverseIndex 构建反向索引</li>

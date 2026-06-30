@@ -21,7 +21,9 @@ import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.ConfigEntry.SourceType;
 import com.ecat.core.Bus.BusRegistry;
 import com.ecat.core.Bus.BusTopic;
-import com.ecat.core.Bus.NotificationEvent;
+import com.ecat.core.Bus.event.BusEvent;
+import com.ecat.core.Bus.event.EventContext;
+import com.ecat.core.Bus.event.NotificationEvent;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Integration.IntegrationRegistry;
@@ -596,8 +598,9 @@ public class ConfigFlowService {
                 ctx.getCoordinate(),
                 ctx.getEntryUniqueId(),
                 title);
-        bus.publish(BusTopic.NOTIFICATION.getTopicName(),
-                new NotificationEvent("INFO", "discovery", "发现新设备：" + title, action));
+        bus.publish(BusEvent.of(BusTopic.NOTIFICATION.getTopicName(),
+                new NotificationEvent("INFO", "discovery", "发现新设备：" + title, action),
+                EventContext.root(EventContext.Source.SYSTEM, null)));
         log.info("已发送 discovery 提示: flowId={}, coordinate={}", flow.getFlowId(), ctx.getCoordinate());
     }
 

@@ -18,6 +18,7 @@ package com.ecat.core.LogicState.BindState;
 
 import com.ecat.core.LogicState.ILogicAttribute;
 import com.ecat.core.LogicState.LNumericAttribute;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.UnitInfo;
@@ -128,23 +129,29 @@ public class LNumericBindAttribute extends LNumericAttribute
      * 默认实现：从源逻辑属性读取显示值并更新。
      * 子类可覆写以实现特定业务计算（如单位转换、缩放等）。
      *
-     * @param updatedAttr 值已更新的源属性
+     * @param sourceState 值已更新的源属性状态（不可变 AttrState）
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
-        if (updatedAttr instanceof LNumericAttribute) {
-            LNumericAttribute source = (LNumericAttribute) updatedAttr;
-            // LNumericAttribute 绑定模式下 value 在 bindAttr 中，
-            // 优先从 getValue() 读取，如果为 null 则从 bindAttr 获取
-            Object rawValue = source.getValue();
+    public void updateBindAttrValue(AttrState<?> sourceState) {
+        // 仅当源 AttrState 携带的 attrId 指向一个 LNumericAttribute 类型绑定时执行数值透传。
+        // resolvedSource 在两阶段初始化后是 ILogicAttribute<?>，但其运行时类型可能是 LNumericAttribute。
+        if (resolvedSource instanceof LNumericAttribute) {
+            LNumericAttribute source = (LNumericAttribute) resolvedSource;
+            // LNumericAttribute 绑定模式下 value 在 bindAttr 中：sourceState.getValue()
+            // 是源逻辑属性自身当前值（可能为 null），为 null 时回退到其绑定物理属性取值。
+            Object rawValue = sourceState.getValue();
             if (rawValue != null) {
                 updateValue(((Number) rawValue).doubleValue());
             } else {
-                // 尝试从绑定的物理属性读取
+                // 尝试从绑定的物理属性读取——getValue() 已降为 protected，跨类经 getState() 读取。
+                // 物理属性首次 updateValue 前 getState() 为 null，按无值跳过（保持原语义）。
                 java.util.List<AttributeBase<?>> binded = source.getBindedAttrs();
-                if (!binded.isEmpty() && binded.get(0).getValue() != null) {
-                    Object phyValue = binded.get(0).getValue();
-                    updateValue(((Number) phyValue).doubleValue());
+                if (!binded.isEmpty()) {
+                    AttrState<?> phyState = binded.get(0).getState();
+                    Object phyValue = phyState != null ? phyState.getValue() : null;
+                    if (phyValue != null) {
+                        updateValue(((Number) phyValue).doubleValue());
+                    }
                 }
             }
         }

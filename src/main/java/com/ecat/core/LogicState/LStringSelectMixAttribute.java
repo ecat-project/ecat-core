@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.UnitInfo;
@@ -32,7 +33,7 @@ import java.util.concurrent.CompletableFuture;
  * 绑定同一设备内多个逻辑属性。
  *
  * <p>默认行为：时间窗口对齐 — 等待所有注册源都更新后才触发 evaluate()。
- * 子类如需即时响应（每次更新都评估），可覆写 {@link #updateBindAttrValue(AttributeBase)}
+ * 子类如需即时响应（每次更新都评估），可覆写 {@link #updateBindAttrValue(AttrState)}
  * 跳过窗口检查。
  *
  * @see LStringSelectAttribute
@@ -73,8 +74,8 @@ public abstract class LStringSelectMixAttribute extends LStringSelectAttribute {
      * 子类可 override 实现即时响应模式。
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
-        String attrId = updatedAttr.getAttributeID();
+    public void updateBindAttrValue(AttrState<?> sourceState) {
+        String attrId = sourceState.getAttrId();
         updatedSources.add(attrId);
         if (allSourcesUpdated()) {
             evaluate();

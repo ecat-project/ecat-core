@@ -25,7 +25,7 @@ ECAT Core 是整个 ECAT 项目的基础框架，提供：
 | 能力 | 描述 |
 |------|------|
 | **设备管理** | 统一的设备抽象层，支持设备注册、生命周期管理和状态监控 |
-| **状态管理** | 强大的状态属性系统，支持多种数据类型和单位转换 |
+| **状态管理** | 强类型不可变状态 `AttrState<T>` 承载工程值、状态、业务单位与 `Class<T>` 值类型——总线/API/持久化的唯一状态真相源 |
 | **集成框架** | 插件化架构，支持动态加载和热插拔 |
 | **事件总线** | 发布-订阅模式的事件系统，实现模块间松耦合通信 |
 | **国际化** | 完整的 i18n 支持，支持多语言切换 |
@@ -153,6 +153,16 @@ java -jar target/ecat-core-1.0.0.jar
 | `BinaryAttribute` | 布尔型属性 |
 | `CommandAttribute` | 命令型属性（可执行的操作） |
 | `SelectAttribute` | 枚举型属性 |
+
+#### 值模型与不可变状态
+
+每个属性内部持有可变的工程值，对外**只通过**不可变强类型快照暴露：
+
+- **`getState(): AttrState<T>`** —— 当前状态的唯一对外入口。`AttrState<T>` 不可变（全字段 `final`、集合类 value 防御性拷贝），总线订阅者与 API 读到的是字段自洽的快照，无撕裂读。
+- **`AttrState<T>`** 承载工程值（`T value`）、`valueType`（`Class<T>` = 属性的 targetType，非枚举）、`status`、业务单位（`nativeUnit`）、派生的 `displayValue`、以及 `Instant` 类型的 `lastUpdated`/`lastChanged`。`getDisplayValue(toUnit)` 是基于已是工程值的 value 做纯单位换算，零 live 属性依赖。
+- **线性换算属性**（如 4-20 mA → 工程量）将原始信号保留为内部 `rawValue`（单位 `inputUnit`），不进 state、不持久化。设备经 `updateRawValue(信号)` 灌入原始信号；逻辑设备/API 经 `updateValue(工程值)` 设业务值——两个 public 入口职责分离，语义不同不可混用。
+- **原始信号字段为 `protected`**：`value`、`status`、`getValueType()`、`getUpdateTime()` 不在对外面上。跨模块、跨线程消费方一律读 `getState()`——这是项目铁律：总线与 API 不读属性脏数据。
+- **持久化围绕 state**：`StateManager.saveState` 经 `PersistedState.from(state)` 序列化当前 `AttrState`；`restore` 据此重建 `lastState`。`rawValue` 不恢复（重启重新采集）。
 
 ### 集成 (Integration)
 

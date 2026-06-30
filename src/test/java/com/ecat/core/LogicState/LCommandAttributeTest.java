@@ -81,7 +81,7 @@ public class LCommandAttributeTest {
         logicAttr.setDisplayValue("ZERO_START", null).join();
 
         assertEquals("zero_calibration_start", phyAttr.getLastCommand());
-        assertEquals("ZERO_START", logicAttr.getValue());
+        assertEquals("ZERO_START", (String) logicAttr.getState().getValue());
     }
 
     @Test
@@ -109,7 +109,7 @@ public class LCommandAttributeTest {
         logicAttr.setDisplayValue("ZERO_START", null).join();
 
         assertEquals("ZERO_START", phyAttr.getLastCommand());
-        assertEquals("ZERO_START", logicAttr.getValue());
+        assertEquals("ZERO_START", (String) logicAttr.getState().getValue());
     }
 
     // ========== Standalone mode tests ==========
@@ -152,7 +152,7 @@ public class LCommandAttributeTest {
 
         Boolean result = logicAttr.setDisplayValue("ZERO_START", null).join();
         assertTrue(result);
-        assertEquals("ZERO_START", logicAttr.getValue());
+        assertEquals("ZERO_START", (String) logicAttr.getState().getValue());
     }
 
     @Test

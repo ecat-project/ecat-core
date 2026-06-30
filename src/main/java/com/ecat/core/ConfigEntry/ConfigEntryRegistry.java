@@ -20,7 +20,9 @@ import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.Bus.BusTopic;
-import com.ecat.core.Bus.ConfigEntryEvent;
+import com.ecat.core.Bus.event.BusEvent;
+import com.ecat.core.Bus.event.ConfigEntryEvent;
+import com.ecat.core.Bus.event.EventContext;
 import com.ecat.core.Utils.DateTimeUtils;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
@@ -601,8 +603,9 @@ public class ConfigEntryRegistry {
 
         ConfigEntryEvent event = new ConfigEntryEvent(
             entry.getEntryId(), entry.getCoordinate(), action);
-        core.getBusRegistry().publishSync(
-            BusTopic.CONFIG_ENTRY_LIFECYCLE.getTopicName(), event);
+        core.getBusRegistry().publish(BusEvent.of(
+            BusTopic.CONFIG_ENTRY_LIFECYCLE.getTopicName(), event,
+            EventContext.root(EventContext.Source.SYSTEM, null)));
 
         log.debug("Published config entry lifecycle event: action={}, entryId={}, coordinate={}",
             action, entry.getEntryId(), entry.getCoordinate());

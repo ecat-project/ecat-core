@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeAbility;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
@@ -47,11 +48,11 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
 
     /**
      * 当绑定的物理属性值更新时调用，由 LogicDevice 或映射管理器触发。
-     * 实现类应在此方法中根据绑定的物理属性更新逻辑属性的值。
+     * 实现类应在此方法中根据绑定的物理属性（的不可变状态）更新逻辑属性的值。
      *
-     * @param updatedAttr 值已更新的物理属性
+     * @param sourceState 值已更新的物理属性状态（不可变 AttrState）
      */
-    void updateBindAttrValue(AttributeBase<?> updatedAttr);
+    void updateBindAttrValue(AttrState<?> sourceState);
 
     /**
      * 获取当前逻辑属性绑定的所有物理属性列表。
@@ -174,7 +175,7 @@ public interface ILogicAttribute<T> extends AttributeAbility<T> {
      * {@code init()} 中所有属性创建和持久化恢复完成后统一调用。
      *
      * <p>计算属性和报警属性应 override 此方法，触发自身的值计算逻辑（如调用
-     * {@link #updateBindAttrValue(AttributeBase)} 复用现有计算逻辑）。
+     * {@link #updateBindAttrValue(AttrState)} 复用现有计算逻辑）。
      * 默认实现为空操作。
      *
      * @param data 初始化上下文数据（当前为空占位，保留用于未来扩展）

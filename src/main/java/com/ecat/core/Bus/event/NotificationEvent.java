@@ -7,29 +7,31 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
-package com.ecat.core.Bus;
+package com.ecat.core.Bus.event;
 
 /**
  * 通知 Bus 事件。
  *
- * <p>任何 ecat 模块可通过 Bus 发布此事件（{@link BusTopic#NOTIFICATION}），
+ * <p>任何 ecat 模块可通过 Bus 发布此事件（{@link com.ecat.core.Bus.BusTopic#NOTIFICATION}），
  * EventController 订阅后转为 NotificationPayload 推送至前端。
  *
  * <p>使用示例：
  * <pre>
  * // 纯提示通知
- * busRegistry.publish(BusTopic.NOTIFICATION.getTopicName(),
- *     new NotificationEvent("ERROR", "device.communication", "Modbus TCP 连接超时: 192.168.1.100:502"));
+ * busRegistry.publish(BusEvent.of(BusTopic.NOTIFICATION.getTopicName(),
+ *     new NotificationEvent("ERROR", "device.communication", "Modbus TCP 连接超时: 192.168.1.100:502"),
+ *     EventContext.root(EventContext.Source.SYSTEM, null)));
  *
  * // actionable 通知（带强类型 action，前端可据 action 执行动作）
- * busRegistry.publish(BusTopic.NOTIFICATION.getTopicName(),
+ * busRegistry.publish(BusEvent.of(BusTopic.NOTIFICATION.getTopicName(),
  *     new NotificationEvent("INFO", "discovery", "发现新设备：XXX",
- *         new DiscoveryNotificationAction(flowId, source, coordinate, uniqueId, title)));
+ *         new DiscoveryNotificationAction(flowId, source, coordinate, uniqueId, title)),
+ *     EventContext.root(EventContext.Source.SYSTEM, null)));
  * </pre>
  *
  * @author coffee
  */
-public class NotificationEvent {
+public class NotificationEvent implements BusPayload {
 
     /** 通知级别: INFO, WARNING, ERROR, CRITICAL */
     private final String level;

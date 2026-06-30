@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.BinaryAttribute;
@@ -38,7 +39,7 @@ import java.util.concurrent.CompletableFuture;
  *   <li><b>Standalone mode</b>: self-maintained, no physical binding</li>
  * </ul>
  *
- * <p>Subclasses override {@link #updateBindAttrValue(AttributeBase)} to provide
+ * <p>Subclasses override {@link #updateBindAttrValue(AttrState)} to provide
  * domain-specific value derivation logic (e.g., online detection from update timestamp).
  *
  * @see ILogicAttribute
@@ -98,16 +99,20 @@ public class LBinaryAttribute extends BinaryAttribute implements ILogicAttribute
      * <p>Default implementation does nothing. Subclasses should override to provide
      * domain-specific logic (e.g., derive online status from update timestamp).
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
+    public void updateBindAttrValue(AttrState<?> sourceState) {
         // Default: convert numeric physical value to Boolean.
         // Non-zero numeric -> true (on), zero -> false (off).
         // Subclasses can override with domain-specific logic.
         if (bindAttr == null) return;
 
-        Object rawValue = bindAttr.getValue();
+        // bindAttr.getValue() 已降为 protected：跨类经不可变 AttrState 读取原始值。
+        // bindAttr.getState() 在首次 updateValue 前为 null，按无值返回
+        // （保持原 getValue() 返回 null 时的跳过语义）。
+        AttrState<?> bindState = bindAttr.getState();
+        Object rawValue = bindState != null ? bindState.getValue() : null;
         if (rawValue == null) return;
 
         boolean boolValue;

@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.StringSelectAttribute;
@@ -160,11 +161,11 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
      * to any standard option.
      * Standalone mode: no-op.
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      * @throws IllegalStateException if physical value cannot be mapped to any standard option
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
+    public void updateBindAttrValue(AttrState<?> sourceState) {
         if (bindAttr == null) return;
 
         // 使用 getI18nValue() 获取稳定的语言无关值：
@@ -188,7 +189,7 @@ public class LStringSelectAttribute extends StringSelectAttribute implements ILo
                 + ", options=" + getOptions());
         }
 
-        updateValue(matchedOption, updatedAttr.getStatus());
+        updateValue(matchedOption, sourceState.getStatus());
     }
 
     /**
