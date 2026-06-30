@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.ecat.core.Bus;
+package com.ecat.core.Bus.event;
 
 /**
  * ConfigEntry生命周期事件的数据载体，由ConfigEntryRegistry发布，
@@ -29,7 +29,7 @@ package com.ecat.core.Bus;
  *
  * @author coffee
  */
-public class ConfigEntryEvent {
+public class ConfigEntryEvent implements BusPayload {
 
     /**
      * ConfigEntry生命周期操作类型

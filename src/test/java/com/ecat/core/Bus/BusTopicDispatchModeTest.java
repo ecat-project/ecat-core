@@ -18,7 +18,8 @@ package com.ecat.core.Bus;
 
 import org.junit.Test;
 
-import java.time.Instant;
+import com.ecat.core.Bus.event.AllLoadedEvent;
+import com.ecat.core.Bus.event.ConfigEntryEvent;
 
 import static org.junit.Assert.*;
 
@@ -83,7 +84,8 @@ public class BusTopicDispatchModeTest {
 
     @Test
     public void integrationsAllLoaded_hasInstantDataClass() {
-        assertEquals(Instant.class, BusTopic.INTEGRATIONS_ALL_LOADED.getDataClass());
+        // eventData 类型现为 AllLoadedEvent.class（纯信号事件，触发时刻从 BusEvent.getFiredAt() 取）
+        assertEquals(AllLoadedEvent.class, BusTopic.INTEGRATIONS_ALL_LOADED.getDataClass());
     }
 
     @Test
@@ -98,7 +100,8 @@ public class BusTopicDispatchModeTest {
 
     @Test
     public void logicDevicesAllLoaded_hasInstantDataClass() {
-        assertEquals(Instant.class, BusTopic.LOGIC_DEVICES_ALL_LOADED.getDataClass());
+        // eventData 类型现为 AllLoadedEvent.class（纯信号事件，触发时刻从 BusEvent.getFiredAt() 取）
+        assertEquals(AllLoadedEvent.class, BusTopic.LOGIC_DEVICES_ALL_LOADED.getDataClass());
     }
 
     // --- CONFIG_ENTRY_LIFECYCLE topic tests ---

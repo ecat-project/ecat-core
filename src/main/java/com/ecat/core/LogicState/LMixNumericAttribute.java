@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.AttributeStatus;
@@ -37,7 +38,7 @@ import java.util.concurrent.CompletableFuture;
  * attributes have been updated within the configured time window. This ensures data
  * consistency when physical attributes arrive from different devices or at different rates.
  *
- * <p><b>Thread safety:</b> {@link #updateBindAttrValue(AttributeBase)} is synchronized
+ * <p><b>Thread safety:</b> {@link #updateBindAttrValue(AttrState)} is synchronized
  * because bus async dispatch may invoke it from multiple thread pools concurrently.
  *
  * <p><b>Read-only:</b> LMixNumericAttribute is read-only. Calling {@link #setDisplayValue(String, UnitInfo)}
@@ -111,11 +112,11 @@ public abstract class LMixNumericAttribute extends LNumericAttribute {
      * <p><b>CRITICAL:</b> This method is synchronized because bus async dispatch
      * (2 thread pools) may invoke it concurrently.
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      */
     @Override
-    public synchronized void updateBindAttrValue(AttributeBase<?> updatedAttr) {
-        String attrId = updatedAttr.getAttributeID();
+    public synchronized void updateBindAttrValue(AttrState<?> sourceState) {
+        String attrId = sourceState.getAttrId();
         BindedPhyAttrData bad = bindAttrs.get(attrId);
         if (bad == null) return;
 
@@ -192,7 +193,7 @@ public abstract class LMixNumericAttribute extends LNumericAttribute {
     /**
      * Registers a physical attribute to be bound to this mix attribute.
      *
-     * <p>Must be called before {@link #updateBindAttrValue(AttributeBase)}.
+     * <p>Must be called before {@link #updateBindAttrValue(AttrState)}.
      *
      * @param phyAttr the physical attribute to register
      */

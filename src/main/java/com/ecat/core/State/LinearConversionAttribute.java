@@ -86,8 +86,8 @@ public class LinearConversionAttribute extends NumericAttribute {
     }
 
     private final List<LinearSegment> segments;  // 线性段列表（单段或多段）
-    private final UnitInfo inputUnit;             // 输入单位（通过UnitInfoFactory获取）
-    private final UnitInfo outputUnit;            // 输出单位（通过UnitInfoFactory获取）
+    private final UnitInfo inputUnit;             // rawValue 原始信号值的单位（信号单位，如电压 V）
+    protected Double rawValue;                      // 原始信号值（如电压），单位 inputUnit；不进 state、不持久化
     private ConfigDefinition valueDef;            // 验证定义
 
     /**
@@ -147,13 +147,12 @@ public class LinearConversionAttribute extends NumericAttribute {
                                    boolean persistable, Double defaultValue,
                                    Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
         super(attributeID, attrClass,
-              UnitInfoFactory.getEnum(inputUnitEnumName),
+              UnitInfoFactory.getEnum(outputUnitEnumName),
               UnitInfoFactory.getEnum(outputUnitEnumName),
               displayPrecision, false, valueChangeable, persistable, defaultValue, onChangedCallback);
 
         this.segments = sortAndValidateSegments(segments);
         this.inputUnit = UnitInfoFactory.getEnum(inputUnitEnumName);
-        this.outputUnit = UnitInfoFactory.getEnum(outputUnitEnumName);
     }
 
     /**
@@ -167,14 +166,13 @@ public class LinearConversionAttribute extends NumericAttribute {
                                    boolean persistable, Double defaultValue,
                                    Function<AttrChangedCallbackParams<Double>, CompletableFuture<Boolean>> onChangedCallback) {
         super(attributeID, attrClass,
-              UnitInfoFactory.getEnum(inputUnitEnumName),
+              UnitInfoFactory.getEnum(outputUnitEnumName),
               UnitInfoFactory.getEnum(outputUnitEnumName),
               displayPrecision, false, valueChangeable, persistable, defaultValue, onChangedCallback);
         this.displayName = displayName;
 
         this.segments = sortAndValidateSegments(segments);
         this.inputUnit = UnitInfoFactory.getEnum(inputUnitEnumName);
-        this.outputUnit = UnitInfoFactory.getEnum(outputUnitEnumName);
     }
 
     /**
@@ -329,38 +327,50 @@ public class LinearConversionAttribute extends NumericAttribute {
         }
     }
 
+    /**
+     * 灌入原始信号值：保存 rawValue + 换算工程值存 value。device 灌入入口。
+     * rawValue 单位 inputUnit（信号单位）；工程值（attr.value）单位 nativeUnit（业务单位）。
+     */
+    public boolean updateRawValue(Double raw) {
+        this.rawValue = raw;
+        return super.updateValue(convertToEngineeringValue(raw));
+    }
+
+    /**
+     * 设业务值（工程值）：同步反算 rawValue，保持 raw/value 一致。
+     * 逻辑设备/API/用户设值入口。setLocationValue 链最终也走此方法（updateValue override 反算 raw）。
+     */
+    @Override
+    public boolean updateValue(Double engineeringValue) {
+        this.rawValue = convertFromEngineeringValue(engineeringValue);
+        return super.updateValue(engineeringValue);
+    }
+
     @Override
     public String getDisplayValue(UnitInfo toUnit) {
         if (value == null) return null;
 
-        // 1. 将原始输入值转换为输出工程值
-        Double engineeringValue = convertToEngineeringValue(value);
-
-        // 2. 如果指定了显示单位，进行单位转换
-        if (toUnit != null && outputUnit != null) {
-            if (outputUnit.getClass().equals(toUnit.getClass())) {
-                engineeringValue = engineeringValue != null ? engineeringValue * outputUnit.convertUnit(toUnit): null;;
-            }
+        // attr.value 已是工程值（业务值），单位 nativeUnit；按 toUnit 做纯单位换算
+        Double displayMagnitude = value;
+        if (toUnit != null && getNativeUnit() != null && getNativeUnit().getClass().equals(toUnit.getClass())) {
+            displayMagnitude = value * getNativeUnit().convertUnit(toUnit);
         }
-
-        return engineeringValue != null ? NumberFormatter.formatValue(engineeringValue, displayPrecision) : null;
+        return NumberFormatter.formatValue(displayMagnitude, displayPrecision);
     }
 
     @Override
     protected Double convertFromUnitImp(Double displayValue, UnitInfo fromUnit) {
-        // 反向转换：将显示值转换为原始输入值
+        // 将指定单位的显示值换算为 nativeUnit（业务单位）的工程值。
+        // attr.value 存工程值，updateValue override 会据此反算 rawValue，故此处不再 convertFromEngineeringValue。
         if (displayValue == null) return null;
 
-        // 1. 如果有单位转换，先转换到标准输出单位
-        Double standardOutputValue = displayValue;
-        if (fromUnit != null && outputUnit != null) {
-            if (outputUnit.getClass().equals(fromUnit.getClass())) {
-                standardOutputValue = displayValue * fromUnit.convertUnit(outputUnit);
+        Double nativeValue = displayValue;
+        if (fromUnit != null && getNativeUnit() != null) {
+            if (getNativeUnit().getClass().equals(fromUnit.getClass())) {
+                nativeValue = displayValue * fromUnit.convertUnit(getNativeUnit());
             }
         }
-
-        // 2. 反向线性转换
-        return convertFromEngineeringValue(standardOutputValue);
+        return nativeValue;
     }
 
     @Override
@@ -397,10 +407,6 @@ public class LinearConversionAttribute extends NumericAttribute {
 
     public UnitInfo getInputUnit() {
         return inputUnit;
-    }
-
-    public UnitInfo getOutputUnit() {
-        return outputUnit;
     }
 
     @Override

@@ -16,10 +16,12 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.AttributeType;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.NumericAttribute;
 import com.ecat.core.State.UnitInfo;
 import org.junit.Before;
@@ -28,9 +30,8 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
@@ -60,6 +61,21 @@ public class LMixNumericAttributeTest {
                 "temperature_1", mockAttrClass, null, null, 2, false, false);
         phyAttr2 = new NumericAttribute(
                 "temperature_2", mockAttrClass, null, null, 2, false, false);
+
+        // 绑定 mock 设备：getState() 只有在设备绑定且 getId() 非空时才返回非 null 状态对象，
+        // 因此所有需要 getState().getValue()/getStatus() 的物理/逻辑属性都得先绑定设备。
+        bindDevice(phyAttr1);
+        bindDevice(phyAttr2);
+    }
+
+    /**
+     * 给属性绑定一个 getId() 非空的 mock 设备，使其 getState() 能返回非 null 的 AttrState。
+     * 这些 NumericAttribute 非持久化，updateValue 不会调用 getCore()（仅持久化属性才需要 core）。
+     */
+    private static void bindDevice(AttributeBase<?> attr) {
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        when(mockDevice.getId()).thenReturn("testDevice");
+        attr.setDevice(mockDevice);
     }
 
     /**
@@ -75,7 +91,10 @@ public class LMixNumericAttributeTest {
         protected Double calcRawValue() {
             double sum = 0.0;
             for (BindedPhyAttrData bad : bindAttrs.values()) {
-                Object val = bad.getBindPhyAttr().getValue();
+                // bindPhyAttr 是跨包的 AttributeBase，getValue() 已降为 protected 无法直接读，
+                // 改读 getState()（public）；绑定设备且 updateValue 后 getState() 必非 null。
+                AttrState<?> s = bad.getBindPhyAttr().getState();
+                Object val = s != null ? s.getValue() : null;
                 if (val != null) {
                     sum += ((Number) val).doubleValue();
                 }
@@ -122,6 +141,7 @@ public class LMixNumericAttributeTest {
     public void testSynchronizedUpdateBindAttrValue() {
         SumMixNumericAttribute mixAttr = new SumMixNumericAttribute(
                 "avg_temperature", mockAttrClass, null, null, 2, 5000);
+        bindDevice(mixAttr);
         mixAttr.registerBindAttrValue(phyAttr1);
         mixAttr.registerBindAttrValue(phyAttr2);
 
@@ -129,13 +149,14 @@ public class LMixNumericAttributeTest {
         phyAttr1.updateValue(10.0, AttributeStatus.NORMAL);
         phyAttr2.updateValue(20.0, AttributeStatus.NORMAL);
 
-        mixAttr.updateBindAttrValue(phyAttr1);
-        mixAttr.updateBindAttrValue(phyAttr2);
+        // updateBindAttrValue 现在按不可变 AttrState 传递源状态
+        mixAttr.updateBindAttrValue(phyAttr1.getState());
+        mixAttr.updateBindAttrValue(phyAttr2.getState());
 
         // calcRawValue should be called and sum = 10.0 + 20.0 = 30.0
-        assertNotNull(mixAttr.getValue());
-        assertEquals(30.0, mixAttr.getValue(), 0.01);
-        assertEquals(AttributeStatus.NORMAL, mixAttr.getStatus());
+        assertNotNull(mixAttr.getState().getValue());
+        assertEquals(30.0, (Double) mixAttr.getState().getValue(), 0.01);
+        assertEquals(AttributeStatus.NORMAL, mixAttr.getState().getStatus());
     }
 
     // ========== testTimeWindowExpired ==========
@@ -150,17 +171,18 @@ public class LMixNumericAttributeTest {
 
         // Update first physical attribute
         phyAttr1.updateValue(10.0, AttributeStatus.NORMAL);
-        mixAttr.updateBindAttrValue(phyAttr1);
+        mixAttr.updateBindAttrValue(phyAttr1.getState());
 
         // Wait for the time window to expire
         Thread.sleep(100);
 
         // Update second physical attribute - first one should now be expired
         phyAttr2.updateValue(20.0, AttributeStatus.NORMAL);
-        mixAttr.updateBindAttrValue(phyAttr2);
+        mixAttr.updateBindAttrValue(phyAttr2.getState());
 
         // Not all attrs updated within window, value should NOT be updated
-        assertNull(mixAttr.getValue());
+        // mixAttr 未绑定设备 → getState() 为 null（未 updateValue 过，更不可能有状态）
+        assertNull(mixAttr.getState());
     }
 
     // ========== testCalcRawValue ==========
@@ -169,6 +191,7 @@ public class LMixNumericAttributeTest {
     public void testCalcRawValue() {
         SumMixNumericAttribute mixAttr = new SumMixNumericAttribute(
                 "avg_temperature", mockAttrClass, null, null, 2, 5000);
+        bindDevice(mixAttr);
         mixAttr.registerBindAttrValue(phyAttr1);
         mixAttr.registerBindAttrValue(phyAttr2);
 
@@ -177,12 +200,12 @@ public class LMixNumericAttributeTest {
         phyAttr2.updateValue(24.5, AttributeStatus.NORMAL);
 
         // Trigger both updates within window
-        mixAttr.updateBindAttrValue(phyAttr1);
-        mixAttr.updateBindAttrValue(phyAttr2);
+        mixAttr.updateBindAttrValue(phyAttr1.getState());
+        mixAttr.updateBindAttrValue(phyAttr2.getState());
 
         // Sum should be 15.5 + 24.5 = 40.0
-        assertNotNull(mixAttr.getValue());
-        assertEquals(40.0, mixAttr.getValue(), 0.01);
+        assertNotNull(mixAttr.getState().getValue());
+        assertEquals(40.0, (Double) mixAttr.getState().getValue(), 0.01);
     }
 
     // ========== testUpdateBindAttrValueUnknownAttr ==========
@@ -196,12 +219,14 @@ public class LMixNumericAttributeTest {
         // Update an attribute that is NOT registered
         NumericAttribute unknownAttr = new NumericAttribute(
                 "unknown_attr", mockAttrClass, null, null, 2, false, false);
+        bindDevice(unknownAttr);
         unknownAttr.updateValue(99.0, AttributeStatus.NORMAL);
 
         // Should silently ignore the unknown attribute
-        mixAttr.updateBindAttrValue(unknownAttr);
+        mixAttr.updateBindAttrValue(unknownAttr.getState());
 
-        assertNull(mixAttr.getValue());
+        // mixAttr 未绑定设备且从未 updateValue → getState() 为 null
+        assertNull(mixAttr.getState());
     }
 
     // ========== testGetAttributeType ==========
@@ -232,23 +257,24 @@ public class LMixNumericAttributeTest {
     public void testResetAfterAllUpdated() {
         SumMixNumericAttribute mixAttr = new SumMixNumericAttribute(
                 "avg_temperature", mockAttrClass, null, null, 2, 5000);
+        bindDevice(mixAttr);
         mixAttr.registerBindAttrValue(phyAttr1);
         mixAttr.registerBindAttrValue(phyAttr2);
 
         // First round: both updated
         phyAttr1.updateValue(10.0, AttributeStatus.NORMAL);
         phyAttr2.updateValue(20.0, AttributeStatus.NORMAL);
-        mixAttr.updateBindAttrValue(phyAttr1);
-        mixAttr.updateBindAttrValue(phyAttr2);
-        assertEquals(30.0, mixAttr.getValue(), 0.01);
+        mixAttr.updateBindAttrValue(phyAttr1.getState());
+        mixAttr.updateBindAttrValue(phyAttr2.getState());
+        assertEquals(30.0, (Double) mixAttr.getState().getValue(), 0.01);
 
         // Second round: update only one - should NOT recalculate
         // because the isUpdated flags were reset after first round
         phyAttr1.updateValue(5.0, AttributeStatus.NORMAL);
-        mixAttr.updateBindAttrValue(phyAttr1);
+        mixAttr.updateBindAttrValue(phyAttr1.getState());
 
         // Value should remain from first round (30.0), not recalculated
         // because phyAttr2 was not updated this round
-        assertEquals(30.0, mixAttr.getValue(), 0.01);
+        assertEquals(30.0, (Double) mixAttr.getState().getValue(), 0.01);
     }
 }

@@ -30,7 +30,6 @@ import java.util.concurrent.CompletableFuture;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
-import static org.mockito.Mockito.verify;
 
 /**
  * LBinaryAttribute 单元测试
@@ -63,12 +62,17 @@ public class LBinaryAttributeTest {
 
     @Test
     public void boundModeUpdateBindAttrValueNoOp() {
+        // 物理属性虽绑定设备但从未 updateValue → getState() 为 null。
+        // 生产侧 LBinaryAttribute.updateBindAttrValue 读 bindAttr.getState() 为 null → rawValue=null → 提前返回不更新。
         AttributeBase<?> phyAttr = createMockAttr("online", AttributeClass.STATUS);
+        bindDevice(phyAttr);
         LBinaryAttribute logicAttr = new LBinaryAttribute(phyAttr);
+        bindDevice(logicAttr);
 
-        // Default implementation does nothing
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertNull(logicAttr.getValue());
+        // Default implementation: sourceState 透传新签名，物理属性无值时无操作
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        // 无操作 → 逻辑属性从未 updateValue → getState() 本身为 null
+        assertNull(logicAttr.getState());
     }
 
     @Test
@@ -144,14 +148,15 @@ public class LBinaryAttributeTest {
     @Test
     public void standaloneModeTurnOnOff() {
         TestStandaloneBinary logicAttr = new TestStandaloneBinary("alarm_status", AttributeClass.ALARM_STATUS);
+        bindDevice(logicAttr);
 
         logicAttr.turnOn();
         assertTrue(logicAttr.isOn());
-        assertTrue(logicAttr.getValue());
+        assertTrue((Boolean) logicAttr.getState().getValue());
 
         logicAttr.turnOff();
         assertTrue(logicAttr.isOff());
-        assertFalse(logicAttr.getValue());
+        assertFalse((Boolean) logicAttr.getState().getValue());
     }
 
     // ========== fromUnit 透传验证 ==========
@@ -178,6 +183,17 @@ public class LBinaryAttributeTest {
     }
 
     // ========== Test helpers ==========
+
+    /**
+     * Bind a mock device (non-null id) so that {@link AttributeBase#getState()} returns a non-null
+     * AttrState snapshot after {@code updateValue} is called. Required by the state-sealing refactor
+     * where {@code getState()} returns null until a device is bound.
+     */
+    private static void bindDevice(AttributeBase<?> attr) {
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        when(mockDevice.getId()).thenReturn("testDevice");
+        attr.setDevice(mockDevice);
+    }
 
     private static class TestStandaloneBinary extends LBinaryAttribute {
         TestStandaloneBinary(String attributeID, AttributeClass attrClass) {

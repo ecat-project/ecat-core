@@ -121,6 +121,7 @@ public class StateManagerTest {
         device.setAttribute(attr);
 
         attr.updateValue(25.5, AttributeStatus.NORMAL);
+        attr.publicState(); // 新设计：持久化在 commit 点 publicState 触发（写 WAL），commitAll 负责刷盘
         stateManager.commitAll();
 
         PersistedState loaded = stateManager.loadState(device, "temperature");
@@ -138,6 +139,7 @@ public class StateManagerTest {
         device.setAttribute(attr);
 
         attr.updateValue("running");
+        attr.publicState(); // 新设计：持久化在 commit 点 publicState 触发（写 WAL），commitAll 负责刷盘
         stateManager.commitAll();
 
         PersistedState loaded = stateManager.loadState(device, "status_text");
@@ -154,6 +156,7 @@ public class StateManagerTest {
         device.setAttribute(attr);
 
         attr.turnOn();
+        attr.publicState(); // 新设计：持久化在 commit 点 publicState 触发（写 WAL），commitAll 负责刷盘
         stateManager.commitAll();
 
         PersistedState loaded = stateManager.loadState(device, "switch");
@@ -180,6 +183,7 @@ public class StateManagerTest {
         attr1.setPersistable(true);
         device.setAttribute(attr1);
         attr1.updateValue(30.0, AttributeStatus.NORMAL);
+        attr1.publicState(); // 新设计：持久化在 commit 点 publicState 触发（写 WAL），commitAll 负责刷盘
         stateManager.commitAll();
 
         // 从 attrs map 中移除
@@ -282,7 +286,8 @@ public class StateManagerTest {
         attr.setPersistable(true);
         device.setAttribute(attr);
         attr.updateValue(99.9);
-        // 注意: 不调用 commitAll，直接 shutdown 应该也能持久化
+        attr.publicState(); // 新设计：持久化在 commit 点 publicState 触发（写 WAL）
+        // 注意: 不调用 commitAll，直接 shutdown 应该也能把 WAL 刷盘持久化
 
         stateManager.shutdown();
         stateManager = null; // 防止 @After 重复 shutdown

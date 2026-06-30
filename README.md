@@ -25,7 +25,7 @@ ECAT Core is the foundational framework of the entire ECAT project, providing:
 | Capability | Description |
 |------------|-------------|
 | **Device Management** | Unified device abstraction layer with registration, lifecycle management, and status monitoring |
-| **State Management** | Powerful state attribute system supporting multiple data types and unit conversion |
+| **State Management** | Strongly-typed immutable state (`AttrState<T>`) carrying the engineering value, status, business unit, and `Class<T>` value type — single source of truth consumed by the bus, API, and persistence |
 | **Integration Framework** | Plugin architecture supporting dynamic loading and hot-swapping |
 | **Event Bus** | Publish-subscribe event system for loose coupling between modules |
 | **Internationalization** | Complete i18n support for multi-language switching |
@@ -153,6 +153,16 @@ Attributes are data points of a device, which can be:
 | `BinaryAttribute` | Boolean attributes |
 | `CommandAttribute` | Command attributes (executable operations) |
 | `SelectAttribute` | Enumeration attributes |
+
+#### Value model and immutable state
+
+Each attribute holds a mutable engineering value internally and exposes it **only** through an immutable, strongly-typed snapshot:
+
+- **`getState(): AttrState<T>`** — the single external entry point for the live state. `AttrState<T>` is immutable (`final` fields, defensive copy of collection values), so bus subscribers and the API read a self-consistent snapshot free of torn reads.
+- **`AttrState<T>`** carries the engineering value (`T value`), `valueType` (`Class<T>` = the attribute's target type, not an enum), `status`, the business unit (`nativeUnit`), a derived `displayValue`, and `Instant`-based `lastUpdated`/`lastChanged`. `getDisplayValue(toUnit)` is a pure unit conversion over the already-engineering value, with no live-attribute dependency.
+- **Linear-conversion attributes** (e.g. 4-20 mA → engineering quantity) keep the raw signal as an internal `rawValue` (unit `inputUnit`) that never enters state and is never persisted. Devices feed raw signals via `updateRawValue(signal)`; logic devices / the API set the engineering value via `updateValue(engineeringValue)` — the two public entry points have separated responsibilities and must not be mixed.
+- **Raw-signal fields are `protected`**: `value`, `status`, `getValueType()`, and `getUpdateTime()` are not part of the external surface. Cross-module and cross-thread consumers read `getState()` instead — this is the project's invariant that no dirty/torn attribute reads reach the bus or API.
+- **Persistence centers on state**: `StateManager.saveState` serializes the current `AttrState` via `PersistedState.from(state)`; `restore` rebuilds `lastState` from it. `rawValue` is not restored (re-collected on restart).
 
 ### Integration
 

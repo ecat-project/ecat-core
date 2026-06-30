@@ -10,11 +10,11 @@ import java.util.function.Function;
 
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.Bus.event.BusEvent;
 import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 import com.ecat.core.I18n.I18nKeyPath;
 import com.ecat.core.State.Unit.AirVolumeUnit;
@@ -240,24 +240,30 @@ public class AttributeBaseTest {
     @Test
     public void testPublicState_Success() {
         // 测试属性状态发布成功
-        attr.setValueUpdated(true);
         DeviceBase device = mock(DeviceBase.class, RETURNS_DEEP_STUBS);
         when(device.getId()).thenReturn("mockDeviceId");
         attr.setDevice(device);
 
         BusRegistry mockBusRegistry = mock(BusRegistry.class);
         when(device.getCore().getBusRegistry()).thenReturn(mockBusRegistry);
-        doNothing().when(mockBusRegistry).publish(anyString(), any());
+        doNothing().when(mockBusRegistry).publish(any(BusEvent.class));
+        // updateValue（绑定设备后）才会构建 lastState，publicState 才会真正发布 BusEvent<DeviceDataChangedEvent>
+        // setValueUpdated(true) 只置标志位不构建 lastState，publicState 会因 newState==null 直接返回不发布
+        assertTrue(attr.updateValue(111));
         assertTrue(attr.publicState());
         assertFalse(attr.isValueUpdated());
+        // 重构后 publicState 调用 publish(BusEvent) 而非旧的 publish(String, Object)
+        verify(mockBusRegistry).publish(any(BusEvent.class));
     }
 
     @Test
     public void testPublicState_Fail() {
         // 测试属性状态发布失败
-        attr.setValueUpdated(true);
         DeviceBase device = mock(DeviceBase.class);
+        when(device.getId()).thenReturn("mockDeviceId");
         attr.setDevice(device);
+        // updateValue 构建 lastState 后，publicState 才会进入发布分支触发 device.getCore()
+        assertTrue(attr.updateValue(111));
         when(device.getCore()).thenThrow(new RuntimeException("fail"));
         assertFalse(attr.publicState());
     }
@@ -435,7 +441,7 @@ public class AttributeBaseTest {
         // Test invalid string conversion (type error)
         CompletableFuture<Boolean> typeErrorResult = attr.setDisplayValue("invalid");
         try {
-            Boolean success = typeErrorResult.get();
+            typeErrorResult.get();
             fail("Expected type conversion to fail");
         } catch (Exception e) {
             assertTrue(e.getCause() instanceof IllegalArgumentException);

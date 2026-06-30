@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.ecat.core.Bus;
+package com.ecat.core.Bus.event;
 
 import org.junit.Test;
 

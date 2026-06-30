@@ -18,8 +18,9 @@ package com.ecat.core.ConfigFlow;
 
 import com.ecat.core.Bus.BusRegistry;
 import com.ecat.core.Bus.BusTopic;
-import com.ecat.core.Bus.NotificationAction;
-import com.ecat.core.Bus.NotificationEvent;
+import com.ecat.core.Bus.event.BusEvent;
+import com.ecat.core.Bus.event.NotificationAction;
+import com.ecat.core.Bus.event.NotificationEvent;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.ConfigEntry.SourceType;
@@ -248,7 +249,7 @@ public class ConfigFlowServiceTest {
         assertEquals("R12 命中应返回现有 flowId(续期,非新建)", existingFlowId, instance.getFlowId());
         verify(mockFlowRegistry, never()).createFlow(any());               // 不建新 flow
         verify(mockFlowRegistry, times(1)).getActiveFlow(existingFlowId);   // getStatus 经 getActiveFlow touch 续期
-        verify(mockBus, never()).publish(anyString(), any());               // R12 命中不重发 discovery 提示
+        verify(mockBus, never()).publish(any(BusEvent.class));               // R12 命中不重发 discovery 提示
     }
 
     @Test
@@ -445,9 +446,12 @@ public class ConfigFlowServiceTest {
                 new ImportFlowPayload(coordinate, 1, "model|SN|新发现设备"));
 
         // 捕获 publish 的 NotificationEvent，断言其携带强类型 DiscoveryNotificationAction（非 Map）
-        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(mockBus).publish(eq(BusTopic.NOTIFICATION.getTopicName()), captor.capture());
-        Object published = captor.getValue();
+        // 信封迁移后 publish 为单参签名（BusEvent），captor 抓的是 BusEvent 本身，payload 仍是 NotificationEvent
+        ArgumentCaptor<BusEvent<?>> captor = ArgumentCaptor.forClass(BusEvent.class);
+        verify(mockBus).publish(captor.capture());
+        assertEquals("信封 type 应为 notification topic",
+                BusTopic.NOTIFICATION.getTopicName(), captor.getValue().getType());
+        Object published = captor.getValue().getPayload();
         assertTrue("应发布 NotificationEvent", published instanceof NotificationEvent);
         NotificationEvent evt = (NotificationEvent) published;
         NotificationAction action = evt.getAction();

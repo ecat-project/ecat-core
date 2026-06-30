@@ -17,11 +17,8 @@
 package com.ecat.core.State;
 
 import java.io.File;
-import java.time.Instant;
-import java.time.ZoneId;
 import java.util.Collection;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
@@ -86,26 +83,11 @@ public class StateManager {
         if (baseDir == null) return;
 
         try {
+            AttrState<?> s = attr.getState();
+            if (s == null) return;  // 未 updateValue 过，无可持久化的 state
             ConcurrentMap<String, String> map = getOrCreateMap(device);
-
-            PersistedState state = new PersistedState();
-            // 统一数值存储：Instant 属性归一为 epoch 毫秒（Long），与 updateTimeEpochMs 一致。
-            // 避免 fastjson2 把 Instant 序列化为 ISO-8601 String（如 "2026-06-23T10:27:15.642Z"），
-            // 导致 restore 时 convertObjectToTargetType 的 Instant+Number 分支无法匹配（read 只认 Number）。
-            // 读侧复用 AttributeBase.convertObjectToTargetType 现有 Instant+Number 分支，保持单一分支、读写对称。
-            Object persistValue = attr.getValue();
-            if (persistValue instanceof Instant) {
-                persistValue = ((Instant) persistValue).toEpochMilli();
-            }
-            state.value = persistValue;
-            state.statusCode = attr.getStatus().getId();
-            state.updateTimeEpochMs = attr.getUpdateTime() != null
-                ? attr.getUpdateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                : 0L;
-            state.nativeUnitStr = attr.getNativeUnit() != null
-                ? attr.getNativeUnit().getFullUnitString() : null;
-
-            map.put(attr.getAttributeID(), JSON.toJSONString(state));
+            // 围绕 state 持久化：从不可变 AttrState 精简映射，不戳 attr 内部字段
+            map.put(attr.getAttributeID(), JSON.toJSONString(PersistedState.from(s)));
         } catch (Exception e) {
             log.error("Failed to save state for attr " + attr.getAttributeID() +
                 " device " + device.getId(), e);
@@ -147,16 +129,19 @@ public class StateManager {
         try {
             PersistedState state = loadState(device, attr.getAttributeID());
             if (state != null) {
-                String currentUnit = attr.getNativeUnit() != null
-                    ? attr.getNativeUnit().getFullUnitString() : null;
-                if (Objects.equals(currentUnit, state.nativeUnitStr)) {
-                    attr.restore(state);
-                    log.debug("Restored state for attr '{}' value={} device={}",
-                        attr.getAttributeID(), state.value, device.getId());
-                } else {
-                    log.warn("Unit mismatch for attr {}, skip restore (persisted={}, current={})",
-                        attr.getAttributeID(), state.nativeUnitStr, currentUnit);
+                if (state.version < 2) {
+                    // 围绕 state 重设计前的旧结构数据废弃，不恢复，走默认值（不迁移历史缓存）
+                    log.warn("Obsolete persisted state (version={}) for attr {}, skip restore",
+                        state.version, attr.getAttributeID());
+                    if (attr.getDefaultValue() != null) {
+                        attr.restoreFromDefault();
+                    }
+                    return;
                 }
+                // state 内容恢复 attr（restore 内重建 lastState）；state 自带一致单位，无需单位校验
+                attr.restore(state);
+                log.debug("Restored state for attr '{}' value={} device={}",
+                    attr.getAttributeID(), state.value, device.getId());
             } else if (attr.getDefaultValue() != null) {
                 attr.restoreFromDefault();
             }

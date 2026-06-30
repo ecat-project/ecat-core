@@ -7,6 +7,7 @@ import org.mockito.MockitoAnnotations;
 
 import com.ecat.core.EcatCore;
 import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.Bus.event.BusEvent;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Utils.TestTools;
 import com.ecat.core.I18n.I18nKeyPath;
@@ -21,7 +22,6 @@ import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -86,7 +86,7 @@ public class I18nTextAttributeTest {
         TestTools.setPrivateField(attr, "device", mockDevice);
         when(mockDevice.getCore()).thenReturn(mockEcatCore);
         when(mockEcatCore.getBusRegistry()).thenReturn(mockBusRegistry);
-        doNothing().when(mockBusRegistry).publish(anyString(), any());
+        doNothing().when(mockBusRegistry).publish(any(BusEvent.class));
     }
 
     @Test

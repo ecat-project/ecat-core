@@ -18,6 +18,7 @@ package com.ecat.core.Integration;
 
 import com.ecat.core.Bus.BusTopic;
 import com.ecat.core.Bus.BusTopic.DispatchMode;
+import com.ecat.core.Bus.event.AllLoadedEvent;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -52,9 +53,9 @@ public class IntegrationManagerEventPublishTest {
         assertNotNull("topicName 不应为 null", topic.getTopicName());
         assertFalse("topicName 不应为空", topic.getTopicName().isEmpty());
 
-        // 验证 dataClass 为 Instant
-        assertEquals("eventData 类型应为 Instant.class",
-            java.time.Instant.class, topic.getDataClass());
+        // 验证 dataClass 为 AllLoadedEvent（纯信号事件，触发时刻从 BusEvent.getFiredAt() 取）
+        assertEquals("eventData 类型应为 AllLoadedEvent.class",
+            AllLoadedEvent.class, topic.getDataClass());
     }
 
     /**

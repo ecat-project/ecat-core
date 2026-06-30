@@ -19,7 +19,10 @@ package com.ecat.core.Integration;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Bus.BusRegistry;
 import com.ecat.core.Bus.BusTopic;
-import com.ecat.core.Bus.IntegrationLifecycleEvent;
+import com.ecat.core.Bus.event.AllLoadedEvent;
+import com.ecat.core.Bus.event.BusEvent;
+import com.ecat.core.Bus.event.EventContext;
+import com.ecat.core.Bus.event.IntegrationLifecycleEvent;
 import com.ecat.core.Task.NamedThreadFactory;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Utils.LoadJarUtils;
@@ -153,9 +156,10 @@ public class IntegrationManager {
                                        IntegrationLifecycleEvent.Effect effect) {
         BusRegistry busRegistry = getBusRegistry();
         if (busRegistry != null) {
-            busRegistry.publishSync(
+            busRegistry.publish(BusEvent.of(
                 BusTopic.INTEGRATION_LIFECYCLE.getTopicName(),
-                new IntegrationLifecycleEvent(coordinate, action, effect));
+                new IntegrationLifecycleEvent(coordinate, action, effect),
+                EventContext.root(EventContext.Source.SYSTEM, null)));
         }
     }
 
@@ -657,10 +661,10 @@ public class IntegrationManager {
             // 发布所有集成加载完成事件（同步），通知逻辑设备子集成可以创建逻辑设备
             BusRegistry busRegistry = getBusRegistry();
             if (busRegistry != null) {
-                busRegistry.publishSync(
+                busRegistry.publish(BusEvent.of(
                     BusTopic.INTEGRATIONS_ALL_LOADED.getTopicName(),
-                    java.time.Instant.now()
-                );
+                    new AllLoadedEvent(),
+                    EventContext.root(EventContext.Source.SYSTEM, null)));
                 log.info("Published INTEGRATIONS_ALL_LOADED event");
             }
 

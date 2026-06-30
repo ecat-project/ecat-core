@@ -26,12 +26,31 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
 
+import com.ecat.core.Bus.consumer.AbstractBusConsumer;
+import com.ecat.core.Bus.event.BusEvent;
+import com.ecat.core.Bus.event.BusPayload;
+import com.ecat.core.Bus.event.EventContext;
+
 /**
- * Tests for BusRegistry.publishSync() — synchronous event dispatch.
- * Validates that publishSync runs callbacks on the caller's thread,
- * that publish() remains async, and that wildcard topic matching works.
+ * Tests for BusRegistry 同步扇出分发（重构后契约）。
+ * 重构后 publish 是唯一发布方法，做同步扇出（调用线程内执行订阅者），不再持有共享线程池；
+ * 异步性下放到消费者自身（AbstractBusConsumer 自带独占线程）。本类验证：
+ * 同步扇出在调用线程执行、通配符匹配、订阅者从 BusEvent 信封取 type/payload、以及消费者自有线程承担异步处理。
+ *
+ * <p>载荷用本测试自带的 {@link TestPayload}（实现 {@link BusPayload}）——这些用例只验证总线信封投递
+ * 契约（同步扇出/通配符/线程归属），不关心领域载荷语义，故用最小占位载荷而非真实 DeviceDataChangedEvent。
  */
 public class BusRegistrySyncPublishTest {
+
+    /**
+     * 测试占位载荷——只验证总线信封投递契约（同步扇出/通配符/线程归属）的最小 BusPayload，
+     * 不承载领域语义。携带一个 Object 值供订阅者取回校验透传正确性。
+     */
+    private static final class TestPayload implements BusPayload {
+        private final Object value;
+        TestPayload(Object value) { this.value = value; }
+        Object getValue() { return value; }
+    }
 
     private BusRegistry registry;
 
@@ -46,65 +65,92 @@ public class BusRegistrySyncPublishTest {
     }
 
     /**
-     * publishSync must invoke the subscriber on the same thread that called publishSync,
-     * NOT on the executorService thread.
+     * publish 必须在调用 publish 的同一线程上同步执行订阅者（不在任何执行器线程上）。
      */
     @Test
-    public void testSyncPublishCallsSubscriberInSameThread() {
+    public void testPublishCallsSubscriberInSameThread() {
         Thread callerThread = Thread.currentThread();
         AtomicReference<Thread> callbackThread = new AtomicReference<>();
 
-        registry.subscribe("device.status", (topic, data) -> {
-            callbackThread.set(Thread.currentThread());
-        });
+        registry.subscribe("device.status", event -> callbackThread.set(Thread.currentThread()));
 
-        registry.publishSync("device.status", "online");
+        registry.publish(BusEvent.of("device.status", new TestPayload("online"),
+                EventContext.root(EventContext.Source.SYSTEM, null)));
 
         assertNotNull("Subscriber should have been called", callbackThread.get());
-        assertSame("publishSync should invoke subscriber on caller thread",
+        assertSame("publish 应在调用线程同步扇出（重构后无共享线程池）",
                 callerThread, callbackThread.get());
     }
 
     /**
-     * publish must still dispatch asynchronously via executorService.
-     * The callback should run on a different thread.
+     * 重构后的流控契约：publish() 同步扇出——订阅者在调用线程内执行，不再经共享线程池。
+     * 这正是把"是否异步"下放到消费者的前提：发布线程同步扇出，消费者自行决定是否离线处理。
      */
     @Test
-    public void testAsyncPublishStillUsesExecutor() throws InterruptedException {
+    public void testPublishIsSyncFanoutOnCallerThread() {
         Thread callerThread = Thread.currentThread();
-        CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<Thread> callbackThread = new AtomicReference<>();
 
-        registry.subscribe("device.data", (topic, data) -> {
-            callbackThread.set(Thread.currentThread());
-            latch.countDown();
-        });
+        registry.subscribe("device.data", event -> callbackThread.set(Thread.currentThread()));
 
-        registry.publish("device.data", "some-payload");
-
-        assertTrue("Async publish should complete within 5 seconds",
-                latch.await(5, TimeUnit.SECONDS));
+        registry.publish(BusEvent.of("device.data", new TestPayload("some-payload"),
+                EventContext.root(EventContext.Source.DEVICE_POLL, null)));
 
         assertNotNull("Subscriber should have been called", callbackThread.get());
-        assertNotSame("publish should invoke subscriber on a different thread (async)",
+        assertSame("publish 应在调用线程同步扇出（重构后无共享线程池）",
                 callerThread, callbackThread.get());
     }
 
     /**
-     * publishSync must support wildcard topic matching, just like publish().
-     * Subscribing to "device.*" should match "device.status".
+     * 异步处理由消费者自有线程承担：订阅者把事件非阻塞转交 AbstractBusConsumer（自带独占线程），
+     * 实际消费跑在 consumer 的 worker 线程（bus-consumer-*），而非发布线程。
+     * 这是"流控下放到消费者"的核心——发布线程只入队纳秒级返回，绝不阻塞；慢消费者各自背压互不影响。
      */
     @Test
-    public void testSyncPublishMatchesWildcardTopics() {
+    public void testAsyncProcessingViaConsumerOwnedThread() throws InterruptedException {
+        Thread callerThread = Thread.currentThread();
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicReference<Thread> workerThread = new AtomicReference<>();
+
+        AbstractBusConsumer<String> consumer = new AbstractBusConsumer<String>("sync-test", 4) {
+            @Override
+            protected void consume(String event) {
+                workerThread.set(Thread.currentThread());
+                latch.countDown();
+            }
+        };
+        // 订阅者只做非阻塞入队（onEvent 纳秒级返回），重活交给消费者独占线程；
+        // 信封迁移后订阅者收到 BusEvent，从 getPayload() 取 TestPayload 再读出其中的 String 值
+        // （getPayload() 返回通配类型 capture#1 of ?，须先按 TestPayload 取值再交消费者）
+        registry.subscribe("device.data",
+                event -> consumer.onEvent((String) ((TestPayload) event.getPayload()).getValue()));
+
+        registry.publish(BusEvent.of("device.data", new TestPayload("heavy-payload"),
+                EventContext.root(EventContext.Source.DEVICE_POLL, null)));
+
+        assertTrue("消费者应在 5s 内处理完", latch.await(5, TimeUnit.SECONDS));
+        assertNotNull("消费者 worker 应已执行", workerThread.get());
+        assertNotSame("实际消费应跑在消费者独占线程，而非发布线程",
+                callerThread, workerThread.get());
+        consumer.shutdown();
+    }
+
+    /**
+     * publish 必须支持通配符 topic 匹配：订阅 "device.*" 应匹配 "device.status"。
+     * 信封迁移后订阅者从 BusEvent 取 type/payload。
+     */
+    @Test
+    public void testPublishMatchesWildcardTopics() {
         AtomicReference<String> receivedTopic = new AtomicReference<>();
         AtomicReference<Object> receivedData = new AtomicReference<>();
 
-        registry.subscribe("device.*", (topic, data) -> {
-            receivedTopic.set(topic);
-            receivedData.set(data);
+        registry.subscribe("device.*", event -> {
+            receivedTopic.set(event.getType());
+            receivedData.set(((TestPayload) event.getPayload()).getValue());
         });
 
-        registry.publishSync("device.status", 42);
+        registry.publish(BusEvent.of("device.status", new TestPayload(42),
+                EventContext.root(EventContext.Source.SYSTEM, null)));
 
         assertEquals("Wildcard should match 'device.status'",
                 "device.status", receivedTopic.get());

@@ -17,6 +17,7 @@
 package com.ecat.core.LogicState;
 
 import com.ecat.core.State.AQAttribute;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.UnitInfo;
@@ -84,13 +85,17 @@ public class LAQAttribute extends AQAttribute implements ILogicAttribute<Double>
      * This supports both same-class conversion (e.g., mg/m³ → µg/m³) and cross-class conversion
      * (e.g., PPB → µg/m³, requiring molecularWeight).
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      * @throws IllegalStateException if cross-class conversion is needed but molecularWeight is not set
      * @throws RuntimeException if unit conversion is not supported
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
-        Object rawValue = bindAttr.getValue();
+    public void updateBindAttrValue(AttrState<?> sourceState) {
+        // bindAttr.getValue() 已降为 protected：跨类经不可变 AttrState 读取原始值。
+        // bindAttr.getState() 在首次 updateValue 前为 null，按无值（newValue=null）处理
+        // （保持原 getValue() 返回 null 时的语义）。
+        AttrState<?> bindState = bindAttr.getState();
+        Object rawValue = bindState != null ? bindState.getValue() : null;
         Double newValue = null;
         if (rawValue != null) {
             Double rawDouble = rawValue instanceof Number ? ((Number) rawValue).doubleValue() : null;
@@ -98,7 +103,7 @@ public class LAQAttribute extends AQAttribute implements ILogicAttribute<Double>
                 newValue = this.convertValueToUnit(rawDouble, bindNativeUnit, nativeUnit);
             }
         }
-        updateValue(newValue, updatedAttr.getStatus());
+        updateValue(newValue, sourceState.getStatus());
     }
 
     /**

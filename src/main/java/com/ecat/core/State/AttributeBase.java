@@ -19,19 +19,21 @@ package com.ecat.core.State;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import lombok.Getter;
 import lombok.Setter;
 
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Bus.BusTopic;
+import com.ecat.core.Bus.event.BusEvent;
+import com.ecat.core.Bus.event.DeviceDataChangedEvent;
+import com.ecat.core.Bus.event.EventContext;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 import com.ecat.core.Utils.DynamicConfig.ConstraintValidator;
@@ -67,11 +69,11 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     @Getter
     protected boolean isValueUpdated; // 是否更新过，标志位
     @Getter
-    protected java.time.LocalDateTime updateTime; // 数据更新时间，对于实时数据等同于数据产生的时间
+    protected Instant updateTime; // 数据更新时间（Instant，跨时区），对于实时数据等同于数据产生的时间
     protected Function<AttrChangedCallbackParams<T>, CompletableFuture<Boolean>> onChangedCallback = null; // 设备数据更新回调函数
 
     // 数据属性
-    protected UnitInfo nativeUnit; //原始信号单位，允许为null
+    protected UnitInfo nativeUnit; //业务原始单位（attr.value 业务值对应的单位），允许为null
     protected UnitInfo displayUnit; //显示信号单位，允许为null，显示使用，不存储数据库
     
     protected String displayName; // 用户设置的高优先级显示名称，对外显示displayName优先级>i18n名称
@@ -94,6 +96,21 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     @Getter
     @Setter
     protected T defaultValue = null; // 默认值，无历史记录时使用
+
+    // —— 不可变状态三槽（mid 在途 / last 已提交 / previous 上一态），生命周期与调用链详见 state-lifecycle-design.md ——
+    // 在途/不稳定态：updateValue/setStatus 的变更都重建这里，反映尚未提交的最新快照。getState() 在它非空时
+    // 返回它（同周期内 updateValue 后立即可读——计算属性求值、测试预热断言依赖此特性）。publicState 提交后置 null。
+    private volatile AttrState<T> midState;
+    // 已提交态：上次 publicState 提交的稳定快照。作为下次发布事件的 old、持久化数据源；getState() 在 midState 为空时返回它。
+    private volatile AttrState<T> lastState;
+    // 上一态：lastState 的前驱，永远指向真正的上一个 state（即发布事件的 old）。不再被中间态覆盖，语义干净。
+    protected volatile AttrState<T> previousState;
+    // 事件溯源上下文：谁触发本次变更（设备轮询/用户操作/逻辑重发布/跨集成）。默认设备轮询；
+    // 用户/逻辑入口在调用 updateValue 前用 setEventContext 覆盖。
+    private volatile EventContext eventContext;
+    // 值真正发生变化的时刻（Instant，跨时区）。与 updateTime 区分：updateTime 是数据产生时间（含重复刷新），
+    // lastChanged 仅在 value 实际变化时推进——供设备活性判断、告警去重区分"真变化"与"重复刷新"。
+    private volatile Instant lastChanged;
 
     /**
      * 支持I18n的构造函数，属性i18n名称规则见i18nDispNamePath
@@ -198,14 +215,40 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
         return valueChangeable;
     }
 
+    /**
+     * 更新属性状态（不改值）。变更写入在途 midState，待 publicState 提交。
+     *
+     * <p>⚠ <b>不推荐单独使用</b>：值与状态都需变更时应优先 {@link #updateValue(Object, AttributeStatus)}
+     * 一次设值+状态。单独 setStatus 会单独重建一次 midState（含 getDisplayValue 单位换算+格式化），
+     * 叠加此前的 updateValue 即双重建、且中途产生「值新/状态旧」瞬态撕裂 midState。
+     * 仅在「只改状态不改值」时使用——典型场景：异常路径设备故障 setStatus(MALFUNCTION)，本周期无有效值可解析。
+     *
+     * <p>状态变更即产新 state：device 已附着时无条件重建 midState（不依赖 lastState 是否已存在），
+     * 使异常路径的纯状态变更（无 updateValue）也能经 getState 可见、经 publicState 上总线。
+     *
+     * @param newStatus 新状态
+     */
     @Override
     public boolean setStatus(AttributeStatus newStatus){
-        status = newStatus;
+        synchronized (this) {
+            if (this.status == newStatus) {
+                return true; // 状态未变，避免无谓刷新与重复发布
+            }
+            this.status = newStatus;
+            // 状态变更即产新 state：device 已附着时无条件重建在途 midState（不再依赖 lastState 已存在），
+            // 使异常路径纯状态变更（无 updateValue）也能经 getState 可见、经 publicState 上总线。
+            if (this.device != null && this.device.getId() != null) {
+                if (this.eventContext == null) {
+                    this.eventContext = EventContext.root(EventContext.Source.DEVICE_POLL, null);
+                }
+                this.midState = buildState();
+                setValueUpdated(true);
+            }
+        }
         return true;
     }
 
-    @Override
-    public AttributeStatus getStatus(){
+    protected AttributeStatus getStatus(){
         return status;
     }
 
@@ -261,11 +304,9 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     }
 
     /**
-     * 获取属性原始值
+     * 获取属性原始值——protected：内部/子类用；外部跨线程消费方用 getState() 拿不可变 AttrState。
      */
-    @Override
-	public T getValue() {
-		// Provide implementation
+	protected T getValue() {
         return value;
 	}
 
@@ -365,7 +406,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
 
     public void setValueUpdated(boolean isValueUpdated){
         if(isValueUpdated){
-            this.updateTime = java.time.LocalDateTime.now();
+            this.updateTime = Instant.now();
         }
         this.isValueUpdated = isValueUpdated;
     }
@@ -415,7 +456,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      * @see #convertStringToType(String)
      * @see AttrValueType
      */
-    public AttrValueType getValueType(){
+    protected AttrValueType getValueType(){
         return AttrValueType.fromJDKClass(targetType);
     }
 
@@ -424,13 +465,18 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      * @apiNote 为序列化等场景提供字符串类型名称
      * @return 属性值类型名称
      */
-    public String getValueTypeName(){
+    protected String getValueTypeName(){
         return getValueType().getValueTypeName();
     }
 
     /**
-     * 发布属性状态，提交给bus
-     * 按需更新，只有属性值发生变化时才更新
+     * 提交并发布状态变更（commit 点）。按需发布：仅当自上次提交后有 updateValue/setStatus 变更（isValueUpdated）时。
+     *
+     * <p>取在途 midState 作 new、上次已提交 lastState 作 old，发布 BusEvent&lt;DeviceDataChangedEvent&gt;（old+new 两个不可变 AttrState，
+     * 订阅者拿到绝对自洽的变化事件）；随后移位：previousState←lastState、lastState←midState、midState 置空
+     *（previousState 永远指向 lastState 的前驱=发布事件的 old，链连续无幽灵中间态）。
+     * 持久化（persistable）在此对已提交的 coherent 态落盘，保证 value+status 自洽——比在 updateValue 内落盘更准
+     *（避免值新/状态旧的瞬态撕裂态被持久化）。
      */
     public boolean publicState() {
         if(this.isValueUpdated){
@@ -440,10 +486,37 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
                     log.warn("Attribute '{}' is not registered to any device, skip publicState", this.getAttributeID());
                     return true;
                 }
-                device.getCore().getBusRegistry().publish(BusTopic.DEVICE_DATA_UPDATE.getTopicName(), this);
+                AttrState<T> newState = this.midState;
+                if (newState == null) {
+                    // 无在途变更（device 未附着或从未 updateValue/setStatus），无可发布内容
+                    return true;
+                }
+                // context 取自 eventContext（null 兜底设备轮询——setValueUpdated(true) 公开入口可能绕过 updateValue）
+                EventContext ctx = (this.eventContext != null)
+                        ? this.eventContext
+                        : EventContext.root(EventContext.Source.DEVICE_POLL, null);
+                // 持久化（commit 点，独立 try）：此时 getState() 返回在途 midState（本周期 value+status 已 settle 的 coherent 态）。
+                // 放在发布前、移位前——无总线或发布失败时仍保证持久化。
+                if (persistable && device.getCore() != null) {
+                    try {
+                        device.getCore().getStateManager().saveState(device, this);
+                    } catch (Exception e) {
+                        log.error("Failed to persist state for attribute " + attributeID, e);
+                    }
+                }
+                // 发布总线事件：old=lastState（上次提交），new=midState（本次在途）。
+                // 失败抛到外层 catch → publicState 返回 false（保留发布失败可感知契约；未移位，下次 publicState 可重试）。
+                DeviceDataChangedEvent change = new DeviceDataChangedEvent(
+                        device.getId(), attributeID, this.lastState, newState);
+                BusEvent<DeviceDataChangedEvent> event = BusEvent.of(
+                        BusTopic.DEVICE_DATA_UPDATE.getTopicName(), change, ctx);
+                device.getCore().getBusRegistry().publish(event);
+                // 发布成功后移位提交：previous←last, last←mid(已提交), mid=null
+                this.previousState = this.lastState;
+                this.lastState = newState;
+                this.midState = null;
             } catch (Exception e) {
-                log.error("Failed to update attribute " + this.getAttributeID() + " for device " + device.getId());
-                log.error(e.getStackTrace().toString());
+                log.error("Failed to publish attribute state " + this.getAttributeID() + " for device " + device.getId(), e);
                 return false;
             }
             this.setValueUpdated(false);
@@ -452,24 +525,51 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     }
 
     /**
-     * 设备自己更新原始数据，不触发onChangedCallback订阅，适于收到设备新数据更新状态值
-     * 子类根据需求设置访问范围
-     * 不要给用户侧操作使用此函数
-     * @param newValue
-     * @return
+     * 获取属性当前可见的状态快照（不可变 AttrState，单次 volatile 读，字段自洽）。
+     *
+     * <p>返回规则：自上次 publicState 提交后若有 updateValue/setStatus 变更（midState 非空），返回<b>在途的 midState</b>
+     *（反映尚未提交的最新变更）；否则返回<b>上次已提交的 lastState</b>。即「读取此刻最新可见态」——同周期内
+     * updateValue 后立即调用可读到刚写入的值（计算属性求值、测试预热断言等依赖此特性）。
+     *
+     * <p>总线订阅者、API 导出、持久化统一用此替代分别读 getValue/getStatus/getUpdateTime——避免多字段分别读取期间的撕裂读。
+     * 注意：在途 midState 在属性自身 updateValue 与 setStatus 之间存在极短的「值已新/状态未新」瞬态窗口；
+     * 若需值与状态绝对自洽的已提交态，调用前先 publicState。首次 updateValue 前（或未绑定设备）为 null。
+     *
+     * @return 当前可见状态；属性从未 updateValue 且 device 未附着时为 null
      */
-    protected boolean updateValue(T newValue){
-        this.value = newValue;
-        this.setValueUpdated();
-        // 持久化：persistable 标志为 true 且已绑定设备时自动保存
-        if (persistable && device != null && device.getCore() != null) {
-            try {
-                device.getCore().getStateManager().saveState(device, this);
-            } catch (Exception e) {
-                log.error("Failed to persist state for attribute " + attributeID, e);
-            }
+    public AttrState<T> getState() {
+        return midState != null ? midState : lastState;
+    }
+
+    /**
+     * 获取当前事件溯源上下文（谁触发本次变更）。
+     *
+     * @return 溯源上下文，尚未 updateValue 过时为 null
+     */
+    public EventContext getEventContext() {
+        return eventContext;
+    }
+
+    /**
+     * 设置事件溯源上下文。用户侧（setDisplayValue 链）、逻辑重发布等入口在调用 updateValue 前
+     * 调用此方法标记来源；不设置则 updateValue 默认按设备轮询溯源。
+     *
+     * @param ctx 溯源上下文，不能为 null
+     */
+    public void setEventContext(EventContext ctx) {
+        if (ctx == null) {
+            throw new IllegalArgumentException("eventContext 不能为 null");
         }
-        return true;
+        this.eventContext = ctx;
+    }
+
+    /**
+     * 值实际发生变化的时刻（Instant，跨时区）。与 updateTime（数据时间，含重复刷新）区分，用于判断"真变化"。
+     *
+     * @return 最近一次 value 变化的时刻，从未变化过为 null
+     */
+    public Instant getLastChanged() {
+        return lastChanged;
     }
 
     /**
@@ -477,13 +577,80 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      * 子类根据需求设置访问范围
      * 不要给用户侧操作使用此函数
      * @param newValue
-     * @param newStatus
      * @return
+     */
+    /**
+     * 更新属性业务值（工程值），不改变 status。变更写入在途 midState，待 publicState 提交。
+     *
+     * <p>⚠ <b>不推荐单独使用</b>：若同周期还需 setStatus，应改用 {@link #updateValue(Object, AttributeStatus)}
+     * 一次设值+状态。本方法触发一次 midState 重建（含 getDisplayValue 单位换算+格式化），紧接 setStatus 会再重建一次
+     * ——双倍重建开销，且中途产生「值新/状态旧」瞬态撕裂 midState。仅在「只改值不改状态」时使用。
+     *
+     * @param newValue 新业务值
+     * @return true
+     */
+    protected boolean updateValue(T newValue){
+        // 同步块保证"写新值 -> 推进 lastChanged -> 构建在途 midState"原子进行，getState() 单次 volatile 读拿到的状态字段自洽（修撕裂读）。
+        synchronized (this) {
+            T oldValue = this.value;
+            boolean changed = !Objects.equals(oldValue, newValue);
+            this.value = newValue;
+            this.setValueUpdated();
+            if (changed) {
+                this.lastChanged = Instant.now();
+            }
+            // context 默认按设备轮询入口溯源；用户/逻辑入口会先 setEventContext 覆盖。
+            if (this.eventContext == null) {
+                this.eventContext = EventContext.root(EventContext.Source.DEVICE_POLL, null);
+            }
+            // 写入在途 midState（不触碰 lastState/previousState——它们由 publicState 移位管理）。
+            // 仅在已绑定设备且设备 id 可解析时构建（deviceId 是 AttrState 必填字段）；未绑定或 id 为 null（单测未 stub getId 的 mock 设备）时跳过。
+            if (this.device != null && this.device.getId() != null) {
+                this.midState = buildState();
+            }
+        }
+        // 持久化已迁到 publicState（commit 点），此处不再落盘——避免值新/状态旧的瞬态 midState 被持久化。
+        return true;
+    }
+
+    /**
+     * 原子更新属性业务值与状态——<b>推荐入口</b>。值与状态一次写入、midState 仅重建一次，无瞬态撕裂、性能最优
+     *（相对分别调 updateValue + setStatus 省一次 midState 重建与一次同步块）。适于收到设备新数据时同步更新值与状态。
+     * 子类按需设置访问范围；不要给用户侧操作使用（用户侧走 setValue，会触发 onChangedCallback）。
+     *
+     * @param newValue  新业务值
+     * @param newStatus 新状态；null 表示不改变当前 status（保留既有 status 字段，buildState 要求 status 非空）
+     * @return true
      */
     @Override
     public boolean updateValue(T newValue, AttributeStatus newStatus){
-        this.status = newStatus;
+        // null 表示"不改变当前状态"（保留既有 status 字段），而非置空——buildState 要求 status 非空。
+        if (newStatus != null) {
+            this.status = newStatus;
+        }
         return updateValue(newValue);
+    }
+
+    /**
+     * 从当前可变字段构建不可变 AttrState 状态。
+     * <p>须在 synchronized(this) 内调用（由 updateValue 保证），确保各字段读取自洽。
+     * 集合类 value 由 AttrState 自行防御性拷贝；标量与不可变类型零拷贝。
+     */
+    private AttrState<T> buildState() {
+        return AttrState.<T>builder()
+            .deviceId(device.getId())
+            .attrId(attributeID)
+            .valueType(targetType)
+            .value(value)
+            .status(status)
+            .nativeUnit(nativeUnit)
+            .displayUnit(displayUnit)
+            .displayPrecision(displayPrecision)
+            .displayValue(getDisplayValue())
+            .lastUpdated(updateTime)
+            .lastChanged(lastChanged)
+            .context(eventContext)
+            .build();
     }
 
 
@@ -677,17 +844,24 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     }
 
     /**
-     * 从 PersistedState 恢复属性状态（value, status, updateTime）
-     * 基类统一处理类型转换，不需要子类重写
+     * 从 PersistedState 恢复属性状态（value, status, updateTime）到已提交 lastState。
+     * 基类统一处理类型转换，不需要子类重写。恢复后 midState/previousState 置空——首次 updateValue 重建 midState、
+     * 首次 publicState 移位生成新 previousState。
      */
     public void restore(PersistedState state) {
-        this.value = convertObjectToTargetType(state.value);
-        this.status = AttributeStatus.fromId(state.statusCode);
-        if (state.updateTimeEpochMs > 0) {
-            this.updateTime = LocalDateTime.ofInstant(
-                Instant.ofEpochMilli(state.updateTimeEpochMs),
-                ZoneId.systemDefault()
-            );
+        synchronized (this) {
+            this.value = convertObjectToTargetType(state.value);
+            this.status = AttributeStatus.fromId(state.statusCode);
+            if (state.updateTimeEpochMs > 0) {
+                this.updateTime = Instant.ofEpochMilli(state.updateTimeEpochMs);
+            }
+            // 恢复到已提交 lastState（让 getState() 在无在途变更时返回恢复态）；midState/previousState 置空。
+            // 必填（deviceId/attrId/status）未就绪时跳过，待首次 updateValue 构建——避免 LogicDevice createAttrs 早期 restore 时字段未全引发 build 校验失败。
+            if (device != null && device.getId() != null && attributeID != null && this.status != null) {
+                this.lastState = buildState();
+                this.midState = null;
+                this.previousState = null;
+            }
         }
     }
 
@@ -697,7 +871,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     public void restoreFromDefault() {
         this.value = defaultValue;
         this.status = AttributeStatus.NORMAL;
-        this.updateTime = LocalDateTime.now();
+        this.updateTime = Instant.now();
     }
 
     /**

@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.AttributeStatus;
@@ -41,112 +42,156 @@ public class LRunningStatusAttributeTest {
     public void valueSetToNormalWhenPhyStatusIsNormal() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(AttributeStatus.NORMAL);
+        bindDevice(phyAttr);
+        phyAttr.updateValue(null, AttributeStatus.NORMAL);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
+        bindDevice(logicAttr);
 
-        assertEquals("Normal", logicAttr.getValue());
-        assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+
+        assertEquals("Normal", logicAttr.getState().getValue());
+        assertEquals(AttributeStatus.NORMAL, logicAttr.getState().getStatus());
     }
 
     @Test
     public void valueSetToAlarmWhenPhyStatusIsAlarm() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(AttributeStatus.ALARM);
+        bindDevice(phyAttr);
+        phyAttr.updateValue(null, AttributeStatus.ALARM);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
+        bindDevice(logicAttr);
 
-        assertEquals("Alarm", logicAttr.getValue());
-        assertEquals(AttributeStatus.ALARM, logicAttr.getStatus());
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+
+        assertEquals("Alarm", logicAttr.getState().getValue());
+        assertEquals(AttributeStatus.ALARM, logicAttr.getState().getStatus());
     }
 
     @Test
     public void valueSetToMaintenanceWhenPhyStatusIsMaintenance() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(AttributeStatus.MAINTENANCE);
+        bindDevice(phyAttr);
+        phyAttr.updateValue(null, AttributeStatus.MAINTENANCE);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
+        bindDevice(logicAttr);
 
-        assertEquals("Maintenance", logicAttr.getValue());
-        assertEquals(AttributeStatus.MAINTENANCE, logicAttr.getStatus());
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+
+        assertEquals("Maintenance", logicAttr.getState().getValue());
+        assertEquals(AttributeStatus.MAINTENANCE, logicAttr.getState().getStatus());
     }
 
     @Test
     public void valueSetToCalibrationWhenPhyStatusIsCalibration() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(AttributeStatus.CALIBRATION);
+        bindDevice(phyAttr);
+        phyAttr.updateValue(null, AttributeStatus.CALIBRATION);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
+        bindDevice(logicAttr);
 
-        assertEquals("Calibration", logicAttr.getValue());
-        assertEquals(AttributeStatus.CALIBRATION, logicAttr.getStatus());
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+
+        assertEquals("Calibration", logicAttr.getState().getValue());
+        assertEquals(AttributeStatus.CALIBRATION, logicAttr.getState().getStatus());
     }
 
     @Test
     public void valueSetToMalfunctionWhenPhyStatusIsMalfunction() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(AttributeStatus.MALFUNCTION);
+        bindDevice(phyAttr);
+        phyAttr.updateValue(null, AttributeStatus.MALFUNCTION);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
+        bindDevice(logicAttr);
 
-        assertEquals("Malfunction", logicAttr.getValue());
-        assertEquals(AttributeStatus.MALFUNCTION, logicAttr.getStatus());
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+
+        assertEquals("Malfunction", logicAttr.getState().getValue());
+        assertEquals(AttributeStatus.MALFUNCTION, logicAttr.getState().getStatus());
     }
 
     // ========== 边界条件测试 ==========
 
     @Test
     public void noUpdateWhenPhyStatusIsNull() {
+        // 物理属性从未 updateValue → getState() 为 null（等价于原 getStatus()==null 的「无状态」语义）。
+        // 不能用 updateValue(null, null) 驱动：buildState() 要求 status 非 null，会抛 IllegalArgument。
+        // 生产侧 LRunningStatusAttribute.updateBindAttrValue 已对 getState()==null 做空守卫 → 提前返回不更新。
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(null);
+        bindDevice(phyAttr);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
+        bindDevice(logicAttr);
 
-        assertNull(logicAttr.getValue());
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+
+        // 物理属性无状态 → 逻辑属性从未更新 → getState() 本身为 null
+        assertNull(logicAttr.getState());
     }
 
     @Test
     public void noUpdateWhenPhyStatusIsEmpty() {
+        // 物理属性带 EMPTY 状态：EMPTY 非 null，buildState() 可正常构建；
+        // 生产侧 LRunningStatusAttribute.updateBindAttrValue 见 status==EMPTY → 提前返回不更新。
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(AttributeStatus.EMPTY);
+        bindDevice(phyAttr);
+        phyAttr.updateValue(null, AttributeStatus.EMPTY);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
+        bindDevice(logicAttr);
 
-        assertNull(logicAttr.getValue());
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+
+        // 生产侧见 EMPTY 跳过更新 → 逻辑属性从未 updateValue → getState() 本身为 null
+        assertNull(logicAttr.getState());
     }
 
     @Test
     public void statusTransitionNormalToAlarm() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(AttributeStatus.NORMAL);
+        bindDevice(phyAttr);
+        phyAttr.updateValue(null, AttributeStatus.NORMAL);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertEquals("Normal", logicAttr.getValue());
+        bindDevice(logicAttr);
+
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        assertEquals("Normal", logicAttr.getState().getValue());
 
         phyAttr.setTestStatus(AttributeStatus.ALARM);
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertEquals("Alarm", logicAttr.getValue());
+        phyAttr.updateValue(null, AttributeStatus.ALARM);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        assertEquals("Alarm", logicAttr.getState().getValue());
     }
 
     @Test
     public void statusTransitionAlarmToNormal() {
         TestPhyAttr phyAttr = createMockAttr("so2", AttributeClass.SO2);
         phyAttr.setTestStatus(AttributeStatus.ALARM);
+        bindDevice(phyAttr);
+        phyAttr.updateValue(null, AttributeStatus.ALARM);
 
         LRunningStatusAttribute logicAttr = new LRunningStatusAttribute(phyAttr);
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertEquals("Alarm", logicAttr.getValue());
+        bindDevice(logicAttr);
+
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        assertEquals("Alarm", logicAttr.getState().getValue());
 
         phyAttr.setTestStatus(AttributeStatus.NORMAL);
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertEquals("Normal", logicAttr.getValue());
+        phyAttr.updateValue(null, AttributeStatus.NORMAL);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        assertEquals("Normal", logicAttr.getState().getValue());
     }
 
     // ========== 选项列表测试 ==========
@@ -205,6 +250,16 @@ public class LRunningStatusAttributeTest {
         return new TestPhyAttr(attrId, attrClass);
     }
 
+    /**
+     * 绑定 mock 设备，使 {@link AttributeBase#getState()} 在 updateValue 后返回非 null 的 AttrState。
+     * getState() 要求设备已绑定且 getId() 非 null，否则恒为 null。
+     */
+    private static void bindDevice(AttributeBase<?> attr) {
+        DeviceBase mockDevice = org.mockito.Mockito.mock(DeviceBase.class);
+        org.mockito.Mockito.when(mockDevice.getId()).thenReturn("testDevice");
+        attr.setDevice(mockDevice);
+    }
+
     private static class TestPhyAttr extends AttributeBase<String> {
         private AttributeStatus testStatus = AttributeStatus.EMPTY;
 
@@ -216,7 +271,9 @@ public class LRunningStatusAttributeTest {
             this.testStatus = status;
         }
 
-        @Override public AttributeStatus getStatus() { return testStatus; }
+        // getStatus()/getValue() 已降为 protected 且不再属于接口契约；
+        // 此处仅作为测试桩的内部状态读取，不再标注 @Override。
+        public AttributeStatus getStatus() { return testStatus; }
         @Override public String getDisplayValue(UnitInfo toUnit) { return null; }
         @Override protected String convertFromUnitImp(String value, UnitInfo fromUnit) { return value; }
         @Override public Double convertValueToUnit(Double value, UnitInfo fromUnit, UnitInfo toUnit) { return value; }

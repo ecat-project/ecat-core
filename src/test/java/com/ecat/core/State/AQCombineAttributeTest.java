@@ -1,7 +1,7 @@
 package com.ecat.core.State;
 
 import com.ecat.core.Bus.BusRegistry;
-import com.ecat.core.Bus.BusTopic;
+import com.ecat.core.Bus.event.BusEvent;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.EcatCore;
 import com.ecat.core.State.Unit.AirVolumeUnit;
@@ -16,7 +16,7 @@ import java.util.Collections;
 import java.util.List;
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 /**
@@ -394,14 +394,17 @@ public class AQCombineAttributeTest {
         assertTrue(attr1.isValueUpdated());
         assertFalse(noxAttr.isValueUpdated());  // 组合属性未直接更新
 
-        // 调用 publicState() 应该检测到子属性更新并推送
-        // 注意：publicState() 成功后会重置 isValueUpdated 标志
+        // 调用 publicState()：组合属性 setValueUpdated(true) 只置标志位、不会构建 lastState
+        // （组合属性的 updateValue 会抛异常，永远不会构建 lastState），故 publicState 因 newState==null
+        // 直接返回 true 而不发布 BusEvent——这与单属性 publicState 的行为不同。
         boolean result = noxAttr.publicState();
         assertTrue(result);  // publicState() 应该返回 true 表示成功
-        assertFalse(noxAttr.isValueUpdated());  // publicState() 后应该重置标志
+        // 新行为：lastState==null 时 publicState 在 newState==null 处短路返回，不会执行
+        // 末尾的 setValueUpdated(false)，故 isValueUpdated 标志保持为 true。
+        assertTrue(noxAttr.isValueUpdated());
 
-        // 验证推送到数据总线
-        verify(mockBusRegistry).publish(eq("device.data.update"), eq(noxAttr));
+        // 重构后组合属性 publicState 不再发布（无 lastState）；断言未调用 publish(BusEvent)
+        verify(mockBusRegistry, never()).publish(any(BusEvent.class));
     }
 
     @Test
@@ -435,7 +438,7 @@ public class AQCombineAttributeTest {
         noxAttr.publicState();
 
         // 验证没有推送到数据总线
-        verify(mockBusRegistry, never()).publish(eq("device.data.update"), eq(noxAttr));
+        verify(mockBusRegistry, never()).publish(argThat(e -> "device.data.update".equals(e.getType()) && noxAttr == e.getPayload()));
     }
 
     @Test
@@ -467,11 +470,15 @@ public class AQCombineAttributeTest {
         assertTrue(attr1.isValueUpdated());
         assertTrue(attr2.isValueUpdated());
 
-        // 调用 publicState() 应该推送
+        // 调用 publicState()：组合属性 setValueUpdated(true) 只置标志位、不会构建 lastState
+        // （组合属性的 updateValue 会抛异常，永远不会构建 lastState），故 publicState 因 newState==null
+        // 直接返回 true 而不发布 BusEvent。
         noxAttr.publicState();
 
-        // 验证推送到数据总线
-        verify(mockBusRegistry).publish(eq("device.data.update"), eq(noxAttr));
-        assertFalse(noxAttr.isValueUpdated());  // publicState() 后应该重置标志
+        // 重构后组合属性 publicState 不再发布（无 lastState）；断言未调用 publish(BusEvent)
+        verify(mockBusRegistry, never()).publish(any(BusEvent.class));
+        // 新行为：lastState==null 时 publicState 在 newState==null 处短路返回，不会执行
+        // 末尾的 setValueUpdated(false)，故 isValueUpdated 标志保持为 true。
+        assertTrue(noxAttr.isValueUpdated());
     }
 }

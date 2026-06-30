@@ -25,29 +25,21 @@ import com.ecat.core.LogicState.LogicAttributeDefine;
 import com.ecat.core.LogicState.LNumericAttribute;
 import com.ecat.core.LogicState.PlaceholderLogicAttribute;
 import com.ecat.core.EcatCore;
-import com.ecat.core.Device.DeviceRegistry;
-import com.ecat.core.State.AttributeAbility;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
-import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.AttributeType;
-import com.ecat.core.State.NumericAttribute;
 import com.ecat.core.State.UnitInfo;
 import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 import com.ecat.core.I18n.I18nKeyPath;
-import com.ecat.core.LogicState.LTextAttribute;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-
 import static org.junit.Assert.*;
 
 /**
@@ -225,11 +217,16 @@ public class LogicDeviceTest {
 
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         assertNotNull(attrMap);
-        // test_attr is mapable=true (default), no mapping resolved → placeholder created with ALARM status
+        // test_attr is mapable=true (default), no mapping resolved → placeholder created with ALARM intent
         assertEquals("No mappings key should create placeholder for mapable attr", 1, attrMap.size());
         ILogicAttribute<?> attr = attrMap.get("test_attr");
         assertNotNull("Placeholder attr should exist", attr);
-        assertEquals("Placeholder should have ALARM status", AttributeStatus.ALARM, attr.getStatus());
+        // Placeholder 只走 setStatus（从不 updateValue），状态密封后其 lastState 恒为 null，
+        // 无法经 getState() 读 status。改用重构的 canonical 判别式 getPlaceholderKind()：
+        // ALARM_MISSING_DEVICE ↔ ALARM 意图（物理设备未配置/未找到）。
+        assertEquals("Placeholder kind should be ALARM_MISSING_DEVICE",
+            PlaceholderLogicAttribute.Kind.ALARM_MISSING_DEVICE,
+            ((PlaceholderLogicAttribute) attr).getPlaceholderKind());
     }
 
     @Test
@@ -412,7 +409,7 @@ public class LogicDeviceTest {
 
     @Test
     public void testPlaceholderAttrCreatedWithAlarmStatus() {
-        // When a mappable attr has no phyDevice, a placeholder should be created with ALARM status
+        // When a mappable attr has no phyDevice, a placeholder should be created with ALARM intent
         ConfigEntry entry = createTestEntry("test-001", null);
         TestLogicDevice device = createTestLogicDevice(entry);
         device.init();
@@ -420,14 +417,16 @@ public class LogicDeviceTest {
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         ILogicAttribute<?> attr = attrMap.get("test_attr");
         assertNotNull("Placeholder should be created for mapable attr", attr);
-        assertEquals("Placeholder should have ALARM status", AttributeStatus.ALARM, attr.getStatus());
+        // Placeholder 只走 setStatus（从不 updateValue），状态密封后其 lastState 恒为 null，
+        // 无法经 getState() 读 status。改用重构的 canonical 判别式 getPlaceholderKind() 区分占位意图：
+        // ALARM_MISSING_DEVICE ↔ ALARM 意图（物理设备未配置/未找到）。
+        assertEquals("Placeholder kind should be ALARM_MISSING_DEVICE",
+            PlaceholderLogicAttribute.Kind.ALARM_MISSING_DEVICE,
+            ((PlaceholderLogicAttribute) attr).getPlaceholderKind());
         assertTrue("Placeholder should be LNumericAttribute", attr instanceof LNumericAttribute);
         assertTrue("Placeholder should be identifiable via isPlaceholder()", attr.isPlaceholder());
         assertTrue("Placeholder should implement PlaceholderLogicAttribute",
             attr instanceof PlaceholderLogicAttribute);
-        assertEquals("Placeholder kind should be ALARM_MISSING_DEVICE",
-            PlaceholderLogicAttribute.Kind.ALARM_MISSING_DEVICE,
-            ((PlaceholderLogicAttribute) attr).getPlaceholderKind());
     }
 
     @Test
@@ -466,14 +465,16 @@ public class LogicDeviceTest {
         Map<String, ILogicAttribute<?>> attrMap = device.getAttrMap();
         ILogicAttribute<?> attr = attrMap.get("test_attr");
         assertNotNull("Blank attr should be created when device exists but has no attribute", attr);
-        assertEquals("Blank attr should have NORMAL status", AttributeStatus.NORMAL, attr.getStatus());
+        // Placeholder 只走 setStatus（从不 updateValue），状态密封后其 lastState 恒为 null，
+        // 无法经 getState() 读 status。改用重构的 canonical 判别式 getPlaceholderKind() 区分占位意图：
+        // NORMAL_NO_ATTR ↔ NORMAL 意图（物理设备存在但该设备没有对应属性）。
+        assertEquals("Blank attr kind should be NORMAL_NO_ATTR",
+            PlaceholderLogicAttribute.Kind.NORMAL_NO_ATTR,
+            ((PlaceholderLogicAttribute) attr).getPlaceholderKind());
         assertTrue("Blank attr should be LNumericAttribute", attr instanceof LNumericAttribute);
         assertTrue("Blank attr should be identifiable via isPlaceholder()", attr.isPlaceholder());
         assertTrue("Blank attr should implement PlaceholderLogicAttribute",
             attr instanceof PlaceholderLogicAttribute);
-        assertEquals("Blank attr kind should be NORMAL_NO_ATTR",
-            PlaceholderLogicAttribute.Kind.NORMAL_NO_ATTR,
-            ((PlaceholderLogicAttribute) attr).getPlaceholderKind());
     }
 
     @Test

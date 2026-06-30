@@ -16,11 +16,13 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.UnitInfo;
 
-import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -63,20 +65,25 @@ public class LOnlineStatusAttribute extends LStringSelectAttribute {
      * <p>If the physical attribute was updated within the last minute, sets value to "online".
      * Otherwise, sets value to "offline".
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
+    public void updateBindAttrValue(AttrState<?> sourceState) {
         AttributeBase<?> bindAttr = getBindAttr();
         if (bindAttr == null) return;
 
-        AttributeStatus phyStatus = bindAttr.getStatus();
-        LocalDateTime updateTime = bindAttr.getUpdateTime();
+        // bindAttr.getStatus()/updateTime 已收紧为 protected + 时间统一 Instant：
+        // 跨类经不可变 AttrState 读取 status 与 lastUpdated。
+        // bindAttr.getState() 在首次 updateValue 前为 null，按"离线 + EMPTY"处理
+        // （保持原 getStatus()/getUpdateTime() 返回 null 时的语义）。
+        AttrState<?> bindState = bindAttr.getState();
+        AttributeStatus phyStatus = bindState != null ? bindState.getStatus() : AttributeStatus.EMPTY;
+        Instant updateTime = bindState != null ? bindState.getLastUpdated() : null;
         if (updateTime == null) {
             updateValue("offline", phyStatus != null ? phyStatus : AttributeStatus.EMPTY);
             return;
         }
-        long elapsedSeconds = java.time.Duration.between(updateTime, java.time.LocalDateTime.now()).getSeconds();
+        long elapsedSeconds = Duration.between(updateTime, Instant.now()).getSeconds();
         updateValue(elapsedSeconds < 60 ? "online" : "offline", phyStatus);
     }
 

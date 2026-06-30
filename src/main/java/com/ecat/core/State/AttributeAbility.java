@@ -34,18 +34,6 @@ public interface AttributeAbility<T>{
     boolean canValueChange(); //是否允许外部修改值
     boolean setStatus(AttributeStatus newStatus); //设置数据状态
     boolean publicState(); // 发布状态到总线
-    /**
-     * 获取数据状态
-     * @return
-     */
-    AttributeStatus getStatus();
-
-    /**
-     * 获取原始数据
-     * @return
-     *      无值时为null
-     */
-    T getValue();
 
     /**
      * 设置展示数据（可能是转换后的）

@@ -7,6 +7,7 @@ import org.mockito.MockitoAnnotations;
 
 import com.ecat.core.EcatCore;
 import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.Bus.event.BusEvent;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Utils.TestTools;
 import com.ecat.core.I18n.I18nKeyPath;
@@ -21,7 +22,6 @@ import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -80,7 +80,7 @@ public class LinearConversionAttributeTest {
         TestTools.setPrivateField(multiSegmentAttr, "device", mockDevice);
         when(mockDevice.getCore()).thenReturn(mockEcatCore);
         when(mockEcatCore.getBusRegistry()).thenReturn(mockBusRegistry);
-        doNothing().when(mockBusRegistry).publish(anyString(), any());
+        doNothing().when(mockBusRegistry).publish(any(BusEvent.class));
     }
 
     @Test
@@ -143,17 +143,18 @@ public class LinearConversionAttributeTest {
     public void testSingleSegmentLinearConversion() {
         // 测试单段线性转换功能
         // 4-20mA -> 0-10MPa，12mA应该对应5MPa
-        assertTrue(singleSegmentAttr.updateValue(12.0));
-        assertEquals(12.0, singleSegmentAttr.getValue(), 0.001);
+        // 灌入原始信号（mA），attr 内部换算为工程值（MPa）存 value；getValue 返回工程值
+        assertTrue(singleSegmentAttr.updateRawValue(12.0));
+        assertEquals(5.0, singleSegmentAttr.getValue(), 0.001);  // 12mA -> 5MPa
 
         String displayValue = singleSegmentAttr.getDisplayValue(null);
         assertEquals("5.00", displayValue);
 
         // 测试边界值
-        assertTrue(singleSegmentAttr.updateValue(4.0));  // 4mA -> 0MPa
+        assertTrue(singleSegmentAttr.updateRawValue(4.0));  // 4mA -> 0MPa
         assertEquals("0.00", singleSegmentAttr.getDisplayValue(null));
 
-        assertTrue(singleSegmentAttr.updateValue(20.0)); // 20mA -> 10MPa
+        assertTrue(singleSegmentAttr.updateRawValue(20.0)); // 20mA -> 10MPa
         assertEquals("10.00", singleSegmentAttr.getDisplayValue(null));
     }
 
@@ -162,22 +163,22 @@ public class LinearConversionAttributeTest {
         // 测试多段线性转换功能
 
         // 第一段：2.5mA -> 25°C
-        assertTrue(multiSegmentAttr.updateValue(2.5));
+        assertTrue(multiSegmentAttr.updateRawValue(2.5));
         assertEquals("25.0", multiSegmentAttr.getDisplayValue(null));
 
         // 第二段：10mA -> 100°C
-        assertTrue(multiSegmentAttr.updateValue(10.0));
+        assertTrue(multiSegmentAttr.updateRawValue(10.0));
         assertEquals("100.0", multiSegmentAttr.getDisplayValue(null));
 
         // 第三段：17.5mA -> 175°C
-        assertTrue(multiSegmentAttr.updateValue(17.5));
+        assertTrue(multiSegmentAttr.updateRawValue(17.5));
         assertEquals("175.0", multiSegmentAttr.getDisplayValue(null));
 
         // 测试段边界值
-        assertTrue(multiSegmentAttr.updateValue(5.0));   // 5mA -> 50°C
+        assertTrue(multiSegmentAttr.updateRawValue(5.0));   // 5mA -> 50°C
         assertEquals("50.0", multiSegmentAttr.getDisplayValue(null));
 
-        assertTrue(multiSegmentAttr.updateValue(15.0));  // 15mA -> 150°C
+        assertTrue(multiSegmentAttr.updateRawValue(15.0));  // 15mA -> 150°C
         assertEquals("150.0", multiSegmentAttr.getDisplayValue(null));
     }
 
@@ -185,12 +186,12 @@ public class LinearConversionAttributeTest {
     public void testOutOfRangeValues() {
         // 测试超出范围的值
         // 单段转换：3mA超出4-20mA范围
-        assertTrue(singleSegmentAttr.updateValue(3.0));
+        assertTrue(singleSegmentAttr.updateRawValue(3.0));
         String displayValue = singleSegmentAttr.getDisplayValue(null);
         assertNull(displayValue);  // 超出范围应返回null
 
         // 多段转换：25mA超出所有段范围
-        assertTrue(multiSegmentAttr.updateValue(25.0));
+        assertTrue(multiSegmentAttr.updateRawValue(25.0));
         displayValue = multiSegmentAttr.getDisplayValue(null);
         assertNull(displayValue);
     }
@@ -336,8 +337,8 @@ public class LinearConversionAttributeTest {
         );
 
         // 验证两种方式产生相同的结果
-        singleConstructor.updateValue(12.0);
-        multiConstructor.updateValue(12.0);
+        singleConstructor.updateRawValue(12.0);
+        multiConstructor.updateRawValue(12.0);
 
         assertEquals(singleConstructor.getDisplayValue(null),
                     multiConstructor.getDisplayValue(null));
@@ -346,8 +347,9 @@ public class LinearConversionAttributeTest {
     @Test
     public void testUpdateValueWithStatus() {
         // 测试同时更新值和状态
-        assertTrue(singleSegmentAttr.updateValue(8.0, AttributeStatus.NORMAL));
-        assertEquals(8.0, singleSegmentAttr.getValue(), 0.001);
+        // 设业务值（工程值 MPa）+ 状态；updateValue(Double,AttributeStatus) 经 override 设工程值
+        assertTrue(singleSegmentAttr.updateValue(2.5, AttributeStatus.NORMAL));
+        assertEquals(2.5, singleSegmentAttr.getValue(), 0.001);
         assertEquals(AttributeStatus.NORMAL, singleSegmentAttr.getStatus());
         assertEquals("2.50", singleSegmentAttr.getDisplayValue(null));
     }
@@ -356,9 +358,9 @@ public class LinearConversionAttributeTest {
     public void testGetInputOutputUnits() {
         // 测试获取输入输出单位
         assertNotNull(singleSegmentAttr.getInputUnit());
-        assertNotNull(singleSegmentAttr.getOutputUnit());
+        assertNotNull(singleSegmentAttr.getNativeUnit());
         assertNotNull(multiSegmentAttr.getInputUnit());
-        assertNotNull(multiSegmentAttr.getOutputUnit());
+        assertNotNull(multiSegmentAttr.getNativeUnit());
     }
 
     @Test
@@ -366,10 +368,11 @@ public class LinearConversionAttributeTest {
         // 测试回调功能 - 基本验证属性可以正常更新值
         // 回调机制可能依赖于特定条件或父类实现
 
-        assertTrue(singleSegmentAttr.updateValue(10.0));
+        // 灌入原始信号 10mA，换算工程值 3.75MPa
+        assertTrue(singleSegmentAttr.updateRawValue(10.0));
 
-        // 验证值确实被更新了
-        assertEquals(10.0, singleSegmentAttr.getValue(), 0.001);
+        // 验证工程值确实被更新了（10mA -> 3.75MPa）
+        assertEquals(3.75, singleSegmentAttr.getValue(), 0.001);
 
         // 验证显示值计算正确 (10mA在4-20mA范围内应该对应3.75MPa)
         String displayValue = singleSegmentAttr.getDisplayValue(null);

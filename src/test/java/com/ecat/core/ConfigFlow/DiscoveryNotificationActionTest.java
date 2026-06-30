@@ -9,7 +9,7 @@
  */
 package com.ecat.core.ConfigFlow;
 
-import com.ecat.core.Bus.NotificationAction;
+import com.ecat.core.Bus.event.NotificationAction;
 
 import org.junit.Test;
 

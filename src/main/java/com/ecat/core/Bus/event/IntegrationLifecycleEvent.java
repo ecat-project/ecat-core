@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.ecat.core.Bus;
+package com.ecat.core.Bus.event;
 
 /**
  * 集成生命周期事件
@@ -27,7 +27,7 @@ package com.ecat.core.Bus;
  *
  * @author coffee
  */
-public class IntegrationLifecycleEvent {
+public class IntegrationLifecycleEvent implements BusPayload {
 
     private final String coordinate;
     private final Action action;

@@ -9,7 +9,7 @@
  */
 package com.ecat.core.ConfigFlow;
 
-import com.ecat.core.Bus.NotificationAction;
+import com.ecat.core.Bus.event.NotificationAction;
 
 /**
  * discovery（设备自发现）通知的强类型 action——"发现新设备"提示携带的结构化数据。

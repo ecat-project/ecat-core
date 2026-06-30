@@ -24,6 +24,7 @@ import com.ecat.core.Device.DeviceBase;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 
 import java.util.Arrays;
@@ -52,6 +53,16 @@ public class LStringSelectAttributeTest {
         when(mockDevice.getId()).thenReturn("testDeviceId");
     }
 
+    /**
+     * 绑定一个返回固定 id 的 mock 设备到属性上，使其后的 updateValue 调用能构建非 null 的 AttrState
+     * （AttributeBase 仅在已绑定设备且 getId() 非 null 时构建 lastState）。
+     */
+    private static void bindDevice(AttributeBase<?> attr) {
+        DeviceBase mock = Mockito.mock(DeviceBase.class);
+        Mockito.when(mock.getId()).thenReturn("testDevice");
+        attr.setDevice(mock);
+    }
+
     // ========== Bound mode tests ==========
 
     @Test
@@ -78,12 +89,14 @@ public class LStringSelectAttributeTest {
         logicAttr.initAttributeID("manual_status");
         logicAttr.initValueChangeable(true);
 
-        assertNull(logicAttr.getValue());
+        // 未触发任何更新前，逻辑属性尚无状态（getState() 为 null 即等价于"无值"）
+        assertNull(logicAttr.getState());
 
         phyAttr.setTestValue("Maintenance");
-        logicAttr.updateBindAttrValue(phyAttr);
+        bindDevice(logicAttr);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
 
-        assertEquals("Maintenance", logicAttr.getValue());
+        assertEquals("Maintenance", (String) logicAttr.getState().getValue());
     }
 
     // ========== Standalone mode tests ==========
@@ -105,9 +118,10 @@ public class LStringSelectAttributeTest {
             "manual_status", AttributeClass.MODE, Arrays.asList("Normal", "Maintenance"));
         logicAttr.initAttributeID("manual_status");
         logicAttr.initValueChangeable(true);
+        bindDevice(logicAttr);
 
         logicAttr.updateValue("Maintenance");
-        assertEquals("Maintenance", logicAttr.getValue());
+        assertEquals("Maintenance", (String) logicAttr.getState().getValue());
     }
 
     @Test
@@ -118,7 +132,7 @@ public class LStringSelectAttributeTest {
         logicAttr.initValueChangeable(true);
 
         logicAttr.updateBindAttrValue(null);
-        assertNull(logicAttr.getValue());
+        assertNull(logicAttr.getState());
     }
 
     @Test
@@ -130,7 +144,7 @@ public class LStringSelectAttributeTest {
         logicAttr.setDevice(mockDevice);
 
         logicAttr.setDisplayValue("Maintenance", null).join();
-        assertEquals("Maintenance", logicAttr.getValue());
+        assertEquals("Maintenance", (String) logicAttr.getState().getValue());
     }
 
     @Test
@@ -196,8 +210,9 @@ public class LStringSelectAttributeTest {
         logicAttr.initValueChangeable(true);
 
         // 物理值为 "1" → 逻辑值应为 "cooling"
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertEquals("cooling", logicAttr.getValue());
+        bindDevice(logicAttr);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        assertEquals("cooling", (String) logicAttr.getState().getValue());
     }
 
     @Test
@@ -211,8 +226,9 @@ public class LStringSelectAttributeTest {
         logicAttr.initAttributeID("manual_status");
         logicAttr.initValueChangeable(true);
 
-        logicAttr.updateBindAttrValue(phyAttr);
-        assertEquals("Maintenance", logicAttr.getValue());
+        bindDevice(logicAttr);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
+        assertEquals("Maintenance", (String) logicAttr.getState().getValue());
     }
 
     @Test(expected = IllegalStateException.class)
@@ -228,7 +244,7 @@ public class LStringSelectAttributeTest {
             Arrays.asList("cooling", "heating"), mapping);
         logicAttr.initAttributeID("fan_status");
 
-        logicAttr.updateBindAttrValue(phyAttr);
+        logicAttr.updateBindAttrValue(phyAttr.getState());
     }
 
     @Test
@@ -303,14 +319,15 @@ public class LStringSelectAttributeTest {
     }
 
     private static class TestStringSelectAttr extends AttributeBase<String> {
-        private final List<String> options;
         private String value;
         private String lastSetDisplayValue;
 
         TestStringSelectAttr(String attributeID, List<String> options, String initialValue) {
             super(attributeID, AttributeClass.MODE, null, null, 0, false, false);
-            this.options = options;
             this.value = initialValue;
+            // 绑定 mock 设备并以初值构建 AttrState，使 getState() 在 updateBindAttrValue(AttrState) 场景下非 null
+            bindDevice(this);
+            updateValue(initialValue);
         }
 
         @Override public String getDisplayValue(UnitInfo toUnit) { return value; }
@@ -330,20 +347,22 @@ public class LStringSelectAttributeTest {
             return CompletableFuture.completedFuture(true);
         }
 
-        public void setTestValue(String val) { this.value = val; }
+        public void setTestValue(String val) {
+            this.value = val;
+            // 重建 AttrState，使后续 getState() 反映新值（updateValue 在设备已绑定时构建 lastState）
+            updateValue(val);
+        }
         public String getLastSetDisplayValue() { return lastSetDisplayValue; }
     }
 
     /** 捕获 setDisplayValue 收到的 value 和 fromUnit 参数 */
     private static class FromUnitCapturingAttr extends AttributeBase<String> {
-        private final List<String> options;
         private String value;
         String capturedValue;
         UnitInfo capturedFromUnit;
 
         FromUnitCapturingAttr(String attributeID, List<String> options, String initialValue) {
             super(attributeID, AttributeClass.MODE, null, null, 0, false, false);
-            this.options = options;
             this.value = initialValue;
         }
 

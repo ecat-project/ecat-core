@@ -16,6 +16,7 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.UnitInfo;
@@ -62,14 +63,18 @@ public class LAlarmStatusAttribute extends LStringSelectAttribute {
      * <p>If the physical attribute's status is {@link AttributeStatus#ALARM}, sets value to "alarm".
      * Otherwise, sets value to "normal".
      *
-     * @param updatedAttr the physical attribute whose value has been updated
+     * @param sourceState the immutable state of the physical attribute whose value has been updated
      */
     @Override
-    public void updateBindAttrValue(AttributeBase<?> updatedAttr) {
+    public void updateBindAttrValue(AttrState<?> sourceState) {
         AttributeBase<?> bindAttr = getBindAttr();
         if (bindAttr == null) return;
 
-        AttributeStatus phyStatus = bindAttr.getStatus();
+        // bindAttr.getStatus() 已降为 protected：跨类经不可变 AttrState 读取。
+        // bindAttr.getState() 在首次 updateValue 前为 null（属性从未更新过），
+        // 此时无告警可言，按"非告警"处理（保持原 getStatus() 默认 EMPTY 时的语义）。
+        AttrState<?> bindState = bindAttr.getState();
+        AttributeStatus phyStatus = bindState != null ? bindState.getStatus() : AttributeStatus.EMPTY;
         updateValue(phyStatus == AttributeStatus.ALARM ? "alarm" : "normal", phyStatus);
     }
 

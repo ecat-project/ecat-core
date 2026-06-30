@@ -16,14 +16,15 @@
 
 package com.ecat.core.LogicState;
 
+import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.State.AQAttribute;
 import com.ecat.core.State.AttributeBase;
 import com.ecat.core.State.AttributeClass;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.AttributeType;
+import com.ecat.core.State.AttrState;
 import com.ecat.core.State.Unit.AirMassUnit;
 import com.ecat.core.State.Unit.AirVolumeUnit;
-import com.ecat.core.State.UnitInfo;
 import com.ecat.core.Science.AirQuality.Consts.MolecularWeights;
 import org.junit.Before;
 import org.junit.Test;
@@ -32,9 +33,8 @@ import org.mockito.MockitoAnnotations;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiFunction;
-
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
@@ -49,6 +49,17 @@ public class LAQAttributeTest {
 
     private AQAttribute bindAttr;
     private static final Double SO2_MW = MolecularWeights.SO2;
+
+    /**
+     * 绑定一个 stub getId() 非 null 的 mock 设备，使 AttributeBase.getState() 在 updateValue 后返回非 null 的不可变 AttrState。
+     * <p>这些 AQ 参数构造时未显式设 persistable（默认 false），updateValue 不会走持久化分支，
+     * 故无需 stub getCore()/getStateManager()。若未来参数改为 persistable=true，则需补 stub core。
+     */
+    private static void bindDevice(AttributeBase<?> attr) {
+        DeviceBase mockDevice = mock(DeviceBase.class);
+        when(mockDevice.getId()).thenReturn("testDevice");
+        attr.setDevice(mockDevice);
+    }
 
     @Before
     public void setUp() {
@@ -120,15 +131,21 @@ public class LAQAttributeTest {
         // Set logic attr native unit to UGM3 (simulating initFromDefinition)
         logicAttr.initNativeUnit(AirMassUnit.UGM3);
 
+        // 绑定设备：getState() 在 updateValue 前为 null，须先绑定设备（getId 非 null）才返回不可变状态
+        bindDevice(bindAttr);
+        bindDevice(logicAttr);
+
         // Simulate physical attribute being updated with 50.0 mg/m3
         bindAttr.updateValue(50.0, AttributeStatus.NORMAL);
 
         // Trigger logic attribute update - converts 50.0 mg/m3 -> 50000.0 ug/m3
-        logicAttr.updateBindAttrValue(bindAttr);
+        // 传不可变 AttrState（取代旧 AttributeBase 入参，getValue/getStatus 已降 protected）
+        logicAttr.updateBindAttrValue(bindAttr.getState());
 
-        assertNotNull(logicAttr.getValue());
-        assertEquals(50000.0, logicAttr.getValue(), 0.01);
-        assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
+        AttrState<?> state = logicAttr.getState();
+        assertNotNull(state.getValue());
+        assertEquals(50000.0, (Double) state.getValue(), 0.01);
+        assertEquals(AttributeStatus.NORMAL, state.getStatus());
     }
 
     // ========== testUpdateBindAttrValuePassthroughCrossClass ==========
@@ -143,18 +160,24 @@ public class LAQAttributeTest {
         // Set logic attr native unit to UGM3 (simulating initFromDefinition)
         logicAttr.initNativeUnit(AirMassUnit.UGM3);
 
+        // 绑定设备：getState() 在 updateValue 前为 null，须先绑定设备才返回不可变状态
+        bindDevice(bindAttr);
+        bindDevice(logicAttr);
+
         // Simulate physical attribute being updated with 15.5 PPB
         bindAttr.updateValue(15.5, AttributeStatus.NORMAL);
 
         // Trigger logic attribute update - converts 15.5 PPB -> ~41.97 ug/m3
-        logicAttr.updateBindAttrValue(bindAttr);
+        // 传不可变 AttrState（取代旧 AttributeBase 入参，getValue/getStatus 已降 protected）
+        logicAttr.updateBindAttrValue(bindAttr.getState());
 
-        assertNotNull(logicAttr.getValue());
+        AttrState<?> state = logicAttr.getState();
+        assertNotNull(state.getValue());
         // SO2: 1 ppb = MW / MolarVolume ug/m3 = 64.066 / 24.465 ug/m3
         // 15.5 ppb = 15.5 * 64.066 / 24.465 = ~40.60 ug/m3
         double expected = 15.5 * SO2_MW / 24.465;
-        assertEquals(expected, logicAttr.getValue(), 0.01);
-        assertEquals(AttributeStatus.NORMAL, logicAttr.getStatus());
+        assertEquals(expected, (Double) state.getValue(), 0.01);
+        assertEquals(AttributeStatus.NORMAL, state.getStatus());
     }
 
     // ========== testUpdateBindAttrValueCrossClassNoMWThrows ==========
@@ -170,10 +193,12 @@ public class LAQAttributeTest {
         // Set logic attr native unit to UGM3 (cross-class from PPB)
         logicAttr.initNativeUnit(AirMassUnit.UGM3);
 
+        bindDevice(bindAttr);
         bindAttr.updateValue(15.5, AttributeStatus.NORMAL);
 
         // This should throw because cross-class conversion needs molecularWeight
-        logicAttr.updateBindAttrValue(bindAttr);
+        // 传不可变 AttrState（取代旧 AttributeBase 入参）
+        logicAttr.updateBindAttrValue(bindAttr.getState());
     }
 
     // ========== testInitFromDefinition ==========
@@ -237,12 +262,15 @@ public class LAQAttributeTest {
         LAQAttribute logicAttr = new LAQAttribute(changeableBindAttr, SO2_MW);
         logicAttr.initNativeUnit(AirMassUnit.UGM3);
 
+        // 绑定设备：setDisplayValue 最终调用 changeableBindAttr.updateValue，须先绑定设备才让 getState() 可读
+        bindDevice(changeableBindAttr);
+
         // Set display value in UGM3 - passthrough converts to MGM3 for bindAttr
         CompletableFuture<Boolean> result = logicAttr.setDisplayValue("50000.0", AirMassUnit.UGM3);
 
         assertTrue(result.isDone());
-        // 50000.0 ug/m3 = 50.0 mg/m3
-        assertEquals(50.0, changeableBindAttr.getValue(), 0.001);
+        // 50000.0 ug/m3 = 50.0 mg/m3（读不可变 AttrState，getValue 已降 protected）
+        assertEquals(50.0, (Double) changeableBindAttr.getState().getValue(), 0.001);
     }
 
     // ========== Additional tests ==========
@@ -267,13 +295,19 @@ public class LAQAttributeTest {
         bindAttr = createMassBindAttr();
         LAQAttribute logicAttr = new LAQAttribute(bindAttr, SO2_MW);
 
+        // 绑定设备：getState() 在 updateValue 前为 null，须先绑定设备才返回不可变状态
+        bindDevice(bindAttr);
+        bindDevice(logicAttr);
+
         // Update physical attribute with null value
         bindAttr.updateValue(null, AttributeStatus.EMPTY);
 
-        logicAttr.updateBindAttrValue(bindAttr);
+        // 传不可变 AttrState（取代旧 AttributeBase 入参，getValue/getStatus 已降 protected）
+        logicAttr.updateBindAttrValue(bindAttr.getState());
 
-        assertNull(logicAttr.getValue());
-        assertEquals(AttributeStatus.EMPTY, logicAttr.getStatus());
+        AttrState<?> state = logicAttr.getState();
+        assertNull(state.getValue());
+        assertEquals(AttributeStatus.EMPTY, state.getStatus());
     }
 
     @Test
