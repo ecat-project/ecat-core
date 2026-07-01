@@ -1,10 +1,13 @@
 package com.ecat.core.Bus.consumer;
 
+import com.ecat.core.Utils.Mdc.MdcCoordinateConverter;
 import org.junit.Test;
+import org.slf4j.MDC;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
 
@@ -64,5 +67,29 @@ public class AbstractBusConsumerTest {
         assertTrue("onEvent 50 次应毫秒级返回，实际=" + dtMs + "ms", dtMs < 1000);
         hold.countDown();
         stalled.shutdown();
+    }
+
+    /** worker 线程应继承构造线程的 integration.coordinate MDC，使 consumer 日志能按集成投送专属 log SSE。 */
+    @Test
+    public void workerInheritsConstructingThreadCoordinateMdc() throws InterruptedException {
+        final String coord = "com.ecat:integration-test-mdc";
+        MDC.put(MdcCoordinateConverter.COORDINATE_KEY, coord);
+        try {
+            final CountDownLatch latch = new CountDownLatch(1);
+            final AtomicReference<String> seen = new AtomicReference<>();
+            AbstractBusConsumer<Integer> c = new AbstractBusConsumer<Integer>("mdc-test", 4) {
+                @Override
+                protected void consume(Integer event) {
+                    seen.set(MDC.get(MdcCoordinateConverter.COORDINATE_KEY));
+                    latch.countDown();
+                }
+            };
+            c.onEvent(1);
+            assertTrue("consume 应在超时前执行", latch.await(2, TimeUnit.SECONDS));
+            assertEquals("worker 线程应继承构造线程的 integration.coordinate MDC", coord, seen.get());
+            c.shutdown();
+        } finally {
+            MDC.remove(MdcCoordinateConverter.COORDINATE_KEY);
+        }
     }
 }

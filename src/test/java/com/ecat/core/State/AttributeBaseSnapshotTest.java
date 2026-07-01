@@ -113,4 +113,18 @@ public class AttributeBaseSnapshotTest {
         assertTrue(a.updateValue(99));
         assertNull(a.getState());
     }
+
+    @Test
+    public void setStatusBuildsSnapshotWithNonNullLastUpdated() {
+        // 根因回归：纯状态变更（无 updateValue）也必须有非 null 时间戳。
+        // 修复前 setStatus 先 buildState 后 setValueUpdated，midState 捕获的 updateTime 为 null
+        // （从未 updateValue 赋值）——只走 setStatus 的纯状态属性（设备 online/offline、报警翻转）
+        // 发布的 device.data.update 事件 lastUpdated=null，下游时序落库（TimescaleDB 分区表 pick_time
+        // NOT NULL）失败。修复：setStatus 先 setValueUpdated(true) 再 buildState，与 updateValue 范式一致。
+        attr.setStatus(AttributeStatus.NORMAL);
+        attr.setStatus(AttributeStatus.ALARM); // 状态变更触发 midState 重建
+        AttrState<?> snap = attr.getState();
+        assertNotNull("setStatus 后应有 midState 快照", snap);
+        assertNotNull("纯状态变更的 midState.lastUpdated 必须非 null（根因修复）", snap.getLastUpdated());
+    }
 }

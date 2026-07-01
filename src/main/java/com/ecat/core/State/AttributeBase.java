@@ -241,8 +241,12 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
                 if (this.eventContext == null) {
                     this.eventContext = EventContext.root(EventContext.Source.DEVICE_POLL, null);
                 }
-                this.midState = buildState();
+                // 先刷新 updateTime=now，再 buildState——midState 才能捕获新鲜时间戳。
+                // 顺序颠倒会导致只走 setStatus、从未 updateValue 的纯状态属性（设备 online/offline、
+                // 报警翻转等）midState.lastUpdated 为 null，发布的 device.data.update 事件无时间戳，
+                // 下游时序落库（如 realdata 时间分区表）失败。与 updateValue 范式保持一致。
                 setValueUpdated(true);
+                this.midState = buildState();
             }
         }
         return true;
