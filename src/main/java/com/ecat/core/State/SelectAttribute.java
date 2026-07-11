@@ -56,6 +56,17 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
      */
     @Getter
     protected List<T> options;
+    /**
+     * 选项显示标签(整批,key=选项 value=显示文本),由集成一次性灌入(setOptionsDisplayText)。
+     * 用于运行时动态选项(如 modbus-generic 用户自定义枚举值)的中文/可读显示。
+     * 显示优先级:getOptionI18nName → ①有意义 i18n 翻译 > ②optionsDisplayText > ③整条 i18n key(开发诊断:提示此 option 缺①+②)。
+     */
+    protected Map<T, String> optionsDisplayText;
+
+    /** 一次性设置所有选项的显示标签(整批)。key=选项,value=显示文本。 */
+    public void setOptionsDisplayText(Map<T, String> optionsDisplayText) {
+        this.optionsDisplayText = optionsDisplayText;
+    }
 
     protected ConfigDefinition valueDef;        // 验证定义
 
@@ -302,13 +313,32 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
     }
 
     /**
-     * 获取选项的国际化显示名称
+     * 获取选项的显示名称(三级优先级)。
+     * <ol>
+     *   <li>① 有意义 i18n 翻译(i18n.t 命中,translated != key)→ 用翻译。</li>
+     *   <li>② 集成灌入的 optionsDisplayText(此 option 有非空标签)→ 用它。
+     *       覆盖动态/自定义选项无 strings.json 的场景(如 modbus-generic 用户填中文枚举值)。</li>
+     *   <li>③ 整条 i18n key——开发诊断信号:提示此 option 既无 i18n 翻译、集成也未灌 displayText,需补。
+     *       正常用户不应看到③(集成有责任为每个 option 灌②)。</li>
+     * </ol>
      * @param option 选项值
-     * @return 国际化显示名称
-     * @apiNote path: getI18nOptionPathPrefix().getFullPath().{optionLowerCase}
+     * @return 显示名称
+     * @apiNote 运行时(属性绑设备后)i18n path 实为 devices.{deviceTypeName}.{attributeID}_options.{option};
+     *         未绑设备兜底 state.select_attr.{attributeID}_options.{option}。详见 SelectAttribute 类注释订正。
      */
     public String getOptionI18nName(T option) {
-        return i18n.t(getI18nOptionPathPrefix().getFullPath() + "." + option.toString().toLowerCase(Locale.ENGLISH));
+        String key = getI18nOptionPathPrefix().getFullPath() + "." + option.toString().toLowerCase(Locale.ENGLISH);
+        String translated = i18n.t(key);
+        if (!translated.equals(key)) {
+            return translated;                                          // ① 有意义 i18n
+        }
+        if (optionsDisplayText != null) {
+            String lbl = optionsDisplayText.get(option);
+            if (lbl != null && !lbl.isEmpty()) {
+                return lbl;                                             // ② 集成 displayText
+            }
+        }
+        return key;                                                     // ③ 整条 i18n key(开发诊断)
     }
 
     /**

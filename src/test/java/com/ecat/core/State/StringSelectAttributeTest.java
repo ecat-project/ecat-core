@@ -13,7 +13,9 @@ import com.ecat.core.Utils.TestTools;
 import com.ecat.core.I18n.I18nKeyPath;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -92,6 +94,21 @@ public class StringSelectAttributeTest {
         }
     }
 
+    /** 不重写 selectOptionImp，继承 StringSelectAttribute 默认实现，用于验证"设 callback 的 Select 经 selectOption 只触发一次 callback"。 */
+    static class PlainStringSelectAttribute extends StringSelectAttribute {
+        public PlainStringSelectAttribute(String attributeID, AttributeClass attrClass, boolean valueChangeable,
+                                          List<String> options,
+                                          Function<AttrChangedCallbackParams<String>, CompletableFuture<Boolean>> onChangedCallback) {
+            super(attributeID, attrClass, null, null, valueChangeable, options, onChangedCallback);
+        }
+        @Override public I18nKeyPath getI18nPrefixPath() { return new I18nKeyPath("state.test_string_select_attr.", ""); }
+        @Override public Map<String, String> getOptionDict() {
+            Map<String, String> d = new HashMap<>();
+            if (options != null) for (String o : options) d.put(o, o);
+            return d;
+        }
+    }
+
     @Before
     public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
@@ -103,6 +120,20 @@ public class StringSelectAttributeTest {
         when(mockDevice.getCore()).thenReturn(mockEcatCore);
         when(mockEcatCore.getBusRegistry()).thenReturn(mockBusRegistry);
         doNothing().when(mockBusRegistry).publish(any(BusEvent.class));
+    }
+
+    @Test
+    public void testSelectOption_FiresCallbackExactlyOnce() throws Exception {
+        when(mockCallback.apply(any())).thenReturn(CompletableFuture.completedFuture(true));
+        PlainStringSelectAttribute plain = new PlainStringSelectAttribute("mode2", mockAttrClass, true, options, mockCallback);
+        TestTools.setPrivateField(plain, "device", mockDevice);
+        when(mockDevice.getCore()).thenReturn(mockEcatCore);
+        when(mockEcatCore.getBusRegistry()).thenReturn(mockBusRegistry);
+        doNothing().when(mockBusRegistry).publish(any(BusEvent.class));
+
+        CompletableFuture<Boolean> future = plain.selectOption("low");
+        assertTrue(future.get());
+        verify(mockCallback, times(1)).apply(any());   // 修复前 2 次(失败)；修复后 1 次(通过)
     }
 
     @Test

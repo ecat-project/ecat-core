@@ -44,6 +44,21 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
     protected Map<String, String> optionCache;  // 选项缓存
     protected final String ON = "on";   // 开启状态标识
     protected final String OFF = "off"; // 关闭状态标识
+    /**
+     * 开/关的自定义显示标签(由集成一次性灌入 setOptionsDisplayText)。空→走 i18n/整条 key。
+     * 显示优先级:getOnDisplayText/getOffDisplayText → ①有意义 i18n > ②此标签 > ③整条 i18n key(开发诊断)。
+     * 用于 binary 自定义中文标签(如 on→"运行"、off→"停止")。
+     */
+    protected String onDisplayText;
+    protected String offDisplayText;
+
+    /** 一次性设置开/关显示标签(整批)。map key="on"/"off"(对应 ON/OFF 常量)。 */
+    public void setOptionsDisplayText(Map<String, String> optionsDisplayText) {
+        if (optionsDisplayText != null) {
+            this.onDisplayText = optionsDisplayText.get(ON);
+            this.offDisplayText = optionsDisplayText.get(OFF);
+        }
+    }
 
     /**
      * 支持I18n的构造函数
@@ -311,19 +326,35 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
     }
 
     /**
-     * 获取开启状态的显示文本
+     * 获取开启状态的显示文本(三级优先级:①有意义 i18n > ②onDisplayText > ③整条 i18n key 开发诊断)。
      * @return 开启状态显示文本
      */
     protected String getOnDisplayText() {
-        return i18n.t(getI18nOptionPathPrefix().addLastSegment(ON).getI18nPath());
+        String key = getI18nOptionPathPrefix().addLastSegment(ON).getI18nPath();
+        String translated = i18n.t(key);
+        if (!translated.equals(key)) {
+            return translated;                                          // ① 有意义 i18n
+        }
+        if (onDisplayText != null && !onDisplayText.isEmpty()) {
+            return onDisplayText;                                      // ② 集成自定义标签
+        }
+        return key;                                                     // ③ 整条 i18n key(开发诊断)
     }
 
     /**
-     * 获取关闭状态的显示文本
+     * 获取关闭状态的显示文本(三级优先级,同 getOnDisplayText)。
      * @return 关闭状态显示文本
      */
     protected String getOffDisplayText() {
-        return i18n.t(getI18nOptionPathPrefix().addLastSegment(OFF).getI18nPath());
+        String key = getI18nOptionPathPrefix().addLastSegment(OFF).getI18nPath();
+        String translated = i18n.t(key);
+        if (!translated.equals(key)) {
+            return translated;                                          // ①
+        }
+        if (offDisplayText != null && !offDisplayText.isEmpty()) {
+            return offDisplayText;                                     // ②
+        }
+        return key;                                                     // ③
     }
 
     /**

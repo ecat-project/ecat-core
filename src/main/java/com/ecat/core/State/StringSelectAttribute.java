@@ -199,10 +199,9 @@ public class StringSelectAttribute extends SelectAttribute<String> {
      */
     @Override
     protected CompletableFuture<Boolean> selectOptionImp(String option) {
-        // 默认实现：直接调用回调函数
-        if (onChangedCallback != null) {
-            return onChangedCallback.apply(new AttrChangedCallbackParams<String>(this, option));
-        }
+        // 默认实现：无操作。onChangedCallback 由 SelectAttribute.selectOption → AttributeBase.setValue 统一触发一次，
+        // 此处不再重复触发，避免与 setValue 的回调叠加导致双写（修复 selectOption 双触发 bug）。
+        // 子类如需"写成功再发布"语义，可重写本方法执行实际写入（此时应让 onChangedCallback = null）。
         return CompletableFuture.completedFuture(true);
     }
 

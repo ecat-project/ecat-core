@@ -76,9 +76,19 @@ public class YamlConfigItemTest {
 
     @Test
     public void testNullMapReturnsEmpty() {
+        // 显式 Map 重载:setValue 现有 Map / String 两重载,null 须消歧(本例测 Map 重载的 null 入参)
         YamlConfigItem item = new YamlConfigItem("summary")
-            .setValue(null);
+            .setValue((Map<String, Object>) null);
         assertEquals("", item.getDefaultValue());
+    }
+
+    @Test
+    public void testRawYamlStringPassedThrough() {
+        // setValue(String) 直接透传已序列化的 YAML 文本,不再经 Map→dump(保顶层结构,如顶层数组)
+        YamlConfigItem item = new YamlConfigItem("export")
+            .setValue("- attributeID: x\n  conversion:\n    type: LINEAR\n");
+        assertEquals("- attributeID: x\n  conversion:\n    type: LINEAR\n", item.getDefaultValue());
+        assertEquals("", new YamlConfigItem("export").setValue((String) null).getDefaultValue());
     }
 
     @Test

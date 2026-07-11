@@ -145,6 +145,21 @@ public class SelectAttributeTest {
     }
 
     @Test
+    public void testOptionsDisplayTextPriority() {
+        // 框架 displayText 三级优先级:①有意义 i18n > ②optionsDisplayText > ③整条 i18n key。
+        // mock device 的 getI18nPrefix 未 stub → 返 null → 走 state.test_select_attr 兜底前缀,
+        // 无 strings.json 翻译 → ①miss;设 setOptionsDisplayText 后 → ②显自定义标签(覆盖 ③ key)。
+        java.util.Map<String, String> labels = new java.util.HashMap<>();
+        labels.put("heigh", "高");
+        labels.put("medium", "中");
+        labels.put("low", "低");
+        attr.setOptionsDisplayText(labels);
+        assertEquals("高", attr.getOptionI18nName("heigh"));    // ②
+        assertEquals("中", attr.getOptionI18nName("medium"));
+        assertEquals("低", attr.getOptionI18nName("low"));
+    }
+
+    @Test
     public void testSetDisplayValueImp_Success() throws Exception {
         // 测试setDisplayValueImp方法，选项在列表中
         // when(mockCallback.apply(any())).thenReturn(CompletableFuture.completedFuture(true));

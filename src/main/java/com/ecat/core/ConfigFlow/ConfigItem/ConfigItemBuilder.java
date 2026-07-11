@@ -18,6 +18,8 @@ package com.ecat.core.ConfigFlow.ConfigItem;
 
 import java.util.*;
 
+import com.ecat.core.ConfigFlow.ConfigSchema;
+
 /**
  * 配置项构建器
  * <p>
@@ -336,5 +338,17 @@ public class ConfigItemBuilder {
      */
     public static ArrayConfigItem<String> stringArray(String key, boolean required, List<String> defaultValue) {
         return new ArrayConfigItem<>(key, required, defaultValue, "string");
+    }
+
+    /**
+     * 构造变长结构化行表配置项（每行按 rowSchema 校验）。
+     *
+     * @param key       字段 key
+     * @param required  是否必填
+     * @param rowSchema 行子 schema（一个 ConfigSchema）
+     * @return table 配置项
+     */
+    public static TableConfigItem table(String key, boolean required, ConfigSchema rowSchema) {
+        return new TableConfigItem(key, required, rowSchema);
     }
 }

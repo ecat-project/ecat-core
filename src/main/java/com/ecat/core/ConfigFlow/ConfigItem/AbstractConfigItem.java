@@ -20,7 +20,6 @@ import com.ecat.core.Utils.DynamicConfig.ConstraintValidator;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 配置项抽象基类
@@ -45,6 +44,14 @@ public abstract class AbstractConfigItem<T> {
     protected String placeholder;
     protected boolean required;
     protected boolean readOnly;
+    /** 该列选项依赖同行另一列（两级级联，如单位列随单位类别列过滤）；值=被依赖列的 key。null=不级联。 */
+    protected String dependsOn;
+    /** 该列渲染位置:"main"(主行,始终显)或 "detail"(详情区,行展开显);null=main(向后兼容扁平表,列全显无展开)。 */
+    protected String displayGroup;
+    /** 详情列渐进披露条件:"field=v1|v2"(同行 field 值在值集时显本列);null=无条件显。仅 detail 列生效。 */
+    protected String showWhen;
+    /** 详情列分组小标题(如 "转换参数");前端按 group 在详情区分组渲染。null=不分组。 */
+    protected String group;
     protected final List<ConstraintValidator<?>> validators = new ArrayList<>();
     protected T defaultValue;
 
@@ -150,6 +157,34 @@ public abstract class AbstractConfigItem<T> {
         this.readOnly = readOnly;
         return this;
     }
+
+    /**
+     * 声明该列选项依赖同行另一列（两级级联）：前端 table-field 渲染器按同行被依赖列的值前缀过滤本列 options。
+     * 典型用途：单位列 dependsOn 单位类别列（选 TemperatureUnit → 单位列只显示 TemperatureUnit.*）。
+     *
+     * @param dependsOn 被依赖列的 key；null 清除级联
+     * @return this
+     */
+    public AbstractConfigItem<T> dependsOn(String dependsOn) {
+        this.dependsOn = dependsOn;
+        return this;
+    }
+
+    public String getDependsOn() {
+        return dependsOn;
+    }
+
+    /** 声明该列渲染位置:"main"(主行,始终显)/ "detail"(详情区,行展开显)。 */
+    public AbstractConfigItem<T> displayGroup(String displayGroup) { this.displayGroup = displayGroup; return this; }
+    public String getDisplayGroup() { return displayGroup; }
+
+    /** 声明详情列渐进披露条件 "field=v1|v2"(同行 field 命中值集时显本列)。 */
+    public AbstractConfigItem<T> showWhen(String showWhen) { this.showWhen = showWhen; return this; }
+    public String getShowWhen() { return showWhen; }
+
+    /** 声明详情列分组小标题(如 "转换参数"),前端按 group 在详情区分组渲染。 */
+    public AbstractConfigItem<T> group(String group) { this.group = group; return this; }
+    public String getGroup() { return group; }
 
     // ========== 验证方法 ==========
 

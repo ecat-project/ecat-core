@@ -176,4 +176,20 @@ public class BinaryAttributeTest {
         assertTrue(deprecatedAttr.turnOff());
         assertFalse(deprecatedAttr.getValue());
     }
+
+    @Test
+    public void testOptionsDisplayTextPriority() {
+        // 框架 displayText 三级优先级:①有意义i18n > ②onDisplayText/offDisplayText > ③整条i18n key。
+        // 本测试绑 mock device(其 getI18nPrefix 返 null → 走 state.binary_attr 兜底前缀),无 strings.json 翻译 → ①miss。
+        // 设 setOptionsDisplayText 后 → ②显自定义标签(覆盖 ③ key)。未设时(testGetDisplayValue 已覆盖)→ ③显 key。
+        java.util.Map<String, String> labels = new java.util.HashMap<>();
+        labels.put("on", "运行");
+        labels.put("off", "停止");
+        attr.setOptionsDisplayText(labels);
+
+        attr.value = true;
+        assertEquals("运行", attr.getDisplayValue(null));   // ② onDisplayText
+        attr.value = false;
+        assertEquals("停止", attr.getDisplayValue(null));   // ② offDisplayText
+    }
 }

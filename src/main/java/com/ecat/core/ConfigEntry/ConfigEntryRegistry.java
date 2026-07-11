@@ -522,6 +522,10 @@ public class ConfigEntryRegistry {
         try {
             integration.removeEntry(entry.getEntryId());
             log.debug("Notified integration {} to remove entry {}", coordinate, entry.getEntryId());
+        } catch (EntryInUseException e) {
+            // 集成否决删除(如通讯模块仍被具象设备引用)——必须向上抛出,中断 removeEntry 后续步骤
+            // (缓存移除 + 持久化删除),否则被引用的 entry 会删成孤儿。其它异常仍按"清理尽力"语义吞掉。
+            throw e;
         } catch (UnsupportedOperationException e) {
             log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
         } catch (Exception e) {
