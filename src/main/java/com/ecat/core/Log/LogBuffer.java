@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 日志缓冲区
@@ -56,9 +57,12 @@ public class LogBuffer implements AutoCloseable {
     private volatile Thread broadcasterThread;
     // ensureBroadcasterStarted 的幂等临界区锁
     private final Object broadcasterStartLock = new Object();
-    // 已投递高水位（已投递条目的最大时间戳）：仅由单写者投递线程维护，避免重复投递同一增量。
+    // 已投递高水位（已投递条目的最大 seq）：仅由单写者投递线程维护，避免重复投递同一增量。
+    // 用 seq（非毫秒时间戳）作游标——同毫秒并发日志 timestamp 相同,按 ts 去重会丢;seq 唯一递增无碰撞。
     // 新订阅者靠「订阅时间过滤 + 订阅时历史拉取」补齐，与本字段正交。
-    private volatile long lastDeliveredTimestamp = 0L;
+    private volatile long lastDeliveredSeq = 0L;
+    // LogEntry seq 分配器（put 时 incrementAndGet），保证每条日志唯一递增序号。
+    private final AtomicLong seqCounter = new AtomicLong(0);
 
     public LogBuffer(int maxCapacity) {
         this.maxCapacity = maxCapacity;
@@ -79,6 +83,7 @@ public class LogBuffer implements AutoCloseable {
         if (closed.get()) {
             return;
         }
+        entry.setSeq(seqCounter.incrementAndGet());
         buffer.add(entry);
         // 超出容量时移除旧日志（ring 自带丢最旧背压）
         while (buffer.size() > maxCapacity) {
@@ -110,15 +115,15 @@ public class LogBuffer implements AutoCloseable {
         if (subscribers.isEmpty() || closed.get()) {
             return;
         }
-        long fromTs = lastDeliveredTimestamp;
+        long fromSeq = lastDeliveredSeq;
         List<LogEntry> toDeliver = new ArrayList<>();
-        long maxTs = fromTs;
+        long maxSeq = fromSeq;
         for (LogEntry e : buffer) { // ConcurrentLinkedQueue 弱一致快照，仅栈上暂存
-            long ts = e.getTimestamp();
-            if (ts > fromTs) {
+            long seq = e.getSeq();
+            if (seq > fromSeq) {
                 toDeliver.add(e);
-                if (ts > maxTs) {
-                    maxTs = ts;
+                if (seq > maxSeq) {
+                    maxSeq = seq;
                 }
             }
         }
@@ -151,7 +156,7 @@ public class LogBuffer implements AutoCloseable {
             }
             interrupted = Thread.currentThread().isInterrupted();
         }
-        lastDeliveredTimestamp = maxTs;
+        lastDeliveredSeq = maxSeq;
         if (dead != null) {
             for (LogSubscriber s : dead) {
                 subscribers.remove(s);

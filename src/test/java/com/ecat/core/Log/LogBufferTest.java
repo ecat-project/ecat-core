@@ -24,6 +24,7 @@ import java.io.ByteArrayOutputStream;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.*;
 
@@ -160,8 +161,9 @@ public class LogBufferTest {
     }
 
     @Test
-    public void testNoMemoryLeakWithSubscriber() {
-        // 有订阅者时同样不应泄漏
+    public void testNoMemoryLeakWithSubscriber() throws Exception {
+        // 有订阅者时同样不应泄漏。投递为异步(put 只发信号,log-broadcast 线程投递),
+        // 用 awaitReceived 等待投递完成——原立即断言与投递线程赛跑,在 mvnd 并行下 flaky。
         TestSubscriber sub = new TestSubscriber();
         buffer.subscribe(sub);
 
@@ -171,7 +173,33 @@ public class LogBufferTest {
         }
 
         assertEquals("buffer 仍应限制在容量内", 10, buffer.size());
-        assertTrue("订阅者应收到日志推送", sub.receivedCount >= 10);
+        // ring 容量即背压上界:投递跟不上时只保留最新 10 条,订阅者至少应收到这批增量
+        assertTrue("订阅者应收到日志推送(实际 " + sub.getReceivedCount() + ")",
+                sub.awaitReceived(10, 2000));
+
+        buffer.unsubscribe(sub);
+    }
+
+    @Test
+    public void testSameTimestamp_allDeliveredToSubscriber() throws Exception {
+        // 守护:同毫秒时间戳的多条日志必须全部投递给订阅者(不得因毫秒水位去重而丢)。
+        // 复现根因:旧 deliverDelta 用 lastDeliveredTimestamp(ms 高水位)+ ts>水位 去重——
+        // 先投递的把水位推到该 ms,后到的同 ms 条目 ts>水位 不成立 → 永不投递 → SSE 丢日志(文件不丢)。
+        TestSubscriber sub = new TestSubscriber();
+        buffer.subscribe(sub);
+
+        long sameTs = System.currentTimeMillis();
+        // A:先投一条,等 broadcaster 投递完 → 旧实现水位被推到 sameTs
+        buffer.put(createEntry(sameTs, "A"));
+        assertTrue("A 应被投递", sub.awaitReceived(1, 2000));
+
+        // B:同毫秒再投一条。旧实现(ms 水位):B.ts(sameTs) > 水位(sameTs) 不成立 → 丢弃;
+        // 正确实现(单调 seq):B 有更大 seq → 投递。
+        buffer.put(createEntry(sameTs, "B"));
+        boolean bDelivered = sub.awaitReceived(2, 2000);
+
+        assertTrue("同毫秒的第二条日志 B 必须投递给订阅者(旧 ms-水位实现会丢)", bDelivered);
+        assertEquals("订阅者应收到 A 和 B 两条", 2, sub.getReceivedCount());
 
         buffer.unsubscribe(sub);
     }
@@ -209,6 +237,7 @@ public class LogBufferTest {
         assertTrue("被淘汰的条目应可被 GC（清除 " + gcCleared + "/10）", gcCleared > 7);
     }
 
+    @SuppressWarnings("unused")
     @Test
     public void testNoBroadcastQueueField() {
         // 验证重构后不存在 broadcastQueue 字段（双引用已消除）
@@ -265,10 +294,13 @@ public class LogBufferTest {
     }
 
     /**
-     * 测试用订阅者（支持统计接收数量）
+     * 测试用订阅者（支持统计接收数量；AtomicInteger 跨线程可见，兼容异步投递）。
+     *
+     * <p>投递由 LogBuffer 的 log-broadcast 单写者线程异步完成，测试线程需用 {@link #awaitReceived}
+     * 轮询等待，避免立即断言与投递线程赛跑（原裸 int + 立即断言在 mvnd 并行下 flaky）。
      */
     private static class TestSubscriber extends LogSubscriber {
-        private int receivedCount = 0;
+        private final AtomicInteger receivedCount = new AtomicInteger(0);
 
         TestSubscriber() {
             super(new ByteArrayOutputStream());
@@ -276,12 +308,24 @@ public class LogBufferTest {
 
         @Override
         public void send(LogEntry entry) throws java.io.IOException {
-            receivedCount++;
+            receivedCount.incrementAndGet();
             super.send(entry);
         }
 
         int getReceivedCount() {
-            return receivedCount;
+            return receivedCount.get();
+        }
+
+        /** 轮询等待收到至少 n 条（超时返 false），与异步投递线程确定性同步。 */
+        boolean awaitReceived(int n, int timeoutMs) throws InterruptedException {
+            long end = System.currentTimeMillis() + timeoutMs;
+            while (System.currentTimeMillis() < end) {
+                if (receivedCount.get() >= n) {
+                    return true;
+                }
+                Thread.sleep(10);
+            }
+            return receivedCount.get() >= n;
         }
     }
 }

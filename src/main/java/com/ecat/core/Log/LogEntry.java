@@ -25,6 +25,14 @@ package com.ecat.core.Log;
  */
 public class LogEntry {
     private long timestamp;
+    /**
+     * 单调递增序号({@link LogBuffer#put} 时分配),用作 SSE 增量投递游标。
+     *
+     * <p>为什么不用毫秒时间戳当游标:同一毫秒内并发的多条日志 timestamp 相同,按 ts&gt;水位 去重时,
+     * 先投递的会把水位推到该 ms,后到的同 ms 条目 ts&gt;水位 不成立 → 永不投递 → SSE 丢日志(文件不丢)。
+     * seq 唯一递增,无碰撞。时间戳仍用于展示/排序/订阅时间过滤。
+     */
+    private long seq;
     private String traceId;
     private String coordinate;
     private String level;
@@ -65,6 +73,14 @@ public class LogEntry {
 
     public void setTimestamp(long timestamp) {
         this.timestamp = timestamp;
+    }
+
+    public long getSeq() {
+        return seq;
+    }
+
+    public void setSeq(long seq) {
+        this.seq = seq;
     }
 
     public String getTraceId() {
