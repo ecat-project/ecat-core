@@ -16,36 +16,50 @@ import static org.junit.Assert.*;
  */
 public class AbstractBusConsumerTest {
 
-    /** 测试用 consumer：每事件计数；用 latch 等待处理完成。 */
-    private static final class CountingConsumer extends AbstractBusConsumer<Integer> {
-        final AtomicInteger consumed = new AtomicInteger();
-        final CountDownLatch latch;
-        CountingConsumer(int capacity, int expectProcessed) {
-            super("test", capacity);
-            this.latch = new CountDownLatch(expectProcessed);
-        }
-        @Override
-        protected void consume(Integer event) {
-            consumed.incrementAndGet();
-            latch.countDown();
-        }
-    }
-
     @Test
     public void dropOldestWhenOverflow() throws InterruptedException {
-        // 容量 4，投 10 条：最多处理 4，丢最旧 6
-        CountingConsumer c = new CountingConsumer(4, 4);
-        for (int i = 0; i < 10; i++) {
+        // 稳定控制投递/消费速度的关键：用 latch 把 worker 冻结在 consume() 内，让「投递」与「消费」
+        // 两个阶段彻底解耦——投递阶段 worker 绝不抽队列，因此队列是否溢出只取决于容量，与线程调度/机器快慢无关。
+        final int capacity = 4;
+        final int total = 10;                                       // 共投递 10 条
+        final CountDownLatch workerParked = new CountDownLatch(1);  // worker 取到首条并进入 consume()
+        final CountDownLatch release = new CountDownLatch(1);       // 放行 worker 开始消费
+        final int expectedProcessed = capacity + 1;                 // 1 条 in-flight + capacity 条队列
+        final CountDownLatch allProcessed = new CountDownLatch(expectedProcessed);
+        final AtomicInteger processed = new AtomicInteger();
+
+        AbstractBusConsumer<Integer> c = new AbstractBusConsumer<Integer>("overflow", capacity) {
+            @Override
+            protected void consume(Integer event) {
+                workerParked.countDown();            // 已取到事件 → 通知主线程；随后阻塞，不再 take
+                try {
+                    release.await();                 // 冻结：worker 持有 1 条 in-flight，不再抽干队列
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                processed.incrementAndGet();
+                allProcessed.countDown();
+            }
+        };
+
+        // ① 第 1 条用于「唤醒并冻结」worker：确定性建立 in-flight=1，此后 worker 不再消费
+        c.onEvent(0);
+        assertTrue("worker 应及时取到首条并 park", workerParked.await(2, TimeUnit.SECONDS));
+
+        // ② worker 冻结期间批量投递剩余 9 条：队列必然满到 capacity，必然丢最旧
+        for (int i = 1; i < total; i++) {
             c.onEvent(i);
         }
-        assertTrue("4 条应在超时前处理完", c.latch.await(2, TimeUnit.SECONDS));
-        // 等丢弃计数稳定
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        while (c.getProcessedCount() + c.getDroppedCount() < 10 && System.nanoTime() < deadline) {
-            Thread.sleep(5);
-        }
-        assertEquals(4, c.getProcessedCount());
-        assertEquals(6, c.getDroppedCount());
+        // 核心（确定性）：9 条进容量 4 的队列 → 丢最旧 5，队列留最新 4
+        assertEquals(5, c.getDroppedCount());
+        assertEquals(capacity, c.getQueueSize());
+
+        // ③ 放行 worker：处理 in-flight(1) + 队列(4) = 5 条
+        release.countDown();
+        assertTrue("剩余事件应被处理完", allProcessed.await(2, TimeUnit.SECONDS));
+        assertEquals(expectedProcessed, processed.get());
+
         c.shutdown();
     }
 
