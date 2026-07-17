@@ -34,6 +34,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * 逻辑设备注册表，管理所有逻辑设备实例并提供反向索引查找能力。
  *
+ * <p><b>调用方建议优先使用 {@link com.ecat.core.Device.UnifiedDeviceStore}</b>——它聚合物理设备表
+ * ({@link com.ecat.core.Device.DeviceRegistry}) 与本表，能跨表统一查询，覆盖更全面；
+ * 仅当确需限定在逻辑设备范围内查询时，才直接使用本表。
+ *
  * <p>核心职责：
  * <ul>
  *   <li><b>设备注册表</b>：维护 deviceID -> DeviceBase 的映射，支持注册、注销、查询</li>
@@ -168,6 +172,45 @@ public class LogicDeviceRegistry implements IDeviceRegistry {
      */
     public List<DeviceBase> getAllDevices() {
         return new ArrayList<>(registry.values());
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>实现：遍历本表逻辑设备按 {@link DeviceBase#getUniqueId()} 匹配。
+     *
+     * @throws IllegalArgumentException uniqueId 为 null 或空串
+     */
+    @Override
+    public DeviceBase getDeviceByUniqueId(String uniqueId) {
+        if (uniqueId == null || uniqueId.isEmpty()) {
+            throw new IllegalArgumentException("uniqueId 不能为 null 或空串");
+        }
+        for (DeviceBase device : registry.values()) {
+            if (uniqueId.equals(device.getUniqueId())) {
+                return device;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @throws IllegalArgumentException coordinate 为 null 或空串
+     */
+    @Override
+    public List<DeviceBase> getDevicesByCoordinate(String coordinate) {
+        if (coordinate == null || coordinate.isEmpty()) {
+            throw new IllegalArgumentException("coordinate 不能为 null 或空串");
+        }
+        List<DeviceBase> result = new ArrayList<>();
+        for (DeviceBase device : registry.values()) {
+            if (coordinate.equals(device.getCoordinate())) {
+                result.add(device);
+            }
+        }
+        return result;
     }
 
     /**

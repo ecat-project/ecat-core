@@ -43,13 +43,23 @@ public class TestPhyDeviceHelper {
 
     /**
      * 创建一个属于 com.ecat.core.Device 包的 DeviceBase 实例。
+     * entryId 与 uniqueId 同设为 deviceId，coordinate 留空（兼容仅需一个 id 的旧测试）。
      */
     public static DeviceBase createDevice(String deviceId) {
+        return createDevice(deviceId, deviceId, null);
+    }
+
+    /**
+     * 创建一个属于 com.ecat.core.Device 包的 DeviceBase 实例，分别指定 entryId、uniqueId、coordinate。
+     * 供需要这三者不一致的测试使用（如按 uniqueId / coordinate 查询）。
+     */
+    public static DeviceBase createDevice(String entryId, String uniqueId, String coordinate) {
         ConfigEntry entry = new ConfigEntry();
-        entry.setEntryId(deviceId);
-        entry.setUniqueId(deviceId);
+        entry.setEntryId(entryId);
+        entry.setUniqueId(uniqueId);
+        entry.setCoordinate(coordinate);
         Map<String, Object> data = new HashMap<>();
-        data.put("name", "phy-device-" + deviceId);
+        data.put("name", "phy-device-" + entryId);
         entry.setData(data);
         return new TestPhyDeviceInPackage(entry);
     }

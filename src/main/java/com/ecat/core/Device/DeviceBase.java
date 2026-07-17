@@ -295,8 +295,11 @@ public abstract class DeviceBase implements DeviceControl {
 
 
     /**
-     * 从 ConfigEntry 构建设备（推荐）
-     * 自动从 entry 中提取 uniqueId 作为 deviceId，保存 entry 引用建立一对一关系
+     * 从 ConfigEntry 构建设备（推荐）。
+     *
+     * <p>保存 entry 引用建立设备与配置的一对一关系。此时 {@link #getId()} 返回
+     * {@code entry.getEntryId()}（系统生成 UUID，设备注册表以此 entryId 为 key），
+     * {@link #getUniqueId()} 返回 {@code entry.getUniqueId()}（业务标识，如 厂家_sn）。
      *
      * @param entry 配置条目
      */
@@ -324,6 +327,7 @@ public abstract class DeviceBase implements DeviceControl {
         initDevice(config);
     }
 
+    @SuppressWarnings("unchecked")
     private void initDevice(Map<String, Object> config) {
         this.name = (String) config.get("name");
 
@@ -356,8 +360,9 @@ public abstract class DeviceBase implements DeviceControl {
      * 可作为数据库或关联的ID，确保能找到这个配置
      * 但是因为不同集成的reconfigure entry flow不严谨导致设备类型发生变化，可能存在id没变但是设备类型发生变化
      * 因此如果业务方要求强一致应当监听core的 on reconfigured 的事件自行判断
-     * 
-     * @return 兼容 旧构建函数方式，后面当旧构建函数删除后可改为返回 entry.getEntryId()
+     *
+     * @return ConfigEntry 路径返回 {@code entry.getEntryId()}（设备注册表以此 entryId 为 key）；
+     *         仅当废弃的旧构造函数设置过 id 字段时返回旧 id
      */
     public String getId(){
         return id == null ? entry.getEntryId() : id;

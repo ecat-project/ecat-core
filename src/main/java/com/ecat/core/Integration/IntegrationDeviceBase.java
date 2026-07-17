@@ -33,14 +33,14 @@ import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
  * 子类只需实现 {@link #createDeviceFromEntry(ConfigEntry)} 来定义设备创建逻辑，
  * 以及 {@link #getConfigFlow()} 返回对应的 ConfigFlow 实例。
  *
- * <p>设备本地映射表 {@code devices} 以 uniqueId（device.getId()）为 key，
- * 全局 {@link com.ecat.core.Device.DeviceRegistry} 同样以 uniqueId 为 key。
+ * <p>设备本地映射表 {@code devices} 以 entryId（即 {@code device.getId()}，见 {@link DeviceBase#getId()}）为 key，
+ * 全局 {@link com.ecat.core.Device.DeviceRegistry} 同样以 entryId 为 key。
  *
  * @author coffee
  */
 public abstract class IntegrationDeviceBase extends IntegrationBase implements IIntegrationDeviceManagement {
 
-    /** 设备映射表 (uniqueId -> Device)，uniqueId 即 device.getId() */
+    /** 设备映射表 (entryId -> Device)，key 即 device.getId()（= entry.getEntryId()） */
     protected final Map<String, DeviceBase> devices = new ConcurrentHashMap<>();
     protected ConfigDefinition deviceConfigDefinition;
 

@@ -22,8 +22,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 设备注册表类，用于管理系统中所有设备对象的注册和访问
- * 
+ * 物理设备注册表，管理所有物理设备对象的注册与访问。
+ *
+ * <p><b>调用方建议优先使用 {@link UnifiedDeviceStore}</b>——它聚合物理设备表与逻辑设备表
+ * ({@link com.ecat.core.LogicDevice.LogicDeviceRegistry})，能跨表统一查询，覆盖更全面；
+ * 仅当确需限定在物理设备范围内查询时，才直接使用本表。
+ *
  * @author coffee
  */
 public class DeviceRegistry implements IDeviceRegistry {
@@ -66,6 +70,46 @@ public class DeviceRegistry implements IDeviceRegistry {
      */
     public List<DeviceBase> getAllDevices() {
         return new ArrayList<>(registry.values());
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>实现：遍历本表设备按 {@link DeviceBase#getUniqueId()} 匹配（uniqueId 在 entry 创建时由
+     * {@code ConfigEntryRegistry} 强制全局唯一）。
+     *
+     * @throws IllegalArgumentException uniqueId 为 null 或空串
+     */
+    @Override
+    public DeviceBase getDeviceByUniqueId(String uniqueId) {
+        if (uniqueId == null || uniqueId.isEmpty()) {
+            throw new IllegalArgumentException("uniqueId 不能为 null 或空串");
+        }
+        for (DeviceBase device : registry.values()) {
+            if (uniqueId.equals(device.getUniqueId())) {
+                return device;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @throws IllegalArgumentException coordinate 为 null 或空串
+     */
+    @Override
+    public List<DeviceBase> getDevicesByCoordinate(String coordinate) {
+        if (coordinate == null || coordinate.isEmpty()) {
+            throw new IllegalArgumentException("coordinate 不能为 null 或空串");
+        }
+        List<DeviceBase> result = new ArrayList<>();
+        for (DeviceBase device : registry.values()) {
+            if (coordinate.equals(device.getCoordinate())) {
+                result.add(device);
+            }
+        }
+        return result;
     }
 
     // todo: query devices by class

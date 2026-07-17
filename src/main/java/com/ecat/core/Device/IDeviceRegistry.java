@@ -16,17 +16,16 @@
 
 package com.ecat.core.Device;
 
-import java.util.List;
-
 /**
- * 设备注册表公共接口，定义设备注册、注销和查询的标准方法。
+ * 可写设备注册表接口：在只读查询契约 {@link IDeviceQuery} 基础上增加注册/注销写操作。
  *
- * <p>所有设备注册表（物理设备、逻辑设备等）都应实现此接口，
- * 以便 UnifiedDeviceStore 可以统一查询所有设备。
+ * <p>所有可写设备注册表（物理设备、逻辑设备等）都应实现此接口，
+ * 以便 {@link UnifiedDeviceStore} 可以统一聚合查询所有设备。
+ * 只读消费方应面向 {@link IDeviceQuery} 编程，避免误用写操作。
  *
  * @author coffee
  */
-public interface IDeviceRegistry {
+public interface IDeviceRegistry extends IDeviceQuery {
 
     /**
      * 注册设备到注册表
@@ -42,19 +41,4 @@ public interface IDeviceRegistry {
      * @param deviceID 设备ID
      */
     void unregister(String deviceID);
-
-    /**
-     * 根据设备ID获取设备对象
-     *
-     * @param deviceID 设备ID
-     * @return 设备对象，如果不存在则返回 null
-     */
-    DeviceBase getDeviceByID(String deviceID);
-
-    /**
-     * 获取注册表中所有设备的列表
-     *
-     * @return 所有设备的新列表（副本）
-     */
-    List<DeviceBase> getAllDevices();
 }

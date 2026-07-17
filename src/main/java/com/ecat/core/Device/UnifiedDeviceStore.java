@@ -38,12 +38,12 @@ import java.util.List;
  *   DeviceBase device = store.getDeviceByID("some-id");
  * </pre>
  *
- * <p>注意：此类只提供查询功能，不提供 register/unregister 操作。
+ * <p>注意：此类只提供查询功能（{@link IDeviceQuery}），不提供 register/unregister 操作。
  * 写入操作由各注册表自行管理。
  *
  * @author coffee
  */
-public class UnifiedDeviceStore {
+public class UnifiedDeviceStore implements IDeviceQuery {
 
     private final List<IDeviceRegistry> registries = new ArrayList<>();
 
@@ -66,6 +66,7 @@ public class UnifiedDeviceStore {
      * @param deviceID 设备ID
      * @return 设备对象，如果在所有注册表中都不存在则返回 null
      */
+    @Override
     public DeviceBase getDeviceByID(String deviceID) {
         for (IDeviceRegistry r : registries) {
             DeviceBase d = r.getDeviceByID(deviceID);
@@ -81,10 +82,49 @@ public class UnifiedDeviceStore {
      *
      * @return 所有设备的新列表
      */
+    @Override
     public List<DeviceBase> getAllDevices() {
         List<DeviceBase> all = new ArrayList<>();
         for (IDeviceRegistry r : registries) {
             all.addAll(r.getAllDevices());
+        }
+        return all;
+    }
+
+    /**
+     * 根据设备业务唯一标识（uniqueId）在所有注册表中查找设备。
+     *
+     * <p>按注册表添加顺序依次查找，返回第一个匹配的设备（与 {@link #getDeviceByID(String)} 同策略）。
+     * 入参 null/空串的校验由各注册表实现强制（抛 {@link IllegalArgumentException}）。
+     *
+     * @param uniqueId 设备业务唯一标识
+     * @return 设备对象，所有注册表均无匹配则返回 null
+     */
+    @Override
+    public DeviceBase getDeviceByUniqueId(String uniqueId) {
+        for (IDeviceRegistry r : registries) {
+            DeviceBase d = r.getDeviceByUniqueId(uniqueId);
+            if (d != null) {
+                return d;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 获取所有注册表中属于指定集成坐标（coordinate）的设备。
+     *
+     * <p>合并各注册表 {@link IDeviceRegistry#getDevicesByCoordinate(String)} 的结果，跨物理与逻辑设备表。
+     * 入参 null/空串的校验由各注册表实现强制（抛 {@link IllegalArgumentException}）。
+     *
+     * @param coordinate 集成坐标
+     * @return 该坐标下所有设备的新列表
+     */
+    @Override
+    public List<DeviceBase> getDevicesByCoordinate(String coordinate) {
+        List<DeviceBase> all = new ArrayList<>();
+        for (IDeviceRegistry r : registries) {
+            all.addAll(r.getDevicesByCoordinate(coordinate));
         }
         return all;
     }

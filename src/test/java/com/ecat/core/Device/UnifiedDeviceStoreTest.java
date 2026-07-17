@@ -31,6 +31,8 @@ import static org.junit.Assert.*;
  *   <li>addRegistry — 添加单个和多个注册表</li>
  *   <li>getDeviceByID — 从首个/第二个注册表查找、未找到、空 store、ID 重复（先添加者优先）</li>
  *   <li>getAllDevices — 空结果、无注册表、多注册表合并、返回可变副本</li>
+ *   <li>getDeviceByUniqueId — 跨注册表委托、首个命中优先、未找到</li>
+ *   <li>getDevicesByCoordinate — 跨注册表合并、无匹配空列表</li>
  *   <li>动态添加注册表 — 初始查询后追加注册表</li>
  * </ul>
  *
@@ -39,6 +41,14 @@ import static org.junit.Assert.*;
 public class UnifiedDeviceStoreTest {
 
     // ========== addRegistry ==========
+
+    @Test
+    public void testStoreIsReadOnlyIDeviceQuery() {
+        // 统一门面实现只读 IDeviceQuery，但不实现可写 IDeviceRegistry（read-only 契约）
+        UnifiedDeviceStore store = new UnifiedDeviceStore();
+        assertTrue(store instanceof IDeviceQuery);
+        assertFalse(store instanceof IDeviceRegistry);
+    }
 
     @Test
     public void testAddSingleRegistry() {
@@ -205,6 +215,82 @@ public class UnifiedDeviceStoreTest {
         List<DeviceBase> all2 = store.getAllDevices();
         assertEquals(1, all2.size());
         assertSame(device, all2.get(0));
+    }
+
+    // ========== getDeviceByUniqueId ==========
+
+    @Test
+    public void testGetDeviceByUniqueId_DelegatesAcrossRegistries() {
+        UnifiedDeviceStore store = new UnifiedDeviceStore();
+        DeviceRegistry phyRegistry = new DeviceRegistry();
+        LogicDeviceRegistry logicRegistry = new LogicDeviceRegistry();
+        store.addRegistry(phyRegistry);
+        store.addRegistry(logicRegistry);
+
+        DeviceBase phyDevice = TestPhyDeviceHelper.createDevice("phy-entry", "phy-sn", "com.ecat:x");
+        DeviceBase logicDevice = TestPhyDeviceHelper.createDevice("logic-entry", "logic-sn", "com.ecat:logic");
+        phyRegistry.register("phy-entry", phyDevice);
+        logicRegistry.register("logic-entry", logicDevice);
+
+        // 跨物理/逻辑两表按 uniqueId 查
+        assertSame(phyDevice, store.getDeviceByUniqueId("phy-sn"));
+        assertSame(logicDevice, store.getDeviceByUniqueId("logic-sn"));
+    }
+
+    @Test
+    public void testGetDeviceByUniqueId_FirstRegistryWins() {
+        UnifiedDeviceStore store = new UnifiedDeviceStore();
+        DeviceRegistry first = new DeviceRegistry();
+        DeviceRegistry second = new DeviceRegistry();
+        store.addRegistry(first);
+        store.addRegistry(second);
+
+        DeviceBase d1 = TestPhyDeviceHelper.createDevice("e1", "dup-sn", "com.ecat:x");
+        DeviceBase d2 = TestPhyDeviceHelper.createDevice("e2", "dup-sn", "com.ecat:y");
+        first.register("e1", d1);
+        second.register("e2", d2);
+
+        assertSame(d1, store.getDeviceByUniqueId("dup-sn"));
+    }
+
+    @Test
+    public void testGetDeviceByUniqueId_NotFound() {
+        UnifiedDeviceStore store = new UnifiedDeviceStore();
+        store.addRegistry(new DeviceRegistry());
+
+        assertNull(store.getDeviceByUniqueId("no-such-sn"));
+    }
+
+    // ========== getDevicesByCoordinate ==========
+
+    @Test
+    public void testGetDevicesByCoordinate_MergesAcrossRegistries() {
+        UnifiedDeviceStore store = new UnifiedDeviceStore();
+        DeviceRegistry phyRegistry = new DeviceRegistry();
+        LogicDeviceRegistry logicRegistry = new LogicDeviceRegistry();
+        store.addRegistry(phyRegistry);
+        store.addRegistry(logicRegistry);
+
+        // 物理表与逻辑表各有同 coordinate 的设备 → 合并后两个都在
+        DeviceBase phyDevice = TestPhyDeviceHelper.createDevice("phy-e", "phy-u", "com.ecat:shared");
+        DeviceBase logicDevice = TestPhyDeviceHelper.createDevice("logic-e", "logic-u", "com.ecat:shared");
+        phyRegistry.register("phy-e", phyDevice);
+        logicRegistry.register("logic-e", logicDevice);
+
+        List<DeviceBase> shared = store.getDevicesByCoordinate("com.ecat:shared");
+        assertEquals(2, shared.size());
+        assertTrue(shared.contains(phyDevice));
+        assertTrue(shared.contains(logicDevice));
+    }
+
+    @Test
+    public void testGetDevicesByCoordinate_NoMatch_EmptyList() {
+        UnifiedDeviceStore store = new UnifiedDeviceStore();
+        store.addRegistry(new DeviceRegistry());
+
+        List<DeviceBase> result = store.getDevicesByCoordinate("com.ecat:none");
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
     }
 
     // ========== 动态添加注册表 ==========
