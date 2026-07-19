@@ -95,6 +95,16 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
         return this.core.getTaskManager().getExecutorService();
     }
 
+    /**
+     * 本集成的坐标（groupId:artifactId）；loadOption 未设置时返回 null。
+     * 供 flow 上下文之外（如 onStart）需 coordinate 的域化查询：
+     * {@code core.getEntryRegistry().getByUniqueId(getCoordinate(), uniqueId)}。
+     */
+    public String getCoordinate() {
+        return (loadOption != null && loadOption.getIntegrationInfo() != null)
+                ? loadOption.getIntegrationInfo().getCoordinate() : null;
+    }
+
     @Override
     public void onRelease() {
         // 清除日志上下文

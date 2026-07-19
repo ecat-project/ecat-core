@@ -49,12 +49,12 @@ public class IDeviceRegistryTest {
     @Test
     public void testGetDeviceByUniqueId_DeviceRegistry_Found() {
         IDeviceRegistry registry = new DeviceRegistry();
-        // entryId 与 uniqueId 故意不同：证明本方法按 uniqueId 查而非 entryId
+        // entryId 与 uniqueId 故意不同：证明本方法按 (coordinate,uniqueId) 查而非 entryId
         DeviceBase device = TestPhyDeviceHelper.createDevice("entry-1", "sn-001", "com.ecat:x");
         registry.register("entry-1", device);
 
-        assertSame(device, registry.getDeviceByUniqueId("sn-001"));
-        // 用 uniqueId 调 getDeviceByID 应返回 null（key 是 entryId），印证两套查询的区别
+        assertSame(device, registry.getDeviceByUniqueId("com.ecat:x", "sn-001"));
+        // 用 uniqueId 调 getDeviceByID 应返回 null（key 是 deviceId），印证两套查询的区别
         assertNull(registry.getDeviceByID("sn-001"));
     }
 
@@ -64,7 +64,7 @@ public class IDeviceRegistryTest {
         DeviceBase device = TestPhyDeviceHelper.createDevice("entry-2", "sn-002", "com.ecat:y");
         registry.register("entry-2", device);
 
-        assertSame(device, registry.getDeviceByUniqueId("sn-002"));
+        assertSame(device, registry.getDeviceByUniqueId("com.ecat:y", "sn-002"));
     }
 
     @Test
@@ -72,17 +72,21 @@ public class IDeviceRegistryTest {
         IDeviceRegistry registry = new DeviceRegistry();
         registry.register("entry-1", TestPhyDeviceHelper.createDevice("entry-1", "sn-001", "com.ecat:x"));
 
-        assertNull(registry.getDeviceByUniqueId("nonexistent-sn"));
+        assertNull(registry.getDeviceByUniqueId("com.ecat:x", "nonexistent-sn"));
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testGetDeviceByUniqueId_NullInput_Throws() {
-        new DeviceRegistry().getDeviceByUniqueId(null);
+    @Test
+    public void testGetDeviceByUniqueId_NullInput_ReturnsNull() {
+        // 2-param 域化查询对 null 入参优雅返回 null（非异常）——coordinate/uniqueId 任一为 null 即 miss
+        IDeviceRegistry registry = new DeviceRegistry();
+        assertNull(registry.getDeviceByUniqueId(null, "sn-001"));
+        assertNull(registry.getDeviceByUniqueId("com.ecat:x", null));
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testGetDeviceByUniqueId_EmptyInput_Throws() {
-        new DeviceRegistry().getDeviceByUniqueId("");
+    @Test
+    public void testGetDeviceByUniqueId_EmptyInput_ReturnsNull() {
+        IDeviceRegistry registry = new DeviceRegistry();
+        assertNull(registry.getDeviceByUniqueId("com.ecat:x", ""));
     }
 
     // ========== getDevicesByCoordinate 契约 ==========

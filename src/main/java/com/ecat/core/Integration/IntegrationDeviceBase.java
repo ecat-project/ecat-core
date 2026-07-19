@@ -20,6 +20,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.ecat.core.Bus.event.DeviceLifecycleEvent;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Device.DeviceBase;
@@ -33,14 +34,16 @@ import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
  * 子类只需实现 {@link #createDeviceFromEntry(ConfigEntry)} 来定义设备创建逻辑，
  * 以及 {@link #getConfigFlow()} 返回对应的 ConfigFlow 实例。
  *
- * <p>设备本地映射表 {@code devices} 以 entryId（即 {@code device.getId()}，见 {@link DeviceBase#getId()}）为 key，
- * 全局 {@link com.ecat.core.Device.DeviceRegistry} 同样以 entryId 为 key。
+ * <p>设备本地映射表 {@code devices} 以 deviceId（即 {@code device.getId()}，见 {@link DeviceBase#getId()}）为 key，
+ * 全局 {@link com.ecat.core.Device.DeviceRegistry} 同样以 deviceId 为 key。
+ * deviceId 由 core 铸造（UUID），跨重启/重配稳定（getOrCreate 命中持久化记录复原）；与 entryId（配置记录 UUID）不同，
+ * 一个 entry 在网关场景可派生 1:N 个 device。
  *
  * @author coffee
  */
 public abstract class IntegrationDeviceBase extends IntegrationBase implements IIntegrationDeviceManagement {
 
-    /** 设备映射表 (entryId -> Device)，key 即 device.getId()（= entry.getEntryId()） */
+    /** 设备映射表 (deviceId -> Device)，key 即 device.getId()（core 铸造的 deviceId，非 entryId） */
     protected final Map<String, DeviceBase> devices = new ConcurrentHashMap<>();
     protected ConfigDefinition deviceConfigDefinition;
 
@@ -53,12 +56,22 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     // TODO: 旧式 addDevice 直接注册模式，后续统一通过 createEntry 后删除
     @Override
     public boolean addDevice(DeviceBase device) {
+        return addDevice(device, DeviceLifecycleEvent.Action.CREATE);
+    }
+
+    /**
+     * 00-core：经 DeviceRegistry.getOrCreate 解析稳定 deviceId（跨重启）后注册。
+     *
+     * @param action 事件意图（create/enable→CREATE，reconfigure→RECONFIGURE）
+     */
+    public boolean addDevice(DeviceBase device, DeviceLifecycleEvent.Action action) {
+        // 先解析稳定 id（可能用持久化值覆盖构造铸造的默认 UUID），再按解析后的 id 幂等建本地映射
+        deviceRegistry.getOrCreate(device, action);
         if (devices.containsKey(device.getId())) {
             return true;
         }
         devices.put(device.getId(), device);
         device.setIntegration(this);
-        deviceRegistry.register(device.getId(), device);
         return true;
     }
 
@@ -105,7 +118,8 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         DeviceBase device = createDeviceFromEntry(entry);
         if (device != null) {
             // device.load(core) 已在各集成的 createDeviceFromEntry() 中调用
-            addDevice(device);
+            addDevice(device);                                   // getOrCreate 解析稳定 id + register
+            device.restorePersistedState();                      // 00-core(D9)：addDevice 后批量恢复 state（id 已解析）
             device.start();
         }
         log.info("Entry created: {}", entry.getUniqueId());
@@ -116,25 +130,20 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     public ConfigEntry reconfigureEntry(String entryId, ConfigEntry newEntry) {
         log.info("Reconfiguring entry: {}", entryId);
 
-        // 1. 停止并释放旧设备
+        // 1. 软移除旧设备：保 device 记录(yml) + state DB + matchIndex（不删、不发 REMOVE）。
+        //    同物理设备 reconfigure 保身份/state：新设备 getOrCreate 命中保留记录复原原 id。
         DeviceBase oldDevice = findDeviceByEntryId(entryId);
         if (oldDevice != null) {
-            oldDevice.stop();
-            oldDevice.release();
-            removeDevice(oldDevice);
-            // 删除旧设备的持久化状态文件
-            if (core != null && core.getStateManager() != null) {
-                core.getStateManager().removeDevice(oldDevice);
-            }
+            removeOldDevice(oldDevice);
         }
 
-        // 2. 创建并启动新设备
+        // 2. 创建并启动新设备；getOrCreate 命中保留 yml → setId(原 id) → deviceId 跨 reconfigure 稳定。
         DeviceBase newDevice = createDeviceFromEntry(newEntry);
         if (newDevice == null) {
             throw new RuntimeException("Failed to create device with new config for entry: " + entryId);
         }
-        // device.load(core) 已在各集成的 createDeviceFromEntry() 中调用
-        addDevice(newDevice);
+        addDevice(newDevice, DeviceLifecycleEvent.Action.RECONFIGURE);
+        newDevice.restorePersistedState();   // 读保留的 state DB（id 已复原）
         newDevice.start();
 
         log.info("Entry reconfigured: {}", entryId);
@@ -144,26 +153,51 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     @Override
     public void removeEntry(String entryId) {
         log.info("Removing entry: {}", entryId);
-        DeviceBase device = findDeviceByEntryId(entryId);
-        if (device != null) {
+        // 00-core：真实删除按 entryId 级联（1:N 正确）——硬删 device 记录 + state DB，发 REMOVE。
+        for (DeviceBase device : deviceRegistry.findDevicesByEntryId(entryId)) {
             device.stop();
             device.release();
-            removeDevice(device);
-            // 删除持久化状态文件
+            devices.remove(device.getId());
+            deviceRegistry.unregister(device, true);   // 硬：删 yml + matchIndex，发 REMOVE
             if (core != null && core.getStateManager() != null) {
-                core.getStateManager().removeDevice(device);
+                core.getStateManager().removeDevice(device);   // 删 state DB
             }
         }
-        // 注意：不调用 super.removeEntry(entryId)
-        // 调用链：ConfigEntryRegistry.removeEntry() -> notifyIntegrationRemove() -> integration.removeEntry()
-        // 如果这里再调用 super.removeEntry() 会导致递归 StackOverflowError
-        // Registry 已负责从缓存中移除 entry
+        // 注意：不调用 super.removeEntry(entryId)——ConfigEntryRegistry.removeEntry → notifyIntegrationRemove → 本方法，
+        // 再调 super 会递归 StackOverflowError。Registry 已负责从缓存移除 entry。
         log.info("Entry removed: {}", entryId);
     }
 
     /**
-     * 通过 entryId 查找设备
-     * devices 以 uniqueId 为 key，需要遍历匹配 entry.getEntryId()
+     * 00-core：reconfigure 软移除——停止/释放旧设备对象 + 从内存 registry 移除，
+     * 但保留 device yml + state DB + matchIndex（不发 REMOVE）。
+     * 随后新设备 register 命中保留记录复原 id，并按编排意图发 RECONFIGURE。
+     */
+    protected void removeOldDevice(DeviceBase device) {
+        device.stop();
+        device.release();
+        devices.remove(device.getId());
+        deviceRegistry.softRemove(device);   // 仅内存 map 移除，不删记录、不发事件
+    }
+
+    /**
+     * 00-core：entry disable 的 1:N 级联——软移除该 entry 关联的全部设备（保记录+state），逐个发 REMOVE。
+     * 软移除使 enable 时 getOrCreate 命中保留 yml 复原 id、restorePersistedState 读保留 state → 跨 disable/enable 保活。
+     * 覆盖 {@link IntegrationBase#disableEntry(String)}（默认实现调 removeEntry 是破坏性删 state，不适配新模型）。
+     */
+    @Override
+    public void disableEntry(String entryId) {
+        for (DeviceBase device : deviceRegistry.findDevicesByEntryId(entryId)) {
+            device.stop();
+            device.release();
+            devices.remove(device.getId());
+            deviceRegistry.unregister(device, false);   // 软：保 yml+matchIndex，发 REMOVE
+        }
+    }
+
+    /**
+     * 通过 entryId 查找设备。
+     * devices 以 deviceId 为 key（非 entryId），故按 entryId 查需遍历匹配 device.getEntry().getEntryId()。
      */
     private DeviceBase findDeviceByEntryId(String entryId) {
         for (DeviceBase device : devices.values()) {

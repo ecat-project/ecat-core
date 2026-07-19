@@ -20,6 +20,7 @@ import com.ecat.core.Bus.event.AllLoadedEvent;
 import com.ecat.core.Bus.event.AsyncExecutionEvent;
 import com.ecat.core.Bus.event.ConfigEntryEvent;
 import com.ecat.core.Bus.event.DeviceDataChangedEvent;
+import com.ecat.core.Bus.event.DeviceLifecycleEvent;
 import com.ecat.core.Bus.event.IntegrationLifecycleEvent;
 import com.ecat.core.Bus.event.NotificationEvent;
 
@@ -30,6 +31,7 @@ import com.ecat.core.Bus.event.NotificationEvent;
  */
 public enum BusTopic {
     DEVICE_DATA_UPDATE("device.data.update", DeviceDataChangedEvent.class),
+    DEVICE_LIFECYCLE("device.lifecycle", DeviceLifecycleEvent.class),
     INTEGRATIONS_ALL_LOADED("integration.all_loaded", AllLoadedEvent.class),
     LOGIC_DEVICES_ALL_LOADED("logic_device.all_loaded", AllLoadedEvent.class),
     CONFIG_ENTRY_LIFECYCLE("config.entry.lifecycle", ConfigEntryEvent.class),
@@ -75,7 +77,8 @@ public enum BusTopic {
         if (INTEGRATIONS_ALL_LOADED.getTopicName().equals(topic)
                 || LOGIC_DEVICES_ALL_LOADED.getTopicName().equals(topic)
                 || CONFIG_ENTRY_LIFECYCLE.getTopicName().equals(topic)
-                || INTEGRATION_LIFECYCLE.getTopicName().equals(topic)) {
+                || INTEGRATION_LIFECYCLE.getTopicName().equals(topic)
+                || DEVICE_LIFECYCLE.getTopicName().equals(topic)) {
             return DispatchMode.SYNC;
         }
         return DispatchMode.ASYNC;

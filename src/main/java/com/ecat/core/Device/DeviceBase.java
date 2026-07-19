@@ -71,11 +71,22 @@ public abstract class DeviceBase implements DeviceControl {
     //   - gas.zero.generate
     //   - gas.span.generate
 
-    @Deprecated
-    protected String id = null; // 旧yml中device id， 使用config flow后改用entry.getEntryId()，旧可删除此字段
+    /**
+     * 设备主键 id：core 在构造函数铸造的稳定 UUID。跨重启经 DeviceRegistry.getOrCreate 用持久化值覆盖。
+     * 替代旧的"entryId 兼当 deviceId"折叠；entryId 退回 ConfigEntry 自身主键。
+     * setId 包级私有——仅 com.ecat.core.Device（DeviceRegistry.getOrCreate）可改，外部不可变。
+     */
+    protected String id;
+
+    /**
+     * 设备硬件锚点 uniqueId：entry-backed 从 entry.getUniqueId() 取；网关子设备从构造入参取
+     * （其 entry 是网关的，entry.getUniqueId() 是网关的而非子设备的）。
+     * 仅 coordinate 内唯一，只用于 get-or-create 物理匹配/重复发现去重，不进业务/事件。
+     */
+    protected String uniqueId;
 
     @Getter
-    protected ConfigEntry entry; // 配置条目引用，与设备一对一关系
+    protected ConfigEntry entry; // 配置条目引用（entry-backed=自身 entry；网关子设备=网关 entry，1:N back-ref）
 
     /**
      * 获取设备所属集成的坐标标识（如 com.ecat:integration-hikvision）。
@@ -308,14 +319,37 @@ public abstract class DeviceBase implements DeviceControl {
         this.objectId = OBJECT_ID_GENERATOR.getAndIncrement();
         this.entry = entry;
         this.config = entry.getData();
+        this.id = java.util.UUID.randomUUID().toString();
+        this.uniqueId = entry.getUniqueId();
         initDevice(entry.getData());
     }
 
     /**
-     * 从 config Map 构建设备（旧式，已废弃）
+     * 网关子设备构造：无自身 entry，复用网关 entry 作 1:N back-ref。
+     * <p>uniqueId 由集成从子设备硬件读取（≠ 网关 entry 的 uniqueId）；id 仍由 core 铸造 UUID，
+     * 经 DeviceRegistry.getOrCreate 用持久化值覆盖以跨重启稳定。
+     *
+     * @param gatewayEntry 创建此子设备的网关 ConfigEntry（getEntry().getEntryId() 即网关 entryId）
+     * @param uniqueId     子设备硬件原生 uniqueId
+     * @param config       子设备运行时配置（由网关组装）
+     */
+    public DeviceBase(ConfigEntry gatewayEntry, String uniqueId, Map<String, Object> config) {
+        this.log = LogFactory.getLogger(getClass());
+        this.objectId = OBJECT_ID_GENERATOR.getAndIncrement();
+        this.entry = gatewayEntry;
+        this.config = config;
+        this.id = java.util.UUID.randomUUID().toString();
+        this.uniqueId = uniqueId;
+        initDevice(config);
+    }
+
+    /**
+     * 从 config Map 构建设备（旧式，已废弃）。
+     * <p>新代码用 {@link #DeviceBase(ConfigEntry)}（entry-backed）或
+     * {@link #DeviceBase(ConfigEntry, String, Map)}（网关子设备）。00-core Task 11 删除此构造。
      *
      * @param config 设备配置
-     * @deprecated 使用 {@link #DeviceBase(ConfigEntry)} 替代
+     * @deprecated 使用 {@link #DeviceBase(ConfigEntry)} 或网关构造器替代
      */
     @Deprecated
     public DeviceBase(Map<String, Object> config) {
@@ -323,7 +357,8 @@ public abstract class DeviceBase implements DeviceControl {
         this.objectId = OBJECT_ID_GENERATOR.getAndIncrement();
         this.config = config;
         this.entry = new ConfigEntry(); // create empty config entry temporary
-        this.id = (String) config.get("id");
+        this.id = java.util.UUID.randomUUID().toString();
+        this.uniqueId = null;
         initDevice(config);
     }
 
@@ -354,28 +389,32 @@ public abstract class DeviceBase implements DeviceControl {
     }
 
     /**
-     * 获取设备的id标识符
-     * 全局唯一
-     * 全局不会更改，除非entry被删除
-     * 可作为数据库或关联的ID，确保能找到这个配置
-     * 但是因为不同集成的reconfigure entry flow不严谨导致设备类型发生变化，可能存在id没变但是设备类型发生变化
-     * 因此如果业务方要求强一致应当监听core的 on reconfigured 的事件自行判断
+     * 设备主键 id（core 铸造的稳定 UUID）。全局唯一、跨重启稳定（DeviceRegistry.getOrCreate 用持久化值覆盖）。
+     * 注册表 key、事件载荷、历史 FK、数据/逻辑关联均用此。
+     * <p>LogicDevice 豁免：其覆盖 getId() 返确定性 uniqueId（见 LogicDevice），不走 UUID 铸造。
      *
-     * @return ConfigEntry 路径返回 {@code entry.getEntryId()}（设备注册表以此 entryId 为 key）；
-     *         仅当废弃的旧构造函数设置过 id 字段时返回旧 id
+     * @return 设备主键 UUID（构造铸造，可能已被 getOrCreate 覆盖为持久化值）
      */
     public String getId(){
-        return id == null ? entry.getEntryId() : id;
+        return id;
     }
 
     /**
-     * 获取设备的唯一业务标识符，具有业务含义的
-     * 全局唯一
-     * 可能会修改：当用户reconfigure entry后部分支持同类型多设备的集成的entry极大可能变化，比如SN修改会发生改变，只能作为业务展示
-     * @return
+     * 设备硬件锚点 uniqueId（coordinate 内唯一）。仅用于物理设备匹配/重复发现去重，不进业务/事件。
+     * entry-backed 取自 entry.getUniqueId()；网关子设备取自构造入参。
+     *
+     * @return 硬件 uniqueId
      */
     public String getUniqueId(){
-        return entry.getUniqueId();
+        return uniqueId;
+    }
+
+    /**
+     * 包级私有 id setter：仅 com.ecat.core.Device 包（DeviceRegistry.getOrCreate）可调，
+     * 用于把构造铸造的默认 UUID 覆盖为持久化的稳定 id，保证跨重启一致。外部 jar/集成无法改 id。
+     */
+    void setId(String id) {
+        this.id = id;
     }
 
     /**
@@ -398,12 +437,26 @@ public abstract class DeviceBase implements DeviceControl {
         }
         attr.setDevice(this); // 绑定属性与设备的关系以及使用device所在集成的i18n资源
         attrs.put(attr.getAttributeID(), attr);
-
-        // 恢复持久化状态（persistable 属性在 setAttribute 时自动恢复）
-        if (attr.isPersistable() && core != null && core.getStateManager() != null) {
-            core.getStateManager().restoreAttributeState(this, attr);
-        }
+        // 00-core（D9）：state 恢复已从 setAttribute 解耦——setAttribute 只注册。
+        // 恢复由 restorePersistedState() 在 addDevice（getOrCreate 解析稳定 id）之后批量执行。
+        // 原因：setAttribute 普遍在 init()（addDevice 之前）被调用，若此时 restore 会用未解析的构造期 id。
         return true;
+    }
+
+    /**
+     * 00-core（D9）：批量恢复本设备全部 persistable 属性的持久化状态。
+     * <p>由 {@code IntegrationDeviceBase.createEntry} 在 addDevice（getOrCreate 解析稳定 deviceId）之后、
+     * start() 之前调用——确保用稳定 id 读 state DB，避免在 setAttribute（init 期、id 未解析）恢复。
+     */
+    public void restorePersistedState() {
+        if (core == null || core.getStateManager() == null || attrs == null) {
+            return;
+        }
+        for (AttributeBase<?> attr : attrs.values()) {
+            if (attr.isPersistable()) {
+                core.getStateManager().restoreAttributeState(this, attr);
+            }
+        }
     }
 
     public Map<String, AttributeBase<?>> getAttrs() {

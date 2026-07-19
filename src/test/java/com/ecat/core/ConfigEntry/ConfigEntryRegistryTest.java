@@ -24,7 +24,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,8 +45,6 @@ public class ConfigEntryRegistryTest {
     public void setUp() throws IOException {
         // 创建临时测试目录
         testDir = Files.createTempDirectory("config-entry-test");
-        String testBaseDir = testDir.toAbsolutePath().toString() + "/config_entries";
-
         // 创建测试用的 persistence（使用自定义目录）
         persistence = new YmlConfigEntryPersistence() {
             @Override
@@ -72,7 +69,7 @@ public class ConfigEntryRegistryTest {
             }
         };
 
-        registry = new ConfigEntryRegistry(persistence);
+        registry = new ConfigEntryRegistry(null, persistence);
     }
 
     @After
@@ -131,19 +128,19 @@ public class ConfigEntryRegistryTest {
     @Test
     public void testGetIgnoreEntry() {
         registry.createIgnoreEntry("com.ecat:c", "uid-x", null);
-        assertNotNull("存在 IGNORE entry 时 getIgnoreEntry 应非 null", registry.getIgnoreEntry("uid-x"));
-        assertNull("非 IGNORE 的 uniqueId 应返回 null", registry.getIgnoreEntry("not-ignored"));
+        assertNotNull("存在 IGNORE entry 时 getIgnoreEntry 应非 null", registry.getIgnoreEntry("com.ecat:c", "uid-x"));
+        assertNull("非 IGNORE 的 uniqueId 应返回 null", registry.getIgnoreEntry("com.ecat:c", "not-ignored"));
     }
 
     @Test
     public void testRemoveIgnoreEntry_Unblocks() {
         registry.createIgnoreEntry("com.ecat:c", "uid-y", null);
-        assertTrue("删除 IGNORE entry 应返回 true", registry.removeIgnoreEntry("uid-y"));
-        assertNull("删除后 getIgnoreEntry 应为 null", registry.getIgnoreEntry("uid-y"));
+        assertTrue("删除 IGNORE entry 应返回 true", registry.removeIgnoreEntry("com.ecat:c", "uid-y"));
+        assertNull("删除后 getIgnoreEntry 应为 null", registry.getIgnoreEntry("com.ecat:c", "uid-y"));
         // 召回后可重新创建（R5 不再拦截）—— req3 召回语义
         registry.createEntry(new ConfigEntry.Builder()
                 .coordinate("com.ecat:c").uniqueId("uid-y").title("real").build());
-        assertNotNull("召回后可创建真实 entry", registry.getByUniqueId("uid-y"));
+        assertNotNull("召回后可创建真实 entry", registry.getByUniqueId("com.ecat:c", "uid-y"));
     }
 
     @Test
@@ -151,8 +148,8 @@ public class ConfigEntryRegistryTest {
         // 真实 entry（非 IGNORE）不应被 removeIgnoreEntry 误删
         registry.createEntry(new ConfigEntry.Builder()
                 .coordinate("com.ecat:c").uniqueId("real-uid").title("real").build());
-        assertFalse("removeIgnoreEntry 对真实 entry 应返回 false", registry.removeIgnoreEntry("real-uid"));
-        assertNotNull("真实 entry 不应被误删", registry.getByUniqueId("real-uid"));
+        assertFalse("removeIgnoreEntry 对真实 entry 应返回 false", registry.removeIgnoreEntry("com.ecat:c", "real-uid"));
+        assertNotNull("真实 entry 不应被误删", registry.getByUniqueId("com.ecat:c", "real-uid"));
     }
 
     // ==================== createEntry() 测试 ====================
@@ -401,7 +398,7 @@ public class ConfigEntryRegistryTest {
         ConfigEntry created = registry.createEntry(entry);
 
         // 通过 uniqueId 查询
-        ConfigEntry retrieved = registry.getByUniqueId("demo_123");
+        ConfigEntry retrieved = registry.getByUniqueId("com.ecat.integration:demo", "demo_123");
 
         assertNotNull("应该找到 entry", retrieved);
         assertEquals("uniqueId 应该匹配", "demo_123", retrieved.getUniqueId());
@@ -410,7 +407,7 @@ public class ConfigEntryRegistryTest {
 
     @Test
     public void testGetByUniqueId_NotFound() {
-        ConfigEntry retrieved = registry.getByUniqueId("non-existent-unique-id");
+        ConfigEntry retrieved = registry.getByUniqueId("com.ecat.integration:demo", "non-existent-unique-id");
         assertNull("未找到 entry 应该返回 null", retrieved);
     }
 

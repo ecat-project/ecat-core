@@ -391,7 +391,7 @@ public class ConfigFlowService {
         if (entryRegistry == null) {
             throw new ConfigFlowException("ConfigEntryRegistry not initialized");
         }
-        ConfigEntry entry = entryRegistry.getByUniqueId(uniqueId);
+        ConfigEntry entry = entryRegistry.getByUniqueId(coordinate, uniqueId);
         if (entry == null) {
             throw new ConfigFlowException("ConfigEntry not found: " + uniqueId);
         }
@@ -672,7 +672,7 @@ public class ConfigFlowService {
             log.error("ConfigEntryRegistry not initialized");
             return;
         }
-        ConfigEntry existing = registry.getByUniqueId(entry.getUniqueId());
+        ConfigEntry existing = registry.getByUniqueId(entry.getCoordinate(), entry.getUniqueId());
         if (existing != null) {
             registry.removeEntry(existing.getEntryId());
             log.info("Entry removed via flow: {}", entry.getUniqueId());

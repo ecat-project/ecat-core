@@ -174,20 +174,14 @@ public class LogicDeviceRegistry implements IDeviceRegistry {
         return new ArrayList<>(registry.values());
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * <p>实现：遍历本表逻辑设备按 {@link DeviceBase#getUniqueId()} 匹配。
-     *
-     * @throws IllegalArgumentException uniqueId 为 null 或空串
-     */
+    /** 00-core：按 coordinate 域化查找逻辑设备。 */
     @Override
-    public DeviceBase getDeviceByUniqueId(String uniqueId) {
-        if (uniqueId == null || uniqueId.isEmpty()) {
-            throw new IllegalArgumentException("uniqueId 不能为 null 或空串");
+    public DeviceBase getDeviceByUniqueId(String coordinate, String uniqueId) {
+        if (coordinate == null || uniqueId == null || uniqueId.isEmpty()) {
+            return null;
         }
         for (DeviceBase device : registry.values()) {
-            if (uniqueId.equals(device.getUniqueId())) {
+            if (coordinate.equals(device.getCoordinate()) && uniqueId.equals(device.getUniqueId())) {
                 return device;
             }
         }

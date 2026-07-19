@@ -73,6 +73,7 @@ public class LogicDeviceRegistryTest {
         data.put("name", "test-device-" + deviceId);
         entry.setData(data);
         return new DeviceBase(entry) {
+            @Override public String getId() { return deviceId; } // 测试确定性：getId 返传入 deviceId（绕过 UUID 铸造），使 removeReverseIndex(deviceId) 字面量匹配
             @Override
             public void init() {}
             @Override
@@ -167,6 +168,7 @@ public class LogicDeviceRegistryTest {
         entry.setData(data);
 
         DeviceBase phyDevice = new DeviceBase(entry) {
+            @Override public String getId() { return deviceId; } // 测试确定性：getId 返传入 deviceId（绕过 UUID 铸造），使 findByPhysicalAttr(deviceId,...) 字面量成立
             @Override public void init() {}
             @Override public void start() {}
             @Override public void stop() {}

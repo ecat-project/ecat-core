@@ -91,19 +91,11 @@ public class UnifiedDeviceStore implements IDeviceQuery {
         return all;
     }
 
-    /**
-     * 根据设备业务唯一标识（uniqueId）在所有注册表中查找设备。
-     *
-     * <p>按注册表添加顺序依次查找，返回第一个匹配的设备（与 {@link #getDeviceByID(String)} 同策略）。
-     * 入参 null/空串的校验由各注册表实现强制（抛 {@link IllegalArgumentException}）。
-     *
-     * @param uniqueId 设备业务唯一标识
-     * @return 设备对象，所有注册表均无匹配则返回 null
-     */
+    /** 00-core：按 coordinate 域化查找（委托各注册表 2-param 版本）。 */
     @Override
-    public DeviceBase getDeviceByUniqueId(String uniqueId) {
+    public DeviceBase getDeviceByUniqueId(String coordinate, String uniqueId) {
         for (IDeviceRegistry r : registries) {
-            DeviceBase d = r.getDeviceByUniqueId(uniqueId);
+            DeviceBase d = r.getDeviceByUniqueId(coordinate, uniqueId);
             if (d != null) {
                 return d;
             }

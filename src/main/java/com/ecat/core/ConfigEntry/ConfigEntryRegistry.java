@@ -122,19 +122,6 @@ public class ConfigEntryRegistry {
     }
 
     /**
-     * 兼容旧代码的构造函数（不调用 integration）
-     *
-     * @param persistence 持久化实现
-     * @deprecated 使用 {@link #ConfigEntryRegistry(EcatCore, ConfigEntryPersistence)} 代替
-     */
-    @Deprecated
-    public ConfigEntryRegistry(ConfigEntryPersistence persistence) {
-        this.core = null;
-        this.persistence = persistence;
-        loadAllEntries();
-    }
-
-    /**
      * 加载所有配置条目
      */
     private void loadAllEntries() {
@@ -156,7 +143,7 @@ public class ConfigEntryRegistry {
      */
     public ConfigEntry createEntry(ConfigEntry entry) {
         // 1. 校验 uniqueId 唯一性
-        if (entry.getUniqueId() != null && getByUniqueId(entry.getUniqueId()) != null) {
+        if (entry.getUniqueId() != null && getByUniqueId(entry.getCoordinate(), entry.getUniqueId()) != null) {
             throw new DuplicateUniqueIdException(entry.getUniqueId());
         }
 
@@ -221,8 +208,8 @@ public class ConfigEntryRegistry {
      *
      * @return IGNORE entry；不存在或非 IGNORE 则 null
      */
-    public ConfigEntry getIgnoreEntry(String uniqueId) {
-        ConfigEntry e = getByUniqueId(uniqueId);
+    public ConfigEntry getIgnoreEntry(String coordinate, String uniqueId) {
+        ConfigEntry e = getByUniqueId(coordinate, uniqueId);
         return (e != null && e.getSource() == SourceType.IGNORE) ? e : null;
     }
 
@@ -232,8 +219,8 @@ public class ConfigEntryRegistry {
      *
      * @return 是否删除了 IGNORE entry
      */
-    public boolean removeIgnoreEntry(String uniqueId) {
-        ConfigEntry e = getByUniqueId(uniqueId);
+    public boolean removeIgnoreEntry(String coordinate, String uniqueId) {
+        ConfigEntry e = getByUniqueId(coordinate, uniqueId);
         if (e != null && e.getSource() == SourceType.IGNORE) {
             removeEntry(e.getEntryId());
             return true;
@@ -345,14 +332,18 @@ public class ConfigEntryRegistry {
     }
 
     /**
-     * 按 uniqueId 查询
+     * 按 coordinate 域化查找（uniqueId 仅在 coordinate 内唯一，故查询须带 coordinate）。
      *
-     * @param uniqueId 唯一标识
+     * @param coordinate 集成标识（域）
+     * @param uniqueId   唯一标识
      * @return 配置条目，不存在时返回 null
      */
-    public ConfigEntry getByUniqueId(String uniqueId) {
+    public ConfigEntry getByUniqueId(String coordinate, String uniqueId) {
+        if (coordinate == null || uniqueId == null) {
+            return null;
+        }
         return entryCache.values().stream()
-                .filter(e -> uniqueId.equals(e.getUniqueId()))
+                .filter(e -> coordinate.equals(e.getCoordinate()) && uniqueId.equals(e.getUniqueId()))
                 .findFirst()
                 .orElse(null);
     }

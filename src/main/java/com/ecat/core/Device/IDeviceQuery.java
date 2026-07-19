@@ -45,20 +45,19 @@ public interface IDeviceQuery {
     List<DeviceBase> getAllDevices();
 
     /**
-     * 根据设备业务唯一标识（uniqueId）获取设备对象。
+     * 按集成坐标（coordinate）域化查找设备。
      *
-     * <p>uniqueId 是设备的业务标识（由集成生成，如 {@code 厂家_sn}），与 {@link #getDeviceByID(String)}
-     * 使用的 entryId 不同——entryId 是系统生成的 UUID（见 {@link DeviceBase#getId()} 与
-     * {@link DeviceBase#getUniqueId()} 的区别）。因此用 uniqueId 调 {@link #getDeviceByID} 会返回 null，
-     * 必须改用本方法。
+     * <p>uniqueId 是设备的业务标识（由集成生成，如 {@code 厂家_sn}），仅在 coordinate 内唯一（00-core
+     * 域化约束），故查询必须带 coordinate。uniqueId 与 {@link #getDeviceByID(String)} 使用的 deviceId
+     * 不同——deviceId 是 core 铸造的设备主键（全局稳定），用 uniqueId 调 {@code getDeviceByID} 会返回 null。
      *
-     * <p>找不到返回 null（正常查询 miss，非异常）；入参为 null/空串属于调用方契约违规，抛
-     * {@link IllegalArgumentException}。
+     * <p>找不到返回 null（正常查询 miss，非异常）；coordinate/uniqueId 为 null 或 uniqueId 为空串时返回 null。
      *
-     * @param uniqueId 设备业务唯一标识
+     * @param coordinate 集成坐标（域）
+     * @param uniqueId   设备业务唯一标识（coordinate 内唯一）
      * @return 设备对象，不存在则返回 null
      */
-    DeviceBase getDeviceByUniqueId(String uniqueId);
+    DeviceBase getDeviceByUniqueId(String coordinate, String uniqueId);
 
     /**
      * 根据集成坐标（coordinate）获取该集成下的全部设备。

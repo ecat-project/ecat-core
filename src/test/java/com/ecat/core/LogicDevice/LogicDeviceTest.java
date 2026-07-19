@@ -452,7 +452,7 @@ public class LogicDeviceTest {
         DeviceBase phyDevice = createMockPhysicalDevice("phy-001", coordinate, model);
 
         Map<String, Object> mappingConfig = new HashMap<>();
-        mappingConfig.put("device_id", "phy-001");
+        mappingConfig.put("device_id", phyDevice.getId());
         Map<String, Object> mappings = new LinkedHashMap<>();
         mappings.put("test_attr", mappingConfig);
         ConfigEntry entry = createEntryWithMappings("test-001", mappings);
@@ -488,7 +488,7 @@ public class LogicDeviceTest {
         DeviceBase phyDevice = createMockPhysicalDevice("phy-001", coordinate, model);
 
         Map<String, Object> mappingConfig = new HashMap<>();
-        mappingConfig.put("device_id", "phy-001");
+        mappingConfig.put("device_id", phyDevice.getId());
         Map<String, Object> mappings = new LinkedHashMap<>();
         mappings.put("test_attr", mappingConfig);
         ConfigEntry entry = createEntryWithMappings("test-001", mappings);

@@ -232,13 +232,14 @@ public class UnifiedDeviceStoreTest {
         phyRegistry.register("phy-entry", phyDevice);
         logicRegistry.register("logic-entry", logicDevice);
 
-        // 跨物理/逻辑两表按 uniqueId 查
-        assertSame(phyDevice, store.getDeviceByUniqueId("phy-sn"));
-        assertSame(logicDevice, store.getDeviceByUniqueId("logic-sn"));
+        // 跨物理/逻辑两表按 (coordinate, uniqueId) 查
+        assertSame(phyDevice, store.getDeviceByUniqueId("com.ecat:x", "phy-sn"));
+        assertSame(logicDevice, store.getDeviceByUniqueId("com.ecat:logic", "logic-sn"));
     }
 
     @Test
-    public void testGetDeviceByUniqueId_FirstRegistryWins() {
+    public void testGetDeviceByUniqueId_CoordinateDisambiguates() {
+        // uniqueId 仅 coordinate 内唯一：两设备同 uniqueId、不同 coordinate，域化查询各自命中
         UnifiedDeviceStore store = new UnifiedDeviceStore();
         DeviceRegistry first = new DeviceRegistry();
         DeviceRegistry second = new DeviceRegistry();
@@ -250,7 +251,8 @@ public class UnifiedDeviceStoreTest {
         first.register("e1", d1);
         second.register("e2", d2);
 
-        assertSame(d1, store.getDeviceByUniqueId("dup-sn"));
+        assertSame(d1, store.getDeviceByUniqueId("com.ecat:x", "dup-sn"));
+        assertSame(d2, store.getDeviceByUniqueId("com.ecat:y", "dup-sn"));
     }
 
     @Test
@@ -258,7 +260,7 @@ public class UnifiedDeviceStoreTest {
         UnifiedDeviceStore store = new UnifiedDeviceStore();
         store.addRegistry(new DeviceRegistry());
 
-        assertNull(store.getDeviceByUniqueId("no-such-sn"));
+        assertNull(store.getDeviceByUniqueId("com.ecat:x", "no-such-sn"));
     }
 
     // ========== getDevicesByCoordinate ==========

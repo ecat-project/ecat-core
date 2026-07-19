@@ -16,6 +16,12 @@
 
 package com.ecat.core.Device;
 
+import com.ecat.core.Bus.BusRegistry;
+import com.ecat.core.Bus.BusTopic;
+import com.ecat.core.Bus.event.BusEvent;
+import com.ecat.core.Bus.event.DeviceLifecycleEvent;
+import com.ecat.core.Bus.event.EventContext;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,6 +43,21 @@ public class DeviceRegistry implements IDeviceRegistry {
      * Key为设备ID(String类型)，Value为设备对象(DeviceBase类型)
      */
     private final Map<String, DeviceBase> registry = new HashMap<>();
+
+    /** (coordinate, uniqueId) → id 匹配索引：启动 {@link #load()} 从 device yml 建立，供 getOrCreate 跨重启稳定 id。 */
+    private final Map<String, String> matchIndex = new HashMap<>();
+
+    /** 设备持久化（device yml），由 EcatCore.init 注入（可空→仅内存模式，不发事件不落盘）。 */
+    private DevicePersistence persistence;
+
+    /** 总线，用于发布 DEVICE_LIFECYCLE（由 EcatCore.init 注入，可空→不发事件）。 */
+    private BusRegistry busRegistry;
+
+    /** 注入持久化层（EcatCore.init 调用）。 */
+    public void setPersistence(DevicePersistence persistence) { this.persistence = persistence; }
+
+    /** 注入总线（EcatCore.init 调用）。 */
+    public void setBusRegistry(BusRegistry busRegistry) { this.busRegistry = busRegistry; }
 
     // 注册设备
     // @param deviceID 设备ID，Core内唯一
@@ -72,21 +93,14 @@ public class DeviceRegistry implements IDeviceRegistry {
         return new ArrayList<>(registry.values());
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * <p>实现：遍历本表设备按 {@link DeviceBase#getUniqueId()} 匹配（uniqueId 在 entry 创建时由
-     * {@code ConfigEntryRegistry} 强制全局唯一）。
-     *
-     * @throws IllegalArgumentException uniqueId 为 null 或空串
-     */
+    /** 00-core：按 coordinate 域化查找设备（uniqueId 仅 coordinate 内唯一）。 */
     @Override
-    public DeviceBase getDeviceByUniqueId(String uniqueId) {
-        if (uniqueId == null || uniqueId.isEmpty()) {
-            throw new IllegalArgumentException("uniqueId 不能为 null 或空串");
+    public DeviceBase getDeviceByUniqueId(String coordinate, String uniqueId) {
+        if (coordinate == null || uniqueId == null || uniqueId.isEmpty()) {
+            return null;
         }
         for (DeviceBase device : registry.values()) {
-            if (uniqueId.equals(device.getUniqueId())) {
+            if (coordinate.equals(device.getCoordinate()) && uniqueId.equals(device.getUniqueId())) {
                 return device;
             }
         }
@@ -115,5 +129,121 @@ public class DeviceRegistry implements IDeviceRegistry {
     // todo: query devices by class
 
     // todo: query devices by ability
+
+    // ==================== 00-core：deviceId 稳定 + DEVICE_LIFECYCLE + 1:N 级联 ====================
+
+    /** 匹配键：coordinate 与 uniqueId 用 SOH 分隔（二者均不会含 SOH）。 */
+    static String matchKey(String coordinate, String uniqueId) {
+        return (coordinate == null ? "" : coordinate) + "" + (uniqueId == null ? "" : uniqueId);
+    }
+
+    /**
+     * 启动加载：读全部 device yml 建 (coordinate, uniqueId) → id 匹配索引。
+     * <p>必须在 IntegrationManager.loadExistingConfigEntries（createEntry→restore）之前完成
+     * （EcatCore.init 内调用）。这样 getOrCreate 在 createEntry 时能命中持久化 id 覆盖构造默认 UUID。
+     */
+    public void load() {
+        if (persistence == null) {
+            return;
+        }
+        matchIndex.clear();
+        for (DeviceRecord r : persistence.loadAll()) {
+            matchIndex.put(matchKey(r.getCoordinate(), r.getUniqueId()), r.getId());
+        }
+    }
+
+    /**
+     * 解析稳定 deviceId 并注册。命中 matchIndex（同 coordinate+uniqueId）则用 {@link DeviceBase#setId}
+     * 覆盖构造铸造的默认 UUID，否则保留新 UUID；随后 {@link #register(DeviceBase, Action)} 落库+建索引+发事件。
+     * <p>跨重启稳定的核心：重启后构造铸造新 UUID，getOrCreate 用持久化 id 覆盖 → deviceId 不变。
+     *
+     * @param device 待注册设备（getId 已被构造铸造为默认 UUID）
+     * @param action 事件意图（create/enable→CREATE，reconfigure→RECONFIGURE）
+     * @return 注册后的设备（id 已解析为稳定值）
+     */
+    public DeviceBase getOrCreate(DeviceBase device, DeviceLifecycleEvent.Action action) {
+        String existing = matchIndex.get(matchKey(device.getCoordinate(), device.getUniqueId()));
+        if (existing != null) {
+            device.setId(existing); // 包级私有 setId：同包 DeviceRegistry 可调，覆盖构造默认 UUID
+        }
+        register(device, action);
+        return device;
+    }
+
+    /**
+     * 注册：map.put + matchIndex + 持久化 + 在 put 完成后发 DEVICE_LIFECYCLE(action)。
+     * <p>与旧 {@link #register(String, DeviceBase)} 共存——旧方法供未迁移调用方使用（Task 7 接线后逐步切到本方法）。
+     */
+    public void register(DeviceBase device, DeviceLifecycleEvent.Action action) {
+        registry.put(device.getId(), device);
+        matchIndex.put(matchKey(device.getCoordinate(), device.getUniqueId()), device.getId());
+        if (persistence != null) {
+            persistence.save(toRecord(device));
+        }
+        publish(device, action);
+    }
+
+    /**
+     * 注销：从 map 移除；deleteRecord=true 真实删除（删 yml + matchIndex），false 软移除（保记录，供 enable 恢复）。
+     * 两者都发 REMOVE（设备从活跃系统消失，订阅方按离线处理）。
+     */
+    public void unregister(DeviceBase device, boolean deleteRecord) {
+        registry.remove(device.getId());
+        if (deleteRecord) {
+            if (persistence != null) {
+                persistence.delete(device.getId());
+            }
+            matchIndex.remove(matchKey(device.getCoordinate(), device.getUniqueId()));
+        }
+        publish(device, DeviceLifecycleEvent.Action.REMOVE);
+    }
+
+    /**
+     * config entry 的 reconfigure 专用软移除：仅从内存 map 移除旧对象，不发事件、不删记录、不动 matchIndex。
+     * <p>随后新设备 register 时命中保留的 matchIndex 复原同 id，并按编排意图发 RECONFIGURE（见 IntegrationDeviceBase）。
+     */
+    public void softRemove(DeviceBase device) {
+        registry.remove(device.getId());
+    }
+
+    /**
+     * 1:N 级联用：枚举某 ConfigEntry 关联的全部设备（按 device.getEntry().getEntryId() 反查）。
+     * <p>网关 entry 的 N 个子设备 entry 均回指网关 entryId（1:N back-ref），故可一次枚举。
+     */
+    public List<DeviceBase> findDevicesByEntryId(String entryId) {
+        List<DeviceBase> result = new ArrayList<>();
+        for (DeviceBase d : registry.values()) {
+            if (d.getEntry() != null && entryId.equals(d.getEntry().getEntryId())) {
+                result.add(d);
+            }
+        }
+        return result;
+    }
+
+    private DeviceRecord toRecord(DeviceBase d) {
+        String entryId = d.getEntry() != null ? d.getEntry().getEntryId() : null;
+        return DeviceRecord.builder()
+                .id(d.getId())
+                .coordinate(d.getCoordinate())
+                .uniqueId(d.getUniqueId())
+                .entryId(entryId)
+                .name(d.getName())
+                .vendor(d.getVendor())
+                .model(d.getModel())
+                .createTime(com.ecat.core.Utils.DateTimeUtils.now())
+                .updateTime(com.ecat.core.Utils.DateTimeUtils.now())
+                .build();
+    }
+
+    private void publish(DeviceBase d, DeviceLifecycleEvent.Action action) {
+        if (busRegistry == null) {
+            return;
+        }
+        String entryId = d.getEntry() != null ? d.getEntry().getEntryId() : null;
+        DeviceLifecycleEvent event = new DeviceLifecycleEvent(d.getId(), d.getCoordinate(), entryId, action);
+        busRegistry.publish(BusEvent.of(
+                BusTopic.DEVICE_LIFECYCLE.getTopicName(), event,
+                EventContext.root(EventContext.Source.SYSTEM, null)));
+    }
 
 }

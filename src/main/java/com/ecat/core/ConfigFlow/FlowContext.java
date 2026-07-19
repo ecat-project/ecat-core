@@ -19,6 +19,7 @@ package com.ecat.core.ConfigFlow;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.EcatCore;
 
@@ -193,12 +194,24 @@ public class FlowContext {
                 }
                 // 检查已持久化的 entry
                 ConfigEntryRegistry entryRegistry = core.getEntryRegistry();
-                if (entryRegistry != null && entryRegistry.getByUniqueId(entryUniqueId) != null) {
+                if (entryRegistry != null && entryRegistry.getByUniqueId(this.coordinate, entryUniqueId) != null) {
                     throw new ConfigEntryRegistry.DuplicateUniqueIdException(entryUniqueId);
                 }
             }
         }
         this.entryUniqueId = entryUniqueId;
+    }
+
+    /**
+     * 00-core（D7）：按本 flow 的 coordinate 查找已持久化的 entry。
+     * <p>uniqueId 仅在 coordinate 内唯一，故查询必须域化；本方法封装域化使集成 flow 子类无需感知 coordinate。
+     */
+    public ConfigEntry getEntryByUniqueId(String uniqueId) {
+        EcatCore core = EcatCore.getInstance();
+        if (core == null || core.getEntryRegistry() == null || this.coordinate == null) {
+            return null;
+        }
+        return core.getEntryRegistry().getByUniqueId(this.coordinate, uniqueId);
     }
 
     // ========== 基础属性 ==========

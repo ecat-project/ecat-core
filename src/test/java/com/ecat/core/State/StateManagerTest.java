@@ -236,9 +236,10 @@ public class StateManagerTest {
         attr.setPersistable(true);
         device.setAttribute(attr);
         attr.updateValue(10.0);
+        attr.publicState(); // 00-core(D9)：setAttribute 不再 auto-restore（其副作用不再创建 DB 文件），需显式 publicState 写库建文件
         stateManager.commitAll();
 
-        File dbFile = new File(TEST_DIR + "com.ecat/integration-sailhero/abc-123.db");
+        File dbFile = new File(TEST_DIR + "com.ecat/integration-sailhero/" + device.getId() + ".db");
         assertTrue("DB file should exist at correct path", dbFile.exists());
     }
 
@@ -268,11 +269,12 @@ public class StateManagerTest {
         attr.setPersistable(true);
         device.setAttribute(attr);
         attr.updateValue(25.0);
+        attr.publicState(); // 00-core(D9)：显式 publicState 写库（setAttribute 不再 auto-create DB 文件）
         stateManager.commitAll();
 
-        stateManager.closeDevice("device-close");
+        stateManager.closeDevice(device.getId());
 
-        File dbFile = new File(TEST_DIR + "com.test/integration-test/device-close.db");
+        File dbFile = new File(TEST_DIR + "com.test/integration-test/" + device.getId() + ".db");
         assertTrue("DB file should still exist after close", dbFile.exists());
     }
 

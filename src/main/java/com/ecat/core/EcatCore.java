@@ -23,6 +23,7 @@ import com.ecat.core.ConfigFlow.ConfigFlowRegistry;
 import com.ecat.core.ConfigFlow.ConfigFlowService;
 import com.ecat.core.Device.DeviceRegistry;
 import com.ecat.core.Device.UnifiedDeviceStore;
+import com.ecat.core.Device.YmlDevicePersistence;
 import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.I18n.I18nRegistry;
 import com.ecat.core.Integration.IntegrationManager;
@@ -179,6 +180,10 @@ public class EcatCore {
         configFlowService = new ConfigFlowService(this);
         integrationManager = new IntegrationManager(this, integrationRegistry, stateManager);
         deviceRegistry = new DeviceRegistry();
+        // 00-core：设备持久化 + 启动加载（deviceId 跨重启稳定）。必须在 integrationManager.load（createEntry）之前完成。
+        deviceRegistry.setPersistence(new YmlDevicePersistence(".ecat-data/core/devices"));
+        deviceRegistry.setBusRegistry(busRegistry);
+        deviceRegistry.load();
         logicDeviceRegistry = new LogicDeviceRegistry();
         unifiedDeviceStore = new UnifiedDeviceStore();
         unifiedDeviceStore.addRegistry(deviceRegistry);
