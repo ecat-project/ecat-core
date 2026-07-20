@@ -400,11 +400,15 @@ public class LogicDeviceTest {
     }
 
     @Test
-    public void testGetIdReturnsEntryId() {
+    public void testGetIdReturnsCastedDeviceId() {
         ConfigEntry entry = createTestEntry("test-entry-id-123", null);
         TestLogicDevice device = createTestLogicDevice(entry);
 
-        assertEquals("test-entry-id-123", device.getId());
+        // Phase 3 撤 LogicDevice.getId override（LogicDevice.java:143-146 删）：getId 走 DeviceBase 默认实现，
+        // 返回构造铸造的 deviceId（UUID），不再 override 返回 uniqueId。deviceId 经 DeviceRegistry.getOrCreate
+        // 命中 matchIndex 复原后跨重启稳定，但不等于业务 uniqueId/entryId，故只断言非空。
+        String id = device.getId();
+        assertNotNull("getId 应返回铸造 deviceId（非 null）", id);
     }
 
     @Test

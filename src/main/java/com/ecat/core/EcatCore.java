@@ -22,14 +22,12 @@ import com.ecat.core.ConfigEntry.YmlConfigEntryPersistence;
 import com.ecat.core.ConfigFlow.ConfigFlowRegistry;
 import com.ecat.core.ConfigFlow.ConfigFlowService;
 import com.ecat.core.Device.DeviceRegistry;
-import com.ecat.core.Device.UnifiedDeviceStore;
 import com.ecat.core.Device.YmlDevicePersistence;
 import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.I18n.I18nRegistry;
 import com.ecat.core.Integration.IntegrationManager;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.Log.LogManager;
-import com.ecat.core.LogicDevice.LogicDeviceRegistry;
 import com.ecat.core.LogicMapping.LogicMappingManager;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
@@ -87,18 +85,6 @@ public class EcatCore {
      */
     @Getter
     private ConfigFlowService configFlowService;
-
-    /**
-     * 逻辑设备注册器
-     */
-    @Getter
-    private LogicDeviceRegistry logicDeviceRegistry;
-
-    /**
-     * 统一设备存储，提供跨注册表的只读查询能力
-     */
-    @Getter
-    private UnifiedDeviceStore unifiedDeviceStore;
 
     /**
      * 逻辑映射管理器
@@ -184,10 +170,6 @@ public class EcatCore {
         deviceRegistry.setPersistence(new YmlDevicePersistence(".ecat-data/core/devices"));
         deviceRegistry.setBusRegistry(busRegistry);
         deviceRegistry.load();
-        logicDeviceRegistry = new LogicDeviceRegistry();
-        unifiedDeviceStore = new UnifiedDeviceStore();
-        unifiedDeviceStore.addRegistry(deviceRegistry);
-        unifiedDeviceStore.addRegistry(logicDeviceRegistry);
         logicMappingManager = new LogicMappingManager();
         i18nRegistry = I18nRegistry.getInstance();
         

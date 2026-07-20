@@ -21,9 +21,8 @@ import java.util.List;
 /**
  * 设备注册表只读查询接口，定义设备查询的标准方法（不含注册/注销等写操作）。
  *
- * <p>既被可写注册表 {@link IDeviceRegistry}（物理设备表、逻辑设备表）继承，
- * 也被只读聚合门面 {@link UnifiedDeviceStore} 实现——两者共享同一套查询契约，
- * 调用方可面向本接口编程，按需传入具体注册表或统一门面。
+ * <p>Phase 3 统一后由 {@link DeviceRegistry} 实现（物理 + 逻辑设备同表；原 IDeviceRegistry/
+ * UnifiedDeviceStore 已删）。调用方面向本接口编程，按 (coordinate, uniqueId) 域化查询。
  *
  * @author coffee
  */

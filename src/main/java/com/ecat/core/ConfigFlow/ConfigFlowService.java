@@ -648,6 +648,16 @@ public class ConfigFlowService {
         }
         ConfigEntry saved;
         if (flow != null && flow.getSourceType() == SourceType.RECONFIGURE) {
+            // 守卫：reconfigure 不允许修改 uniqueId（设备身份不可变）。reconfigure 保 entryId，
+            // 故原 entry 可经 entryId 取回；若新 entry 的 uniqueId 与原值不同 = 身份变了 = 不是 reconfigure，
+            // 拒绝提交（fail-loud，防 generateUniqueId 重生成 / 向导漏 hydrate / 开发者写错等任何漂移路径）。
+            // 若确需换设备身份，应删除 entry 后新建，而非 reconfigure。
+            ConfigEntry original = registry.getByEntryId(entry.getEntryId());
+            if (original != null && !original.getUniqueId().equals(entry.getUniqueId())) {
+                throw new ConfigFlowException("reconfigure 不允许修改 uniqueId（设备身份不可变）：old="
+                    + original.getUniqueId() + ", new=" + entry.getUniqueId()
+                    + "；reconfigure 只改配置不改身份，若需换设备请删除后新建");
+            }
             saved = registry.reconfigureEntry(entry.getEntryId(), entry);
             log.info("Reconfigured config entry: {}", saved.getEntryId());
         } else {

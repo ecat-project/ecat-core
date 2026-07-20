@@ -8,13 +8,19 @@ import org.junit.Test;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
 
-/** 00-core Task 4/5：DeviceRegistry load/matchIndex/getOrCreate/register/unregister/findDevicesByEntryId。 */
+/**
+ * 00-core：DeviceRegistry load/matchIndex/getOrCreate + Phase 4 正交化 API（replace/disable/remove/purge）。
+ * <p>commit 已收为 private（原 register(DeviceBase,Action)），create/enable 走 getOrCreate、reconfigure 走 replace、
+ * 禁用走 disable、逻辑删走 remove、硬删走 purge。
+ */
 public class DeviceRegistryGetOrCreateTest {
 
     private DeviceBase newDevice(String entryId, String uniqueId, String coordinate) {
@@ -65,7 +71,7 @@ public class DeviceRegistryGetOrCreateTest {
     }
 
     @Test
-    public void register_publishesCreate_unregisterPublishesRemove() {
+    public void getOrCreate_publishesCreate_disablePublishesRemove() {
         DeviceRegistry reg = new DeviceRegistry();
         BusRegistry bus = new BusRegistry();
         reg.setBusRegistry(bus);
@@ -76,20 +82,39 @@ public class DeviceRegistryGetOrCreateTest {
             }
         });
         DeviceBase d = newDevice("e1", "u1", "com.ecat:c");
-        reg.register(d, DeviceLifecycleEvent.Action.CREATE);
+        reg.getOrCreate(d, DeviceLifecycleEvent.Action.CREATE);
         assertNotNull(seen.get());
         assertEquals(DeviceLifecycleEvent.Action.CREATE, seen.get().getAction());
         assertEquals(d.getId(), seen.get().getDeviceId());
 
         seen.set(null);
-        reg.unregister(d, false);
-        assertNotNull("软 unregister 也应发 REMOVE", seen.get());
+        reg.disable(d);
+        assertNotNull("disable 也应发 REMOVE", seen.get());
         assertEquals(DeviceLifecycleEvent.Action.REMOVE, seen.get().getAction());
     }
 
     @Test
-    public void unregister_softKeepsRecord_hardDeletes() throws Exception {
-        File tmp = Files.createTempDirectory("ecat-reg-unreg").toFile();
+    public void disable_keepsRecordAndMatchIndex_revivesSameId() throws Exception {
+        File tmp = Files.createTempDirectory("ecat-reg-disable").toFile();
+        YmlDevicePersistence p = new YmlDevicePersistence(tmp.getAbsolutePath());
+        DeviceRegistry reg = new DeviceRegistry();
+        reg.setPersistence(p);
+        DeviceBase d = newDevice("e1", "u1", "com.ecat:c");
+        reg.getOrCreate(d, DeviceLifecycleEvent.Action.CREATE);
+        File yml = new File(tmp, "com.ecat/c/" + d.getId() + ".yml");
+
+        reg.disable(d);
+        assertNull("disable 后应从 active map 移除", reg.getDeviceByID(d.getId()));
+        assertTrue("disable 应保留 record yml（供 enable 复原）", yml.exists());
+        // matchIndex 保留：同 (coordinate,uniqueId) 再 getOrCreate 复原同 id
+        DeviceBase d2 = newDevice("e1", "u1", "com.ecat:c");
+        reg.getOrCreate(d2, DeviceLifecycleEvent.Action.CREATE);
+        assertEquals("disable 保留 matchIndex，getOrCreate 复原同 id", d.getId(), d2.getId());
+    }
+
+    @Test
+    public void purge_deletesRecordAndMatchIndex_mintsNewId() throws Exception {
+        File tmp = Files.createTempDirectory("ecat-reg-purge").toFile();
         YmlDevicePersistence p = new YmlDevicePersistence(tmp.getAbsolutePath());
         DeviceRegistry reg = new DeviceRegistry();
         reg.setPersistence(p);
@@ -98,12 +123,72 @@ public class DeviceRegistryGetOrCreateTest {
         File yml = new File(tmp, "com.ecat/c/" + d.getId() + ".yml");
         assertTrue(yml.exists());
 
-        reg.unregister(d, false);
-        assertTrue("软移除应保留 yml", yml.exists());
+        reg.purge(d);
+        assertNull("purge 后应从 active map 移除", reg.getDeviceByID(d.getId()));
+        assertFalse("purge 应删除 record yml", yml.exists());
+        // matchIndex 删除：再 getOrCreate 铸新 id（不复原）
+        DeviceBase d2 = newDevice("e1", "u1", "com.ecat:c");
+        reg.getOrCreate(d2, DeviceLifecycleEvent.Action.CREATE);
+        assertNotEquals("purge 删 matchIndex 后 getOrCreate 铸新 id", d.getId(), d2.getId());
+    }
 
-        reg.register(d, DeviceLifecycleEvent.Action.CREATE);
-        reg.unregister(d, true);
-        assertFalse("硬删除应移除 yml", yml.exists());
+    @Test
+    public void remove_marksDeleted_nullsEntryId_keepsMatchIndex_revivesSameId() throws Exception {
+        File tmp = Files.createTempDirectory("ecat-reg-remove").toFile();
+        YmlDevicePersistence p = new YmlDevicePersistence(tmp.getAbsolutePath());
+        DeviceRegistry reg = new DeviceRegistry();
+        reg.setPersistence(p);
+        DeviceBase d = newDevice("e1", "u1", "com.ecat:c");
+        reg.getOrCreate(d, DeviceLifecycleEvent.Action.CREATE);
+        String id = d.getId();
+
+        reg.remove(d);
+        assertNull("remove 后应从 active map 移除", reg.getDeviceByID(id));
+
+        // 重新发现：getOrCreate 命中保留的 matchIndex 复原同 id，commit 重写记录翻回 deleted=false
+        DeviceBase d2 = newDevice("e2", "u1", "com.ecat:c"); // 新 entryId，同 uniqueId
+        reg.getOrCreate(d2, DeviceLifecycleEvent.Action.CREATE);
+        assertEquals("remove 保留 matchIndex，重新发现复原同 deviceId", id, d2.getId());
+        // 读回记录确认复活后 deleted=false（loadAll 读 yml）
+        DeviceRecord revived = p.loadAll().stream()
+            .filter(r -> id.equals(r.getId())).findFirst()
+            .orElseThrow(() -> new AssertionError("record 应存在"));
+        assertFalse("重新发现后记录应翻回 deleted=false", revived.isDeleted());
+    }
+
+    @Test
+    public void replace_overwritesSameKey_newInheritsOldId_singleReconfigureEvent() throws Exception {
+        File tmp = Files.createTempDirectory("ecat-reg-replace").toFile();
+        YmlDevicePersistence p = new YmlDevicePersistence(tmp.getAbsolutePath());
+        DeviceRegistry reg = new DeviceRegistry();
+        reg.setPersistence(p);
+        BusRegistry bus = new BusRegistry();
+        reg.setBusRegistry(bus);
+        List<DeviceLifecycleEvent> events = new ArrayList<>();
+        bus.subscribe(BusTopic.DEVICE_LIFECYCLE.getTopicName(),
+            e -> { if (e.getPayload() instanceof DeviceLifecycleEvent) events.add((DeviceLifecycleEvent) e.getPayload()); });
+
+        DeviceBase oldD = newDevice("e1", "u1", "com.ecat:c");
+        reg.getOrCreate(oldD, DeviceLifecycleEvent.Action.CREATE);
+        String oldId = oldD.getId();
+        events.clear();
+
+        DeviceBase newD = newDevice("e1", "u1", "com.ecat:c"); // 同 coordinate+uniqueId
+        reg.replace(oldD, newD);
+
+        assertEquals("new 继承 old 的稳定 id", oldId, newD.getId());
+        assertSame("map 中同 key 已被 new 覆盖", newD, reg.getDeviceByID(oldId));
+        assertEquals("replace 只发 1 个 RECONFIGURE（不双发 REMOVE→CREATE）", 1, events.size());
+        assertEquals(DeviceLifecycleEvent.Action.RECONFIGURE, events.get(0).getAction());
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void replace_rejectsMismatchedOldNew() {
+        DeviceRegistry reg = new DeviceRegistry();
+        DeviceBase oldD = newDevice("e1", "u1", "com.ecat:c");
+        reg.getOrCreate(oldD, DeviceLifecycleEvent.Action.CREATE);
+        DeviceBase newD = newDevice("e2", "u2", "com.ecat:c"); // 不同 uniqueId → 断言护栏应抛
+        reg.replace(oldD, newD);
     }
 
     @Test
@@ -112,20 +197,10 @@ public class DeviceRegistryGetOrCreateTest {
         DeviceBase c1 = newDevice("gw-1", "child-1", "com.ecat:c");
         DeviceBase c2 = newDevice("gw-1", "child-2", "com.ecat:c");
         DeviceBase other = newDevice("ent-other", "u-other", "com.ecat:c");
-        reg.register(c1, DeviceLifecycleEvent.Action.CREATE);
-        reg.register(c2, DeviceLifecycleEvent.Action.CREATE);
-        reg.register(other, DeviceLifecycleEvent.Action.CREATE);
+        reg.getOrCreate(c1, DeviceLifecycleEvent.Action.CREATE);
+        reg.getOrCreate(c2, DeviceLifecycleEvent.Action.CREATE);
+        reg.getOrCreate(other, DeviceLifecycleEvent.Action.CREATE);
         assertEquals(2, reg.findDevicesByEntryId("gw-1").size());
         assertEquals(1, reg.findDevicesByEntryId("ent-other").size());
-    }
-
-    @Test
-    public void softRemove_dropsFromRegistry_silently() {
-        DeviceRegistry reg = new DeviceRegistry();
-        DeviceBase d = newDevice("e1", "u1", "com.ecat:c");
-        reg.register(d, DeviceLifecycleEvent.Action.CREATE);
-        assertSame(d, reg.getDeviceByID(d.getId()));
-        reg.softRemove(d);
-        assertNull("softRemove 后应从 registry 移除", reg.getDeviceByID(d.getId()));
     }
 }

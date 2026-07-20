@@ -61,4 +61,10 @@ public class DeviceRecord {
     private String model;
     private ZonedDateTime createTime;
     private ZonedDateTime updateTime;
+    /**
+     * 逻辑删标记：{@code remove} 置 true 且 entryId 置 null（记录保留供审计/复活）；
+     * 同 (coordinate,uniqueId) 重新发现经 getOrCreate 命中 matchIndex 时，commit 重写记录翻回 false。
+     * 硬删 {@code purge} 直接删记录，不进入此态。
+     */
+    private boolean deleted;
 }

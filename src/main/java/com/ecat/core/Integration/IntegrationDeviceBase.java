@@ -79,7 +79,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     public boolean removeDevice(DeviceBase device) {
         DeviceBase removed = devices.remove(device.getId());
         if (removed != null) {
-            deviceRegistry.unregister(device.getId());
+            deviceRegistry.purge(device);   // 硬删 record+matchIndex+发 REMOVE（替代旧 unregister(getId())）
             return true;
         }
         return false;
@@ -130,21 +130,36 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     public ConfigEntry reconfigureEntry(String entryId, ConfigEntry newEntry) {
         log.info("Reconfiguring entry: {}", entryId);
 
-        // 1. 软移除旧设备：保 device 记录(yml) + state DB + matchIndex（不删、不发 REMOVE）。
-        //    同物理设备 reconfigure 保身份/state：新设备 getOrCreate 命中保留记录复原原 id。
-        DeviceBase oldDevice = findDeviceByEntryId(entryId);
-        if (oldDevice != null) {
-            removeOldDevice(oldDevice);
-        }
+        // ① 先查旧设备（design §5.1：用 registry 复数查询 findDevicesByEntryId，支持 1:N 网关；取首个为 reconfigure 1:1 目标）
+        java.util.List<DeviceBase> olds = deviceRegistry.findDevicesByEntryId(entryId);
+        DeviceBase oldDevice = olds.isEmpty() ? null : olds.get(0);
 
-        // 2. 创建并启动新设备；getOrCreate 命中保留 yml → setId(原 id) → deviceId 跨 reconfigure 稳定。
+        // ② 先备新设备（失败直接抛，old 原封未动 → 消除回归窗口：设备不会因建新失败而离线无替代）
         DeviceBase newDevice = createDeviceFromEntry(newEntry);
         if (newDevice == null) {
             throw new RuntimeException("Failed to create device with new config for entry: " + entryId);
         }
-        addDevice(newDevice, DeviceLifecycleEvent.Action.RECONFIGURE);
+
+        // ③ 先 stop 旧（资源排他安全；统一"先 stop 后 start"）——在 new 已备好之后，失败也不丢 old
+        if (oldDevice != null) {
+            oldDevice.stop();
+            oldDevice.release();
+            devices.remove(oldDevice.getId());
+        }
+
+        // ④ 原子换装：replace 解析 new 到 old 的稳定 id（setId）+ 单 RECONFIGURE（旧 softRemove+getOrCreate 两步合一）。
+        //    无旧设备（首次/异常）则走 getOrCreate(CREATE)。
+        if (oldDevice != null) {
+            deviceRegistry.replace(oldDevice, newDevice);
+        } else {
+            deviceRegistry.getOrCreate(newDevice, DeviceLifecycleEvent.Action.CREATE);
+        }
+        if (!devices.containsKey(newDevice.getId())) {
+            devices.put(newDevice.getId(), newDevice);
+            newDevice.setIntegration(this);
+        }
         newDevice.restorePersistedState();   // 读保留的 state DB（id 已复原）
-        newDevice.start();
+        newDevice.start();                   // ⑤ 后起新
 
         log.info("Entry reconfigured: {}", entryId);
         return newEntry;
@@ -158,7 +173,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
             device.stop();
             device.release();
             devices.remove(device.getId());
-            deviceRegistry.unregister(device, true);   // 硬：删 yml + matchIndex，发 REMOVE
+            deviceRegistry.purge(device);   // 硬：删 yml + matchIndex，发 REMOVE
             if (core != null && core.getStateManager() != null) {
                 core.getStateManager().removeDevice(device);   // 删 state DB
             }
@@ -166,18 +181,6 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         // 注意：不调用 super.removeEntry(entryId)——ConfigEntryRegistry.removeEntry → notifyIntegrationRemove → 本方法，
         // 再调 super 会递归 StackOverflowError。Registry 已负责从缓存移除 entry。
         log.info("Entry removed: {}", entryId);
-    }
-
-    /**
-     * 00-core：reconfigure 软移除——停止/释放旧设备对象 + 从内存 registry 移除，
-     * 但保留 device yml + state DB + matchIndex（不发 REMOVE）。
-     * 随后新设备 register 命中保留记录复原 id，并按编排意图发 RECONFIGURE。
-     */
-    protected void removeOldDevice(DeviceBase device) {
-        device.stop();
-        device.release();
-        devices.remove(device.getId());
-        deviceRegistry.softRemove(device);   // 仅内存 map 移除，不删记录、不发事件
     }
 
     /**
@@ -191,22 +194,10 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
             device.stop();
             device.release();
             devices.remove(device.getId());
-            deviceRegistry.unregister(device, false);   // 软：保 yml+matchIndex，发 REMOVE
+            deviceRegistry.disable(device);   // 软：保 yml+matchIndex，发 REMOVE
         }
     }
 
-    /**
-     * 通过 entryId 查找设备。
-     * devices 以 deviceId 为 key（非 entryId），故按 entryId 查需遍历匹配 device.getEntry().getEntryId()。
-     */
-    private DeviceBase findDeviceByEntryId(String entryId) {
-        for (DeviceBase device : devices.values()) {
-            if (device.getEntry() != null && entryId.equals(device.getEntry().getEntryId())) {
-                return device;
-            }
-        }
-        return null;
-    }
 
     // ==================== 默认生命周期回调 ====================
 

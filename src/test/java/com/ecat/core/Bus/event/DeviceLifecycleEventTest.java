@@ -11,9 +11,10 @@ public class DeviceLifecycleEventTest {
     @Test
     public void event_carriesFields_isImmutable() {
         DeviceLifecycleEvent e = new DeviceLifecycleEvent(
-                "dev-1", "com.ecat:integration-x", "ent-1", DeviceLifecycleEvent.Action.CREATE);
+                "dev-1", "com.ecat:integration-x", "uid-1", "ent-1", DeviceLifecycleEvent.Action.CREATE);
         assertEquals("dev-1", e.getDeviceId());
         assertEquals("com.ecat:integration-x", e.getCoordinate());
+        assertEquals("uid-1", e.getUniqueId());
         assertEquals("ent-1", e.getEntryId());
         assertEquals(DeviceLifecycleEvent.Action.CREATE, e.getAction());
     }
@@ -21,11 +22,11 @@ public class DeviceLifecycleEventTest {
     @Test
     public void nullDeviceId_orNullAction_rejected() {
         try {
-            new DeviceLifecycleEvent(null, "c", "e", DeviceLifecycleEvent.Action.CREATE);
+            new DeviceLifecycleEvent(null, "c", "u", "e", DeviceLifecycleEvent.Action.CREATE);
             fail("null deviceId should throw");
         } catch (IllegalArgumentException ok) {}
         try {
-            new DeviceLifecycleEvent("dev-1", "c", "e", null);
+            new DeviceLifecycleEvent("dev-1", "c", "u", "e", null);
             fail("null action should throw");
         } catch (IllegalArgumentException ok) {}
     }
@@ -43,7 +44,7 @@ public class DeviceLifecycleEventTest {
     public void entryId_canBeNull_forGatewayChildWithoutEntry() {
         // 网关子设备 entryId 通常=网关 entryId；此字段允许 null（无 entry 的极端设备）
         DeviceLifecycleEvent e = new DeviceLifecycleEvent(
-                "dev-1", "com.ecat:integration-x", null, DeviceLifecycleEvent.Action.REMOVE);
+                "dev-1", "com.ecat:integration-x", "uid-1", null, DeviceLifecycleEvent.Action.REMOVE);
         assertNull(e.getEntryId());
     }
 }

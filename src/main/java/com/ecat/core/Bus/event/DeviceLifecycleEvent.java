@@ -26,12 +26,15 @@ package com.ecat.core.Bus.event;
  * <ul>
  *   <li>{@code deviceId}：设备主键（{@code DeviceBase.getId()}），全局稳定</li>
  *   <li>{@code coordinate}：设备所属集成坐标</li>
+ *   <li>{@code uniqueId}：坐标内硬件锚点（{@code DeviceBase.getUniqueId()}）。消费方按 (coordinate,uniqueId) 匹配设备——
+ *       deviceId 跨 reconfigure 稳定（{@code DeviceRegistry.replace} + matchIndex 复原同 id），但 REMOVE 时设备已离 registry 无法反查，
+ *       故载荷须自带 uniqueId 供消费方识别"是否为我订阅的设备"</li>
  *   <li>{@code entryId}：设备关联的 ConfigEntry（entry-backed=自身 entry；网关子设备=网关 entry，1:N back-ref）</li>
  *   <li>{@code action}：CREATE / RECONFIGURE / REMOVE</li>
  * </ul>
  *
  * <p>device 无独立 enable/disable 事件：entry enable/disable 经设备 create/remove 映射为 CREATE/REMOVE。
- * LogicDevice 豁免——不发本事件（其注册在 LogicDeviceRegistry，不经 DeviceRegistry）。
+ * Phase 3 起逻辑设备经 DeviceRegistry 注册（撤 getId 豁免），同样发 CREATE/RECONFIGURE/REMOVE。
  *
  * @author coffee
  */
@@ -46,21 +49,25 @@ public class DeviceLifecycleEvent implements BusPayload {
 
     private final String deviceId;
     private final String coordinate;
+    /** 坐标内硬件锚点；通常非空，无 uniqueId 的极端设备允许 null（不强校验，与 coordinate/entryId 一致） */
+    private final String uniqueId;
     private final String entryId;
     private final Action action;
 
-    public DeviceLifecycleEvent(String deviceId, String coordinate, String entryId, Action action) {
+    public DeviceLifecycleEvent(String deviceId, String coordinate, String uniqueId, String entryId, Action action) {
         if (deviceId == null || action == null) {
             throw new IllegalArgumentException("deviceId/action must not be null");
         }
         this.deviceId = deviceId;
         this.coordinate = coordinate;
+        this.uniqueId = uniqueId;
         this.entryId = entryId;
         this.action = action;
     }
 
     public String getDeviceId() { return deviceId; }
     public String getCoordinate() { return coordinate; }
+    public String getUniqueId() { return uniqueId; }
     public String getEntryId() { return entryId; }
     public Action getAction() { return action; }
 }
