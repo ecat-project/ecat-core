@@ -121,6 +121,14 @@ public class IntegrationStatus {
     @Getter
     @Setter
     private Date lastUpdate;
+    /**
+     * 是否启用(integrations.yml 的 enabled 字段真相值)。前端启停开关据此判定,
+     * 不再单看 state——state 可能与 enabled 不一致(手动改 yml 不重启等脏数据),
+     * 见 IntegrationManager.getIntegrationStatus 的显示层纠正。
+     */
+    @Getter
+    @Setter
+    private boolean enabled;
 
     /**
      * 默认构造函数
@@ -137,7 +145,7 @@ public class IntegrationStatus {
     public IntegrationStatus(String coordinate, IntegrationState state, String message,
                             List<String> dependents, List<String> dependencies,
                             boolean canDisable, boolean canRemove, boolean canEnable, boolean canUpgrade,
-                            boolean isLocked, String version, String pendingVersion, Date lastUpdate) {
+                            boolean isLocked, String version, String pendingVersion, Date lastUpdate, boolean enabled) {
         this.coordinate = coordinate;
         this.state = state;
         this.message = message;
@@ -151,6 +159,7 @@ public class IntegrationStatus {
         this.version = version;
         this.pendingVersion = pendingVersion;
         this.lastUpdate = lastUpdate != null ? lastUpdate : new Date();
+        this.enabled = enabled;
     }
 
     /**
@@ -177,6 +186,7 @@ public class IntegrationStatus {
         private String version;
         private String pendingVersion;
         private Date lastUpdate = new Date();
+        private boolean enabled;
 
         public Builder coordinate(String coordinate) {
             this.coordinate = coordinate;
@@ -243,9 +253,14 @@ public class IntegrationStatus {
             return this;
         }
 
+        public Builder enabled(boolean enabled) {
+            this.enabled = enabled;
+            return this;
+        }
+
         public IntegrationStatus build() {
             return new IntegrationStatus(coordinate, state, message, dependents, dependencies,
-                canDisable, canRemove, canEnable, canUpgrade, isLocked, version, pendingVersion, lastUpdate);
+                canDisable, canRemove, canEnable, canUpgrade, isLocked, version, pendingVersion, lastUpdate, enabled);
         }
     }
 
@@ -265,6 +280,7 @@ public class IntegrationStatus {
                 ", version='" + version + '\'' +
                 ", pendingVersion='" + pendingVersion + '\'' +
                 ", lastUpdate=" + lastUpdate +
+                ", enabled=" + enabled +
                 '}';
     }
 

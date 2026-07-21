@@ -752,6 +752,13 @@ public class IntegrationManager {
             state = enabled != null && enabled ? IntegrationState.RUNNING : IntegrationState.STOPPED;
         }
 
+        // 显示层纠正:enabled==false 时集成未加载,不可能 RUNNING。yml 残留 state:RUNNING(手动改 enabled
+        // 不重启等脏数据)时纠正为 STOPPED,避免前端误导;同时使读 state 的 canDisable/canEnable 自动变正确。
+        // 仅纠正 RUNNING 这一个不可能态;PENDING_REMOVED 等 enabled==false 的合法态保留。
+        if (enabled != null && !enabled && state == IntegrationState.RUNNING) {
+            state = IntegrationState.STOPPED;
+        }
+
         // 解析更新时间
         Date lastUpdate = null;
         if (updateStr != null) {
@@ -791,6 +798,7 @@ public class IntegrationManager {
             .canEnable(canEnable)
             .canUpgrade(canUpgrade)
             .isLocked(isLocked)
+            .enabled(enabled != null && enabled)
             .build();
     }
 

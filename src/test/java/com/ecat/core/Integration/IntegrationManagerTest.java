@@ -311,6 +311,27 @@ public class IntegrationManagerTest {
         }
     }
 
+    @Test
+    public void getIntegrationStatus_disabledButStaleRunning_reconciledToStoppedAndEnableable() throws Exception {
+        // 脏数据场景:手动改 integrations.yml 把 enabled 改 false 但不重启,state 残留 RUNNING。
+        // 真相是 enabled:未启用不可能 RUNNING。期望显示层纠正为 STOPPED,且可启用、不可停用。
+        new File(testConfigDir + "/core").mkdirs();
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("enabled", false);
+        entry.put("state", "RUNNING");
+        Map<String, Object> integrations = new HashMap<>();
+        integrations.put("test:disabled-stale", entry);
+        Map<String, Object> root = new HashMap<>();
+        root.put("integrations", integrations);
+        writeYamlToFile(testConfigDir + "/core/integrations.yml", root);
+
+        IntegrationStatus s = integrationManager.getIntegrationStatus("test:disabled-stale");
+        assertEquals("enabled==false 不可能 RUNNING,纠正为 STOPPED", IntegrationState.STOPPED, s.getState());
+        assertTrue("已停用应可启用", s.canEnable());
+        assertFalse("已停用不应可停用", s.canDisable());
+        assertFalse("enabled 真相值应如实下发为 false", s.isEnabled());
+    }
+
     // 辅助方法：将Map写入YAML文件（使用标准格式）
     private void writeYamlToFile(String filePath, Map<String, Object> data) throws IOException {
         // 配置YAML输出格式为块格式（标准缩进）
