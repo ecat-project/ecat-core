@@ -61,6 +61,7 @@ public final class UnitRegistry {
             CurrentUnit.class,
             DistanceUnit.class,
             FrequencyUnit.class,
+            IrradianceUnit.class,
             LiterFlowUnit.class,
             NoiseUnit.class,
             PowerUnit.class,

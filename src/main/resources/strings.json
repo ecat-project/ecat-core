@@ -191,6 +191,9 @@
       },
       "noise": {
         "db": "dB"
+      },
+      "irradiance": {
+        "w_per_square_meter": "W/m²"
       }
     }
   },

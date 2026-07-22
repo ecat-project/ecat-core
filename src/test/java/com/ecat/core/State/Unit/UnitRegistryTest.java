@@ -20,8 +20,8 @@ public class UnitRegistryTest {
     public void allUnitClasses_containsKnownClassesAndIsImmutable() {
         List<Class<? extends UnitInfo>> classes = UnitRegistry.allUnitClasses();
 
-        // 已核实的 17 个 InternationalizedUnit enum 类
-        assertEquals(17, classes.size());
+        // 已核实的 18 个 InternationalizedUnit enum 类
+        assertEquals(18, classes.size());
         assertTrue(classes.contains(VoltageUnit.class));
         assertTrue(classes.contains(AirMassUnit.class));
         assertTrue(classes.contains(AirVolumeUnit.class));
