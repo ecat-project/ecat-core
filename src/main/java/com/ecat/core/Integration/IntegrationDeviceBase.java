@@ -79,7 +79,10 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     public boolean removeDevice(DeviceBase device) {
         DeviceBase removed = devices.remove(device.getId());
         if (removed != null) {
-            deviceRegistry.purge(device);   // 硬删 record+matchIndex+发 REMOVE（替代旧 unregister(getId())）
+            // 逻辑删：保 yml(deleted=true)+matchIndex，使同 uniqueId 重建/reconfigure 复原同 deviceId
+            // （与 removeEntry 一致；reconfigure 先 removeDevice 旧设备再 addDevice 新设备，
+            // 命中保留的 matchIndex 复原同 id，而非铸新 UUID）。
+            deviceRegistry.remove(device);
             return true;
         }
         return false;
@@ -168,15 +171,16 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     @Override
     public void removeEntry(String entryId) {
         log.info("Removing entry: {}", entryId);
-        // 00-core：真实删除按 entryId 级联（1:N 正确）——硬删 device 记录 + state DB，发 REMOVE。
+        // 逻辑删：从活跃系统移除设备，保留 matchIndex + yml 记录(deleted=true) + state DB，
+        // 使同 (coordinate,uniqueId) 重新创建时 getOrCreate 命中 matchIndex 复原同 deviceId
+        // （一个 deviceId 绑定一个物理设备，删除后再添加复用原 id，而非铸新 UUID）。
+        // 与 disable 的区别：disable 保留 entryId（entry 仍在、仅禁用）；remove 置 entryId=null（entry 已删、仅留身份记忆）。
         for (DeviceBase device : deviceRegistry.findDevicesByEntryId(entryId)) {
             device.stop();
             device.release();
             devices.remove(device.getId());
-            deviceRegistry.purge(device);   // 硬：删 yml + matchIndex，发 REMOVE
-            if (core != null && core.getStateManager() != null) {
-                core.getStateManager().removeDevice(device);   // 删 state DB
-            }
+            deviceRegistry.remove(device);   // 逻辑删：保 yml(deleted=true)+matchIndex，发 REMOVE
+            // 不删 state DB：state 是设备历史，逻辑删保留（与 disable 一致）；deviceId 复原靠 matchIndex，与 state 无关。
         }
         // 注意：不调用 super.removeEntry(entryId)——ConfigEntryRegistry.removeEntry → notifyIntegrationRemove → 本方法，
         // 再调 super 会递归 StackOverflowError。Registry 已负责从缓存移除 entry。

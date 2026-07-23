@@ -156,6 +156,29 @@ public class DeviceRegistryGetOrCreateTest {
         assertFalse("重新发现后记录应翻回 deleted=false", revived.isDeleted());
     }
 
+
+    @Test
+    public void remove_persistsDeletedFlag_toYml_reloadReadsTrue() throws Exception {
+        // 守护：remove 标的 deleted=true 必须真正落盘到 yml，重启 loadAll 读回仍为 true。
+        // 防回归：YmlDevicePersistence 两个 convert 方法若漏处理 deleted 字段，
+        // yml 不存该字段 → 读回恒为默认 false → 逻辑删记录无法与活跃记录区分（审计失效）。
+        File tmp = Files.createTempDirectory("ecat-reg-del-persist").toFile();
+        YmlDevicePersistence p = new YmlDevicePersistence(tmp.getAbsolutePath());
+        DeviceRegistry reg = new DeviceRegistry();
+        reg.setPersistence(p);
+        DeviceBase d = newDevice("e1", "u1", "com.ecat:c");
+        reg.getOrCreate(d, DeviceLifecycleEvent.Action.CREATE);
+        String id = d.getId();
+
+        reg.remove(d);
+
+        DeviceRecord persisted = p.loadAll().stream()
+            .filter(r -> id.equals(r.getId())).findFirst()
+            .orElseThrow(() -> new AssertionError("逻辑删记录应保留在 yml"));
+        assertTrue("remove 的 deleted=true 必须持久化到 yml 并能读回", persisted.isDeleted());
+        assertNull("逻辑删记录 entryId 应持久化为 null", persisted.getEntryId());
+    }
+
     @Test
     public void replace_overwritesSameKey_newInheritsOldId_singleReconfigureEvent() throws Exception {
         File tmp = Files.createTempDirectory("ecat-reg-replace").toFile();

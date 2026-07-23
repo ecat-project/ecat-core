@@ -211,6 +211,8 @@ public class YmlDevicePersistence implements DevicePersistence {
                 .model((String) map.get("model"))
                 .createTime(parseTime(map.get("createTime")))
                 .updateTime(parseTime(map.get("updateTime")))
+                // 旧 yml 无 deleted 键时读为 false（向后兼容：历史记录视为未删除）
+                .deleted(Boolean.TRUE.equals(map.get("deleted")))
                 .build();
     }
 
@@ -225,6 +227,7 @@ public class YmlDevicePersistence implements DevicePersistence {
         map.put("model", r.getModel());
         map.put("createTime", formatTime(r.getCreateTime()));
         map.put("updateTime", formatTime(r.getUpdateTime()));
+        map.put("deleted", r.isDeleted());
         return map;
     }
 
