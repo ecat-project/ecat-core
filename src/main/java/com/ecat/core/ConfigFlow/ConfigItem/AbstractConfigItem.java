@@ -198,12 +198,11 @@ public abstract class AbstractConfigItem<T> {
      * @return 验证错误信息（String）或嵌套错误（Map），验证通过返回 null
      */
     public Object validate(Object value) {
-        // 空值检查
-        if (value == null) {
+        // 空值检查：null 或（required 时）空白字符串都视为缺失。
+        // 空串也判：堵住 API/脚本 POST 空 sn 等绕过前端 HTML5 required 的口子（bug-record-20260724-084832）。
+        if (value == null || (required && isBlankString(value))) {
             if (required) {
-                return displayName != null
-                    ? displayName + " 是必需的"
-                    : "配置项 " + key + " 是必需的";
+                return requiredError();
             }
             return null;
         }
@@ -226,6 +225,18 @@ public abstract class AbstractConfigItem<T> {
         }
 
         return null;
+    }
+
+    /** required 缺失（null 或空白串）的错误信息。 */
+    private Object requiredError() {
+        return displayName != null
+            ? displayName + " 是必需的"
+            : "配置项 " + key + " 是必需的";
+    }
+
+    /** 仅对 String 判空白（trim 后为空）；非 String（数值/布尔/集合）返回 false——其“缺失”只有 null。 */
+    private static boolean isBlankString(Object value) {
+        return value instanceof String && ((String) value).trim().isEmpty();
     }
 
     /**

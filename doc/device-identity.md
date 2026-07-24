@@ -97,6 +97,17 @@ ConfigEntry "网关 gw-001" (entryId=E1)
 - 取：`device.getUniqueId()`。
 - **不要**脱离 coordinate 用 uniqueId 查设备（旧的单参 `getDeviceByUniqueId(String)` 已删除）。
 
+#### ConfigFlow 约束（设计原则，2026-07-24 全项目统一）
+- **字段决定，禁随机**：uniqueId 必须由用户填写的稳定字段决定，**禁止 `UUID.randomUUID()` 兜底**。随机 uniqueId 会致 reconfigure 漂移（重算出不同值 → 身份丢失）、同设备重复入网。
+  - 字段选择：SN 类（A/B 集成）用 `sn`；网络设备（摄像头/门禁/分析仪，host 接入）用 `host+port`；serial-tcp 桥用 `serial_port`（连接即身份）；modbus-generic 用编号 `code`。**name 可能含中文/特殊符号，不作 uniqueId**。
+- **uniqueId 决定字段在 form 与 device load schema 都必填**（fail-fast）：
+  - ConfigFlow 表单（`createDeviceBasicSchema`）+ 设备加载校验 schema（`XxxDeviceConfigSchema`，`createDeviceFromEntry` 在 core 启动时 `validate(entry.getData())` 校验存量 entry）都设 `required=true`。
+  - 缺身份字段的畸形 entry：创建时被表单拦、加载时被 schema 拒（明确报错），**不静默放行**。
+  - 前提：改 load schema 必填前，确认所有存量 entry 已有该字段（否则像 sn-less legacy entry 一样 load fail，需先重建）。
+- **尽早排重**：`context.setEntryUniqueId(generateUniqueId(), isReconfigure)` 在**提交 uniqueId 决定字段的那个 step** 就调（不等 final_confirm），重名冲突早暴露、避免用户白填后续步。`FlowContext.setEntryUniqueId` 会查活跃 flow + 已存 entry 的 uniqueId 冲突。
+- **reconfigure 复用旧 uniqueId**：身份不可变。reconfigure 时 `generateUniqueId` 返回被重配 entry 的原 uniqueId（查 `reconfigureEntryId`），不重算——防漂移。配合 reconfigure 时身份字段只读（如 SN readonly）。
+- **required 校验已收紧**：`AbstractConfigItem.validate` 的 required 不仅查 `null`，也查**空白串**（`value==null || (required && isBlankString(value))`）——堵住 API/脚本 POST 空 required 字段绕过前端 HTML5 的口子。
+
 ### attrId —— 属性（测点）标识
 - 谁：设备类定义（如 SO2 分析仪有 `so2`、`status` 等 attr）。
 - 用：属性级数据读写、绑定。与 deviceId 组合 `(deviceId, attrId)` 定位一个具体测点。
