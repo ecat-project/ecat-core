@@ -28,7 +28,6 @@ import com.ecat.core.I18n.I18nRegistry;
 import com.ecat.core.Integration.IntegrationManager;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.Log.LogManager;
-import com.ecat.core.LogicMapping.LogicMappingManager;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
 import com.ecat.core.Utils.platform.PlatformInfo;
@@ -85,12 +84,6 @@ public class EcatCore {
      */
     @Getter
     private ConfigFlowService configFlowService;
-
-    /**
-     * 逻辑映射管理器
-     */
-    @Getter
-    private LogicMappingManager logicMappingManager;
 
     /**
      * 平台信息（OS、架构、JavaCPP classifier）
@@ -170,7 +163,6 @@ public class EcatCore {
         deviceRegistry.setPersistence(new YmlDevicePersistence(".ecat-data/core/devices"));
         deviceRegistry.setBusRegistry(busRegistry);
         deviceRegistry.load();
-        logicMappingManager = new LogicMappingManager();
         i18nRegistry = I18nRegistry.getInstance();
         
         // 注册 core 日志缓冲区

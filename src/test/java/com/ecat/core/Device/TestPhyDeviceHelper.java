@@ -29,8 +29,8 @@ import java.util.Map;
  * 测试辅助类，用于创建属于 com.ecat.core.Device 包的设备和属性。
  *
  * <p>在 LogicDeviceConsumer 测试中，需要模拟来自物理设备（非 LogicDevice 包）的属性事件。
- * 由于测试类本身在 com.ecat.core.LogicDevice 包中，
- * 匿名 DeviceBase 子类会继承该包名，导致 {@link com.ecat.core.LogicDevice.LogicDeviceConsumer}
+ * 由于测试类本身在 com.ecat.integration.logicdevice.LogicDevice 包中，
+ * 匿名 DeviceBase 子类会继承该包名，导致 {@link com.ecat.integration.logicdevice.LogicDevice.LogicDeviceConsumer}
  * 的包名过滤逻辑将其误判为逻辑设备属性。
  *
  * <p>通过在本包（com.ecat.core.Device）下创建具体的 DeviceBase 子类，
