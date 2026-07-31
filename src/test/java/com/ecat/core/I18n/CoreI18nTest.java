@@ -56,9 +56,9 @@ public class CoreI18nTest {
 
         // Verify the keys are being used
         assertTrue(AttributeStatus.NORMAL.getDescription().contains(normalKey) ||
-                   AttributeStatus.NORMAL.getDescription().equals("Normal"));
+                   AttributeStatus.NORMAL.getDescription().equals("数据有效"));
         assertTrue(AttributeStatus.ALARM.getDescription().contains(alarmKey) ||
-                   AttributeStatus.ALARM.getDescription().equals("Alarm"));
+                   AttributeStatus.ALARM.getDescription().equals("传感器报警"));
     }
 
     @Test
