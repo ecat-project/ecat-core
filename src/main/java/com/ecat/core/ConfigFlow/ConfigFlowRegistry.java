@@ -265,6 +265,33 @@ public class ConfigFlowRegistry {
     }
 
     /**
+     * 强制结束占用指定 uniqueId 的其他 active flow（last-writer-win 模式用，
+     * 见 {@link FlowContextConfig#isLastWriterWins()}）。
+     * <p>仅结束 context.uniqueId 匹配且 flowId≠{@code excludeFlowId}（自身）的 flow；
+     * 自身与异 uniqueId 的 flow 不动。先收集再结束，避免遍历中并发修改。
+     *
+     * @param uniqueId       目标 uniqueId
+     * @param excludeFlowId  自身 flowId（排除，不结束）
+     * @return 被结束的 flow 数
+     */
+    public int abortActiveFlowsWithUniqueId(String uniqueId, String excludeFlowId) {
+        java.util.List<String> toAbort = new java.util.ArrayList<>();
+        for (Map.Entry<String, TrackedFlow> e : trackedFlows.entrySet()) {
+            if (e.getKey().equals(excludeFlowId)) {
+                continue;
+            }
+            String uid = e.getValue().flow.getContext().getEntryUniqueId();
+            if (uniqueId.equals(uid)) {
+                toAbort.add(e.getKey());
+            }
+        }
+        for (String fid : toAbort) {
+            abortActiveFlow(fid);
+        }
+        return toAbort.size();
+    }
+
+    /**
      * 获取所有运行中的 flow ID
      */
     public List<String> getActiveFlowIds() {

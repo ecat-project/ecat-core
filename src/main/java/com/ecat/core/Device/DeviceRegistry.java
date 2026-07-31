@@ -53,11 +53,17 @@ public class DeviceRegistry implements IDeviceQuery {
     /** 总线，用于发布 DEVICE_LIFECYCLE（由 EcatCore.init 注入，可空→不发事件）。 */
     private BusRegistry busRegistry;
 
+    /** entry 注册表，disable 时级联 setEnabled(false)（由 EcatCore.init 注入，可空→跳过级联）。 */
+    private com.ecat.core.ConfigEntry.ConfigEntryRegistry entryRegistry;
+
     /** 注入持久化层（EcatCore.init 调用）。 */
     public void setPersistence(DevicePersistence persistence) { this.persistence = persistence; }
 
     /** 注入总线（EcatCore.init 调用）。 */
     public void setBusRegistry(BusRegistry busRegistry) { this.busRegistry = busRegistry; }
+
+    /** 注入 entry 注册表（EcatCore.init 调用，disable 级联用）。 */
+    public void setEntryRegistry(com.ecat.core.ConfigEntry.ConfigEntryRegistry entryRegistry) { this.entryRegistry = entryRegistry; }
 
     /**
      * 低级原语：按显式 deviceID 直接 put（不经 matchIndex/持久化/事件）。
@@ -214,7 +220,17 @@ public class DeviceRegistry implements IDeviceQuery {
      */
     public void disable(DeviceBase device) {
         registry.remove(device.getId());
-        // 不动 persistence（保 yml）、不动 matchIndex（保匹配键供复原）
+        // 持久化 disabled=true（保 entryId，区别 remove 的 entryId=null/deleted=true）：record 保留供"未绑定"态查询 + re-enable 复原
+        if (persistence != null) {
+            DeviceRecord record = toRecord(device);
+            record.setDisabled(true);
+            persistence.save(record);
+        }
+        // 级联 entry setEnabled(false)：集成 load 跳过 disabled entry（IntegrationManager/AirdeviceIntegration 实证），
+        // 使 disable 跨重启持久（否则 entry 仍 enabled → 重启 re-register → disable 失效）。保 matchIndex 供 re-enable getOrCreate 复原同 id。
+        if (entryRegistry != null && device.getEntry() != null && device.getEntry().getEntryId() != null) {
+            entryRegistry.setEnabled(device.getEntry().getEntryId(), false);
+        }
         publish(device, DeviceLifecycleEvent.Action.REMOVE);
     }
 

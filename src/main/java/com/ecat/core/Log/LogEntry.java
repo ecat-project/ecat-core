@@ -16,6 +16,9 @@
 
 package com.ecat.core.Log;
 
+import com.ecat.core.Utils.DateTimeUtils;
+import java.time.Instant;
+
 /**
  * 日志条目实体类
  *
@@ -73,6 +76,12 @@ public class LogEntry {
 
     public void setTimestamp(long timestamp) {
         this.timestamp = timestamp;
+    }
+
+    /** 响应层时间（ISO-8601 毫秒，由 timestamp 派生）；REST(fastjson2)/SSE 序列化输出，前端按时区正确展示。
+     *  内部比较/游标仍用 timestamp(long) 与 seq(long)，time 仅给前端展示。 */
+    public String getTime() {
+        return DateTimeUtils.formatInstant(Instant.ofEpochMilli(timestamp));
     }
 
     public long getSeq() {

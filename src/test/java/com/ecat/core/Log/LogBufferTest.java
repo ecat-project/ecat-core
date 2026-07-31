@@ -205,6 +205,25 @@ public class LogBufferTest {
     }
 
     @Test
+    public void testSortBySeqNotTimestamp() {
+        // 守护:getRecent/getAll 按 seq(put 插入序)排序,而非 timestamp。
+        // 旧实现按 ts 排序,同毫秒并发条目顺序不稳定;seq 单调唯一保证插入序。
+        // 构造 ts 非单调、但 seq 按 put 顺序单调的三条:
+        buffer.put(createEntry(100, "first"));   // seq=1
+        buffer.put(createEntry(50, "second"));   // seq=2 (ts 更小但后插入)
+        buffer.put(createEntry(200, "third"));   // seq=3
+
+        List<LogEntry> all = buffer.getAll();
+        assertEquals(3, all.size());
+        // 按 seq(插入序): first, second, third。若退回 ts 排序会是 second(50),first(100),third(200)
+        assertEquals("first", all.get(0).getMessage());
+        assertEquals("second", all.get(1).getMessage());
+        assertEquals("third", all.get(2).getMessage());
+        assertTrue("seq 应单调递增", all.get(0).getSeq() < all.get(1).getSeq());
+        assertTrue("seq 应单调递增", all.get(1).getSeq() < all.get(2).getSeq());
+    }
+
+    @Test
     public void testEvictedEntriesAreGcEligible() {
         // 验证被淘汰的 LogEntry 可以被 GC 回收（单引用保证）
         List<WeakReference<LogEntry>> weakRefs = new ArrayList<>();

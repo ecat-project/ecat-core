@@ -43,8 +43,8 @@ public class DateTimeUtils {
      * 新增格式只需在此枚举中添加。
      */
     public enum TimeFormat {
-        /** ISO 8601 带时区 (如 2026-06-04T16:30:00+08:00) — API 响应默认格式 */
-        ISO("yyyy-MM-dd'T'HH:mm:ssXXX"),
+        /** ISO 8601 带时区 (如 2026-06-04T16:30:00.123+08:00) — API 响应默认格式 */
+        ISO("yyyy-MM-dd'T'HH:mm:ss.SSSXXX"),
         /** 日期时间 (如 2026-06-04 16:30:00) — 日志、UI 展示 */
         DATETIME("yyyy-MM-dd HH:mm:ss"),
         /** 仅日期 (如 2026-06-04) */
@@ -130,7 +130,7 @@ public class DateTimeUtils {
      * 等价于 {@code formatInstant(instant, TimeFormat.ISO)}。
      *
      * @param instant 时间对象，null 返回 null
-     * @return ISO 格式字符串，如 "2026-06-04T16:30:00+08:00"
+     * @return ISO 格式字符串，如 "2026-06-04T16:30:00.123+08:00"
      */
     public static String formatInstant(Instant instant) {
         return formatInstant(instant, TimeFormat.ISO);
@@ -141,7 +141,7 @@ public class DateTimeUtils {
      *
      * @param instant 时间对象，null 返回 null
      * @param format  时间格式枚举，不能为 null
-     * @return 格式化字符串，如 "2026-06-04T16:30:00+08:00"
+     * @return 格式化字符串，如 "2026-06-04T16:30:00.123+08:00"
      * @throws IllegalArgumentException 如果 format 为 null
      */
     public static String formatInstant(Instant instant, TimeFormat format) {

@@ -162,6 +162,7 @@ public class EcatCore {
         // 00-core：设备持久化 + 启动加载（deviceId 跨重启稳定）。必须在 integrationManager.load（createEntry）之前完成。
         deviceRegistry.setPersistence(new YmlDevicePersistence(".ecat-data/core/devices"));
         deviceRegistry.setBusRegistry(busRegistry);
+        deviceRegistry.setEntryRegistry(configEntryRegistry);   // disable 级联 setEnabled(false)（三态承重墙）
         deviceRegistry.load();
         i18nRegistry = I18nRegistry.getInstance();
         

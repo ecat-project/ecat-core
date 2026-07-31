@@ -156,6 +156,85 @@ public class FlowContextUniqueIdTest {
         assertNull("uniqueId 应为 null", context.getEntryUniqueId());
     }
 
+    // ========== lastWriterWins（业务驱动 flow：强制结束占同 uniqueId 的对手 active flow）==========
+
+    /**
+     * T1：lastWriterWins=true 时，遇其他 active flow 占同 uniqueId → 强制结束对手、自身不抛。
+     * 场景：env-air-device-manager 用户 abandon 后以同 SN 重试，新 flow 应取代泄漏的旧 flow。
+     */
+    @Test
+    public void testSetEntryUniqueId_LastWriterWins_ForceTerminatesOther() {
+        EcatCore core = new EcatCore();
+        core.init();
+        EcatCore.setInstance(core);
+
+        ConfigFlowRegistry flowRegistry = core.getFlowRegistry();
+
+        // 另一个 active flow 占用 device_001
+        AbstractConfigFlow otherFlow = new TestConfigFlow("other-flow");
+        otherFlow.getContext().setEntryUniqueId("device_001");
+        flowRegistry.registerActiveFlow("other-flow", otherFlow);
+        assertTrue("对手 flow 应已占用 device_001",
+                flowRegistry.hasActiveFlowWithUniqueId("device_001", "test-flow"));
+
+        // 当前 flow 开 lastWriterWins
+        context.setConfig(FlowContextConfig.builder().lastWriterWins(true).build());
+
+        // 设置同 uniqueId → 不抛 + 对手被结束
+        context.setEntryUniqueId("device_001");
+        assertEquals("自身 uniqueId 应已设置", "device_001", context.getEntryUniqueId());
+        assertFalse("对手 flow 应被强制结束", flowRegistry.hasActiveFlowWithUniqueId("device_001", "test-flow"));
+    }
+
+    /**
+     * T1b：lastWriterWins=true 但同时存在多个同 uniqueId 对手 flow → 全部结束。
+     */
+    @Test
+    public void testSetEntryUniqueId_LastWriterWins_TerminatesAllConflicting() {
+        EcatCore core = new EcatCore();
+        core.init();
+        EcatCore.setInstance(core);
+
+        ConfigFlowRegistry flowRegistry = core.getFlowRegistry();
+        // 先设 uid（两个都未注册→无冲突），再注册；否则第二个 setEntryUniqueId 会撞已注册的第一个
+        AbstractConfigFlow other1 = new TestConfigFlow("other-1");
+        other1.getContext().setEntryUniqueId("device_001");
+        AbstractConfigFlow other2 = new TestConfigFlow("other-2");
+        other2.getContext().setEntryUniqueId("device_001");
+        flowRegistry.registerActiveFlow("other-1", other1);
+        flowRegistry.registerActiveFlow("other-2", other2);
+
+        context.setConfig(FlowContextConfig.builder().lastWriterWins(true).build());
+        context.setEntryUniqueId("device_001");
+        assertEquals("自身 uniqueId 应已设置", "device_001", context.getEntryUniqueId());
+        assertNull("对手1应被结束", flowRegistry.getActiveFlow("other-1"));
+        assertNull("对手2应被结束", flowRegistry.getActiveFlow("other-2"));
+    }
+
+    /**
+     * T1c：默认 config（lastWriterWins=false）遇 active-flow 冲突仍抛（通用 flow 行为回归）。
+     */
+    @Test
+    public void testSetEntryUniqueId_DefaultConfig_StillThrowsOnActiveFlowConflict() {
+        EcatCore core = new EcatCore();
+        core.init();
+        EcatCore.setInstance(core);
+
+        ConfigFlowRegistry flowRegistry = core.getFlowRegistry();
+        AbstractConfigFlow otherFlow = new TestConfigFlow("other-flow");
+        otherFlow.getContext().setEntryUniqueId("device_001");
+        flowRegistry.registerActiveFlow("other-flow", otherFlow);
+
+        // 默认 config（lastWriterWins=false）→ 抛异常（对手保留）
+        try {
+            context.setEntryUniqueId("device_001");
+            fail("默认 config 遇冲突应抛 DuplicateUniqueIdException");
+        } catch (ConfigEntryRegistry.DuplicateUniqueIdException e) {
+            assertTrue("异常消息含 uniqueId", e.getMessage().contains("device_001"));
+        }
+        assertTrue("默认模式下对手 flow 应保留", flowRegistry.hasActiveFlowWithUniqueId("device_001", "test-flow"));
+    }
+
     // ========== 辅助类 ==========
 
     private static class TestConfigFlow extends AbstractConfigFlow {

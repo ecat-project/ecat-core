@@ -46,7 +46,7 @@ public class LogBuffer implements AutoCloseable {
     private final ConcurrentLinkedQueue<LogEntry> buffer;
     private final int maxCapacity;
     private final CopyOnWriteArraySet<LogSubscriber> subscribers;
-    private final ConcurrentHashMap<LogSubscriber, Long> subscriberTimestamps;
+    private final ConcurrentHashMap<LogSubscriber, Long> subscriberSeqs;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     // ========== 异步投递（ring 驱动的信号式单写者，与 put 解耦） ==========
@@ -68,7 +68,7 @@ public class LogBuffer implements AutoCloseable {
         this.maxCapacity = maxCapacity;
         this.buffer = new ConcurrentLinkedQueue<>();
         this.subscribers = new CopyOnWriteArraySet<>();
-        this.subscriberTimestamps = new ConcurrentHashMap<>();
+        this.subscriberSeqs = new ConcurrentHashMap<>();
     }
 
     /**
@@ -137,10 +137,10 @@ public class LogBuffer implements AutoCloseable {
             if (closed.get() || interrupted) {
                 break; // close 中断时尽快退出，剩余订阅者随 close 终止
             }
-            Long subscribeTime = subscriberTimestamps.get(sub);
+            Long subscribeSeq = subscriberSeqs.get(sub);
             for (LogEntry e : toDeliver) {
-                // 订阅时间过滤：只发订阅后产生的日志，避免与订阅时历史拉取重复
-                if (subscribeTime != null && e.getTimestamp() < subscribeTime) {
+                // 订阅序号过滤：只发订阅后产生的日志（seq 单调唯一，同毫秒并发不误判），与订阅时历史拉取不重复
+                if (subscribeSeq != null && e.getSeq() <= subscribeSeq) {
                     continue;
                 }
                 try {
@@ -160,7 +160,7 @@ public class LogBuffer implements AutoCloseable {
         if (dead != null) {
             for (LogSubscriber s : dead) {
                 subscribers.remove(s);
-                subscriberTimestamps.remove(s);
+                subscriberSeqs.remove(s);
             }
         }
     }
@@ -210,7 +210,7 @@ public class LogBuffer implements AutoCloseable {
      */
     public List<LogEntry> getRecent(int limit) {
         List<LogEntry> all = new ArrayList<>(buffer);
-        all.sort(Comparator.comparingLong(LogEntry::getTimestamp));
+        all.sort(Comparator.comparingLong(LogEntry::getSeq));
         if (all.size() <= limit) {
             return all;
         }
@@ -224,7 +224,7 @@ public class LogBuffer implements AutoCloseable {
      */
     public List<LogEntry> getAll() {
         List<LogEntry> all = new ArrayList<>(buffer);
-        all.sort(Comparator.comparingLong(LogEntry::getTimestamp));
+        all.sort(Comparator.comparingLong(LogEntry::getSeq));
         return all;
     }
 
@@ -253,7 +253,7 @@ public class LogBuffer implements AutoCloseable {
         if (!closed.get() && subscriber != null) {
             boolean added = subscribers.add(subscriber);
             if (added) {
-                subscriberTimestamps.put(subscriber, System.currentTimeMillis());
+                subscriberSeqs.put(subscriber, seqCounter.get());
             }
             // 懒启动单写者投递线程：有订阅者才有投递需求；线程守护，无订阅者时本就不会启动
             ensureBroadcasterStarted();
@@ -267,7 +267,7 @@ public class LogBuffer implements AutoCloseable {
      */
     public void unsubscribe(LogSubscriber subscriber) {
         subscribers.remove(subscriber);
-        subscriberTimestamps.remove(subscriber);
+        subscriberSeqs.remove(subscriber);
     }
 
     /**
@@ -301,7 +301,7 @@ public class LogBuffer implements AutoCloseable {
                 }
             }
             subscribers.clear();
-            subscriberTimestamps.clear();
+            subscriberSeqs.clear();
         }
     }
 }

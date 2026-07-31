@@ -539,4 +539,40 @@ public class ConfigEntryRegistryTest {
             // Expected
         }
     }
+
+    /**
+     * setEnabled（disable/enable）必须保留 stepInputs：reconfigure 经 ConfigFlowService 从
+     * entry.stepInputs 回填各步骤表单（如 device_config.sn）。setEnabled 重建 entry 漏拷 stepInputs
+     * 会清空 yml 的 stepInputs → reconfigure 表单回填空 + 只读字段（sn）卡死（bug-record-20260731）。
+     */
+    @Test
+    public void setEnabled_preservesStepInputs_acrossDisableEnable() {
+        // 构造带 stepInputs（device_config.sn）的 entry，模拟用户创建时提交的步骤输入
+        Map<String, Object> deviceConfig = new HashMap<>();
+        deviceConfig.put("sn", "SN-001");
+        Map<String, Object> stepInputs = new HashMap<>();
+        stepInputs.put("device_config", deviceConfig);
+
+        ConfigEntry entry = new ConfigEntry.Builder()
+                .coordinate("com.ecat.integration:demo")
+                .uniqueId("demo_123")
+                .title("Test Entry")
+                .stepInputs(stepInputs)
+                .enabled(true)
+                .build();
+        ConfigEntry created = registry.createEntry(entry);
+        String entryId = created.getEntryId();
+
+        // 用户报告的复现路径：disable → enable → reconfigure
+        registry.setEnabled(entryId, false);
+        ConfigEntry reEnabled = registry.setEnabled(entryId, true);
+
+        // stepInputs 必须跨 disable/enable 保留（reconfigure 回填依赖）
+        assertNotNull("stepInputs 不应为 null", reEnabled.getStepInputs());
+        assertFalse("stepInputs 不应为空（reconfigure 表单回填依赖）", reEnabled.getStepInputs().isEmpty());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> deviceConfigAfter = (Map<String, Object>) reEnabled.getStepInputs().get("device_config");
+        assertNotNull("device_config 步输入应保留", deviceConfigAfter);
+        assertEquals("sn 应跨 disable/enable 保留（reconfigure 回填）", "SN-001", deviceConfigAfter.get("sn"));
+    }
 }

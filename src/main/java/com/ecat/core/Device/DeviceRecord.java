@@ -67,4 +67,11 @@ public class DeviceRecord {
      * 硬删 {@code purge} 直接删记录，不进入此态。
      */
     private boolean deleted;
+    /**
+     * 软禁用标记：{@code disable} 置 true，**entryId 保留**（区别于 deleted 的 entryId=null）。
+     * 用于"未绑定"态持久化——disable 后该参数槽未绑定但 record 存在（区分未创建）；
+     * re-enable 经 getOrCreate 命中 matchIndex 复原同 deviceId。配合 {@code ConfigEntry.setEnabled(false)}
+     * 级联（集成 load 跳过 disabled entry），使 disable 跨重启持久。
+     */
+    private boolean disabled;
 }

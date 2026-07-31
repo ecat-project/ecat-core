@@ -36,11 +36,11 @@ public final class DiscoveryFlowInfo {
     private final String uniqueId;
     /** 当前 stepId（SHOW_FORM 落点）。 */
     private final String currentStep;
-    /** 发现时间（TrackedFlow.lastUpdateTime 近似，ms epoch）。 */
-    private final long discoveredAt;
+    /** 发现时间（ISO-8601 毫秒，由 TrackedFlow.lastUpdateTime(ms epoch) 经 DateTimeUtils.formatInstant 格式化）。 */
+    private final String discoveredAt;
 
     public DiscoveryFlowInfo(String flowId, String source, String coordinate, String integrationName,
-                             String title, String uniqueId, String currentStep, long discoveredAt) {
+                             String title, String uniqueId, String currentStep, String discoveredAt) {
         this.flowId = flowId;
         this.source = source;
         this.coordinate = coordinate;
@@ -79,7 +79,7 @@ public final class DiscoveryFlowInfo {
         return currentStep;
     }
 
-    public long getDiscoveredAt() {
+    public String getDiscoveredAt() {
         return discoveredAt;
     }
 }

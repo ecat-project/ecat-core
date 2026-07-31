@@ -415,6 +415,7 @@ public class ConfigEntryRegistry {
                 .uniqueId(entry.getUniqueId())
                 .title(entry.getTitle())
                 .data(entry.getData())
+                .stepInputs(entry.getStepInputs()) // 保留各步骤输入：reconfigure 经 ConfigFlowService 从 entry.stepInputs 回填表单（如 device_config.sn），漏拷会致 reconfigure 回填空+只读卡死
                 .enabled(enabled)
                 .createTime(entry.getCreateTime())
                 .updateTime(DateTimeUtils.now())

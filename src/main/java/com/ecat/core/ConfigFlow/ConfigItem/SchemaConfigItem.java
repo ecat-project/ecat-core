@@ -32,6 +32,46 @@ import java.util.Map;
  * <p>
  * 扩展模式：将嵌套字段提升到父级，不产生嵌套对象。
  *
+ * <h3>嵌套字段校验错误契约（errors Map 层级结构）</h3>
+ * <p>errors 的 key 永远是 {@code ConfigItem.getKey()}（字段名本身，<b>不带父前缀</b>）；值分两种：
+ * <ul>
+ *   <li>普通字段（叶子）：{@code String} 错误消息</li>
+ *   <li>嵌套字段（本类 SchemaConfigItem）：{@code Map<String,Object>}，递归同结构（其子字段错误）</li>
+ * </ul>
+ *
+ * <p><b>一层嵌套示例</b>（serial_settings 嵌套子 schema，serial_port 重复 + 同级 station_id 必填）：
+ * <pre>{@code
+ * errors = {
+ *   "serial_settings": {                              // SchemaConfigItem → 嵌套 Map
+ *     "serial_port": "该地址对应的设备已存在，请修改地址"  // 叶子子字段 → String
+ *   },
+ *   "station_id": "站点号必填"                          // 同级顶层普通字段 → String
+ * }
+ * }</pre>
+ *
+ * <p><b>两层嵌套示例</b>（schema 套 schema，address → location → city）：
+ * <pre>{@code
+ * errors = {
+ *   "address": {                // 第一层 SchemaConfigItem → 嵌套 Map
+ *     "location": {             // 第二层 SchemaConfigItem（子 schema 里又套 schema）→ 再嵌套 Map
+ *       "city": "城市不合法"     // 叶子 → String
+ *     }
+ *   }
+ * }
+ * }</pre>
+ *
+ * <p><b>禁止·扁平</b>（典型错误，前端按父字段名取不到）：
+ * <pre>{@code
+ * errors = { "serial_port": "..." }   // ✗ serial_port 在 serial_settings 嵌套内，应 errors["serial_settings"]["serial_port"]
+ * }</pre>
+ * 前端 flow-form {@code error = errors[field.key]}：对 serial_settings 取 {@code errors["serial_settings"]}
+ * 得到 undefined（扁平 key 挂在 serial_port，父字段名取不到）→ SchemaFieldRenderer 拿不到错误 → 不显示。
+ *
+ * <p><b>前端契约</b>（lib flow-form renderField + schema-field SchemaFieldRenderer，SPA/ADM 共享）：
+ * schema 类型字段的 error 必须是嵌套 Map，SchemaFieldRenderer 按 {@code nestedField.key} 从嵌套 Map
+ * 取子字段错误，<b>递归渲染（天然支持多层）</b>。故后端任何手动 errors.put 嵌套子字段错误，必须按本契约
+ * 挂嵌套 Map，禁止扁平。{@link #validate} 的自动校验已遵循（递归 schema.validate 返回嵌套 Map）。
+ *
  * @author coffee
  */
 public class SchemaConfigItem extends AbstractConfigItem<Map<String, Object>> {

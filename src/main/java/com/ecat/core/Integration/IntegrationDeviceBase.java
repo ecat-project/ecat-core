@@ -123,6 +123,9 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
             // device.load(core) 已在各集成的 createDeviceFromEntry() 中调用
             addDevice(device);                                   // getOrCreate 解析稳定 id + register
             device.restorePersistedState();                      // 00-core(D9)：addDevice 后批量恢复 state（id 已解析）
+            // [ADM-DELAY-DIAG] 临时诊断：记录 start() 调用时刻与线程，配合 TaskManager 池积压监控，
+            // 定位"批量 provision 设备 readAndUpdate 长期不执行"根因（调度时间 vs 首跑时间之差）。定位后移除。
+            log.info("[ADM-DELAY-DIAG] device.start() invoked for {} on thread {}", device.getId(), Thread.currentThread().getName());
             device.start();
         }
         log.info("Entry created: {}", entry.getUniqueId());

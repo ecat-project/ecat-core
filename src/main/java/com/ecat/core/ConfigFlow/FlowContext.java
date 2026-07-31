@@ -55,6 +55,13 @@ public class FlowContext {
     private String entryUniqueId;
 
     /**
+     * 创建期行为配置（经 {@link ConfigFlowService#startFlow(String, FlowContextConfig)} 注入）。
+     * 默认 {@link FlowContextConfig#defaults()}（通用 flow 行为）。控制如 lastWriterWins 等
+     * uniqueId 冲突处理策略。详见 {@link FlowContextConfig}。
+     */
+    private FlowContextConfig config = FlowContextConfig.defaults();
+
+    /**
      * 创建流程上下文
      *
      * @param flowId 流程标识符
@@ -160,6 +167,16 @@ public class FlowContext {
         return entryUniqueId;
     }
 
+    /** 行为配置（lastWriterWins 等）。默认 {@link FlowContextConfig#defaults()}。 */
+    public FlowContextConfig getConfig() {
+        return config;
+    }
+
+    /** 注入行为配置（经 {@link ConfigFlowService#startFlow(String, FlowContextConfig)} 在创建 flow 后设置）。 */
+    public void setConfig(FlowContextConfig config) {
+        this.config = config;
+    }
+
     /**
      * 设置 Entry 业务唯一标识（自动校验唯一性）
      * <p>
@@ -190,9 +207,16 @@ public class FlowContext {
                 // 检查其他运行中的 flow 是否占用此 uniqueId
                 ConfigFlowRegistry flowRegistry = core.getFlowRegistry();
                 if (flowRegistry != null && flowRegistry.hasActiveFlowWithUniqueId(entryUniqueId, this.flowId)) {
-                    throw new ConfigEntryRegistry.DuplicateUniqueIdException(entryUniqueId);
+                    if (config.isLastWriterWins()) {
+                        // last-writer-win（业务驱动 flow，如 env-air-device-manager）：强制结束占同 uniqueId 的对手
+                        // active flow——典型场景为用户 abandon 后以同 SN 重试，新 flow 取代泄漏的旧 flow。
+                        // 默认 lastWriterWins=false：通用 flow（自发现/交互 SPA）遇冲突即停（下方抛异常），防无限创建占资源。
+                        flowRegistry.abortActiveFlowsWithUniqueId(entryUniqueId, this.flowId);
+                    } else {
+                        throw new ConfigEntryRegistry.DuplicateUniqueIdException(entryUniqueId);
+                    }
                 }
-                // 检查已持久化的 entry
+                // 检查已持久化的 entry（框架在保存时唯一性收口；此为早期暴露，不受 lastWriterWins 影响——避免静默覆盖已提交设备）
                 ConfigEntryRegistry entryRegistry = core.getEntryRegistry();
                 if (entryRegistry != null && entryRegistry.getByUniqueId(this.coordinate, entryUniqueId) != null) {
                     throw new ConfigEntryRegistry.DuplicateUniqueIdException(entryUniqueId);

@@ -415,6 +415,42 @@ public class ConfigFlowRegistryTest {
         assertEquals("应为 1", 1, registry.getActiveFlowCount());
     }
 
+    // ========== abortActiveFlowsWithUniqueId（last-writer-win：强制结束占同 uniqueId 的对手 active flow）==========
+
+    /**
+     * T4：结束占指定 uniqueId 的其他 active flow（排除自身），异 uniqueId 不动。
+     */
+    @Test
+    public void testAbortActiveFlowsWithUniqueId() {
+        AbstractConfigFlow a = new TestConfigFlowWithId("a");
+        a.getContext().setEntryUniqueId("UID-X");
+        AbstractConfigFlow b = new TestConfigFlowWithId("b");
+        b.getContext().setEntryUniqueId("UID-X");
+        AbstractConfigFlow c = new TestConfigFlowWithId("c");
+        c.getContext().setEntryUniqueId("UID-Y");
+        AbstractConfigFlow self = new TestConfigFlowWithId("self");
+        self.getContext().setEntryUniqueId("UID-X");
+        registry.registerActiveFlow("a", a);
+        registry.registerActiveFlow("b", b);
+        registry.registerActiveFlow("c", c);
+        registry.registerActiveFlow("self", self);
+
+        int n = registry.abortActiveFlowsWithUniqueId("UID-X", "self");
+        assertEquals("应结束 a、b 两个（排除自身）", 2, n);
+        assertNull("a 应被结束", registry.getActiveFlow("a"));
+        assertNull("b 应被结束", registry.getActiveFlow("b"));
+        assertNotNull("c（异 uid）应保留", registry.getActiveFlow("c"));
+        assertNotNull("自身应保留", registry.getActiveFlow("self"));
+    }
+
+    @Test
+    public void testAbortActiveFlowsWithUniqueId_NoneMatch() {
+        registry.registerActiveFlow("a", new TestConfigFlowWithId("a"));
+        // 无匹配 uniqueId → 返回 0，不抛
+        int n = registry.abortActiveFlowsWithUniqueId("UID-NONE", "self");
+        assertEquals("无匹配应返回 0", 0, n);
+    }
+
     // ========== cleanupExpiredFlows 测试 ==========
 
     @Test

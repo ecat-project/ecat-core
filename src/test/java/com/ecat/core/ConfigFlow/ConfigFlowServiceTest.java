@@ -146,6 +146,24 @@ public class ConfigFlowServiceTest {
         verify(mockFlowRegistry).registerIfAbsent(eq(flow.getFlowId()), eq(flow));
     }
 
+    @Test(expected = ConfigFlowException.class)
+    public void persistCreateEntry_rejectsNullUniqueId() {
+        // P1.3：CREATE_ENTRY 时 entry.uniqueId null/空 → 守卫抛 ConfigFlowException（防 saimosen IMPORT_FLOW 式 null uid entry）
+        String coordinate = "com.ecat.test:null-uid";
+        final AbstractConfigFlow flow = new AbstractConfigFlow() {{
+            registerStepDiscovery(SourceType.IMPORT_FLOW,
+                    (payload, ctx) -> createEntry());  // createEntry() 建 entry，uniqueId 取 ctx.entryUniqueId（未设→null）
+        }};
+        ConfigEntryRegistry mockEntryRegistry = mock(ConfigEntryRegistry.class);
+        when(mockCore.getEntryRegistry()).thenReturn(mockEntryRegistry);
+        when(mockFlowRegistry.hasActiveFlowWithDiscoveryPayload(eq(coordinate), eq(SourceType.IMPORT_FLOW), any()))
+                .thenReturn(false);
+        when(mockFlowRegistry.createFlow(coordinate)).thenReturn(flow);
+
+        service.startDiscoveryFlow(coordinate, SourceType.IMPORT_FLOW,
+                new ImportFlowPayload(coordinate, 1, "data"));   // drive → createEntry(null uid) → 守卫应抛
+    }
+
     @Test
     public void testStartDiscoveryFlow_NotReady_FlowRegistryNull() {
         when(mockCore.getFlowRegistry()).thenReturn(null);  // 覆盖 setUp 默认：core 未就绪

@@ -69,6 +69,8 @@ public class LogSubscriber implements AutoCloseable {
         sb.append("event: log\n");
         sb.append("data: {");
         sb.append("\"timestamp\":").append(entry.getTimestamp()).append(",");
+        sb.append("\"time\":\"").append(escapeJson(entry.getTime())).append("\",");
+        sb.append("\"seq\":").append(entry.getSeq()).append(",");
         if (entry.getTraceId() != null) {
             sb.append("\"traceId\":\"").append(escapeJson(entry.getTraceId())).append("\",");
         }

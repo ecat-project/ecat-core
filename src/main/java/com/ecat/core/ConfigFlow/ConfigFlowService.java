@@ -27,9 +27,11 @@ import com.ecat.core.Bus.event.NotificationEvent;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Integration.IntegrationRegistry;
+import com.ecat.core.Utils.DateTimeUtils;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -243,7 +245,7 @@ public class ConfigFlowService {
      * @param providerCoordinate 提供者的 Maven coordinate (groupId:artifactId)
      */
     public ConfigFlowInstance startFlow(String providerCoordinate) {
-        return startFlow(providerCoordinate, null);
+        return startFlow(providerCoordinate, null, FlowContextConfig.defaults());
     }
 
     /**
@@ -255,6 +257,26 @@ public class ConfigFlowService {
      * @param initialData 初始上下文数据（可为 null）
      */
     public ConfigFlowInstance startFlow(String providerCoordinate, Map<String, Object> initialData) {
+        return startFlow(providerCoordinate, initialData, FlowContextConfig.defaults());
+    }
+
+    /**
+     * 启动指定集成的配置流程（注入行为配置）。
+     * <p>业务驱动 flow（如 env-air-device-manager）用此重载开启 last-writer-win 等：
+     * 经 {@link FlowContextConfig} 传入，避免给 startFlow 叠加多个布尔参数（后期扩展只改配置类）。
+     *
+     * @param providerCoordinate 提供者 coordinate
+     * @param config             行为配置（null 走默认）；见 {@link FlowContextConfig}
+     */
+    public ConfigFlowInstance startFlow(String providerCoordinate, FlowContextConfig config) {
+        return startFlow(providerCoordinate, null, config);
+    }
+
+    /**
+     * 启动指定集成的配置流程（带初始数据 + 行为配置）——实际实现。
+     */
+    private ConfigFlowInstance startFlow(String providerCoordinate, Map<String, Object> initialData,
+                                         FlowContextConfig config) {
         cleanupExpiredFlows();
         ConfigFlowRegistry flowRegistry = core.getFlowRegistry();
         if (flowRegistry == null) {
@@ -267,12 +289,16 @@ public class ConfigFlowService {
         if (flow == null) {
             throw new ConfigFlowException("Failed to create config flow for: " + providerCoordinate);
         }
-        // setup：coordinate + 预填初始数据（sourceType 默认 USER → startStepId 路由到 userStep）
+        // setup：coordinate + 行为配置 + 预填初始数据（sourceType 默认 USER → startStepId 路由到 userStep）
         flow.getContext().setCoordinate(providerCoordinate);
+        if (config != null) {
+            flow.getContext().setConfig(config);
+        }
         if (initialData != null && !initialData.isEmpty()) {
             flow.getContext().getEntryData().putAll(initialData);
         }
-        log.info("启动配置流程: flowId={}, provider={}", flow.getFlowId(), providerCoordinate);
+        log.info("启动配置流程: flowId={}, provider={}, lastWriterWins={}",
+                flow.getFlowId(), providerCoordinate, flow.getContext().getConfig().isLastWriterWins());
         return drive(flow, flow.startStepId(), null);   // register + handleStep(userStep) + 统一异常/终态 全在 drive
     }
 
@@ -539,7 +565,7 @@ public class ConfigFlowService {
                     resolveDiscoveryTitle(ctx, coordinate),
                     ctx.getEntryUniqueId(),
                     ctx.getCurrentStep(),
-                    snap.getLastUpdateTime()));
+                    DateTimeUtils.formatInstant(Instant.ofEpochMilli(snap.getLastUpdateTime()))));
         }
         return list;
     }
@@ -661,6 +687,13 @@ public class ConfigFlowService {
             saved = registry.reconfigureEntry(entry.getEntryId(), entry);
             log.info("Reconfigured config entry: {}", saved.getEntryId());
         } else {
+            // 守卫：CREATE_ENTRY 拒绝空 uniqueId（设备身份必须非空）。FlowContext.setEntryUniqueId / ConfigEntryRegistry.createEntry
+            // 均只在 uniqueId 非空时校验唯一性，null/空静默放行 → 历史 saimosen IMPORT_FLOW 产出 uniqueId=null entry（设备身份碰撞）。
+            // 此处 CREATE_ENTRY 终点兜底，严格模式 fail-loud（RECONFIGURE 路径不经此分支，保原非空 uniqueId 不受影响）。
+            if (entry.getUniqueId() == null || entry.getUniqueId().isEmpty()) {
+                throw new ConfigFlowException("CREATE_ENTRY 拒绝空 uniqueId（设备身份必须非空，请检查 flow 的 setEntryUniqueId）：entryId="
+                    + entry.getEntryId() + ", coordinate=" + entry.getCoordinate());
+            }
             saved = registry.createEntry(entry);
             log.info("Created config entry: {} (source={})", saved.getEntryId(),
                     flow != null ? flow.getSourceType() : SourceType.USER);

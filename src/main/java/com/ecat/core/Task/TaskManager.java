@@ -22,10 +22,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 import com.ecat.core.Integration.IntegrationBase;
+import com.ecat.core.Utils.Log;
+import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Mdc.MdcExecutorService;
 import com.ecat.core.Utils.Mdc.MdcScheduledExecutorService;
 
@@ -58,6 +61,29 @@ public class TaskManager {
     private final List<ExecutorService> managedExecutors = new CopyOnWriteArrayList<>();
 
     private static final int THREAD_POOL_SIZE = 2;
+
+    private static final Log log = LogFactory.getLogger(TaskManager.class);
+
+    public TaskManager() {
+        // [ADM-DELAY-DIAG] 临时诊断：用独立 daemon 线程周期采样全局调度池（ecat-scheduled，仅 2 线程，
+        // 承载所有设备 readAndUpdate）的活跃数/队列积压/已完成数，证/否"批量 provision 设备 readAndUpdate
+        // 任务长期滞留队列致延迟 poll"。用独立 executor（非被监控池）确保池饱和期也能采样。定位后移除。
+        ScheduledExecutorService diag = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "adm-delay-diag");
+            t.setDaemon(true);
+            return t;
+        });
+        diag.scheduleAtFixedRate(this::dumpGlobalPoolStats, 5, 15, TimeUnit.SECONDS);
+        managedExecutors.add(diag);
+    }
+
+    private void dumpGlobalPoolStats() {
+        if (rawExecutorService instanceof ScheduledThreadPoolExecutor) {
+            ScheduledThreadPoolExecutor pool = (ScheduledThreadPoolExecutor) rawExecutorService;
+            log.info("[ADM-DELAY-DIAG] global scheduler ecat-scheduled: active={}, queueSize={}, completed={}",
+                    pool.getActiveCount(), pool.getQueue().size(), pool.getCompletedTaskCount());
+        }
+    }
 
     /**
      * @deprecated Use {@link #getMdcScheduledExecutorService()} instead.

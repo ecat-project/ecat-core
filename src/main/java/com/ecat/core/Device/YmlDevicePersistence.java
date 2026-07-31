@@ -213,6 +213,8 @@ public class YmlDevicePersistence implements DevicePersistence {
                 .updateTime(parseTime(map.get("updateTime")))
                 // 旧 yml 无 deleted 键时读为 false（向后兼容：历史记录视为未删除）
                 .deleted(Boolean.TRUE.equals(map.get("deleted")))
+                // 旧 yml 无 disabled 键时读为 false（向后兼容：历史记录视为未禁用）
+                .disabled(Boolean.TRUE.equals(map.get("disabled")))
                 .build();
     }
 
@@ -228,6 +230,7 @@ public class YmlDevicePersistence implements DevicePersistence {
         map.put("createTime", formatTime(r.getCreateTime()));
         map.put("updateTime", formatTime(r.getUpdateTime()));
         map.put("deleted", r.isDeleted());
+        map.put("disabled", r.isDisabled());
         return map;
     }
 
