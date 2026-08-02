@@ -382,6 +382,7 @@ public class AQCombineAttributeTest {
         BusRegistry mockBusRegistry = mock(BusRegistry.class);
 
         when(mockDevice.getCore()).thenReturn(mockCore);
+        when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
         when(mockCore.getBusRegistry()).thenReturn(mockBusRegistry);
 
         noxAttr.setDevice(mockDevice);
@@ -425,6 +426,7 @@ public class AQCombineAttributeTest {
         BusRegistry mockBusRegistry = mock(BusRegistry.class);
 
         when(mockDevice.getCore()).thenReturn(mockCore);
+        when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
         when(mockCore.getBusRegistry()).thenReturn(mockBusRegistry);
 
         noxAttr.setDevice(mockDevice);
@@ -459,6 +461,7 @@ public class AQCombineAttributeTest {
         BusRegistry mockBusRegistry = mock(BusRegistry.class);
 
         when(mockDevice.getCore()).thenReturn(mockCore);
+        when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
         when(mockCore.getBusRegistry()).thenReturn(mockBusRegistry);
 
         noxAttr.setDevice(mockDevice);

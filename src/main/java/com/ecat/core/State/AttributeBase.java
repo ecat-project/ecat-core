@@ -483,56 +483,64 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      *（避免值新/状态旧的瞬态撕裂态被持久化）。
      */
     public boolean publicState() {
-        if(this.isValueUpdated){
-            try {
-                if (device == null) {
-                    // 属性未注册到设备时（如单元测试中），无法发布总线事件
-                    log.warn("Attribute '{}' is not registered to any device, skip publicState", this.getAttributeID());
-                    return true;
-                }
-                if (!device.isReady()) {
-                    // ready gate：设备未就绪（init 期/restore 期）。挂起发布、保留 midState+isValueUpdated，
-                    // 待 DeviceBase.markReady() 统一 flush——使首发的 state 是 restorePersistedState 之后的最终态
-                    //（持久化值优先于 config/默认派生值），并避免 init 期多次 updateValue 逐条发孤儿事件。
-                    // 注：稳定 id 已由 DeviceBase.load 在 init 之前解析（resolveStableId），故此处与 id 无关。
-                    return true;
-                }
-                AttrState<T> newState = this.midState;
-                if (newState == null) {
-                    // 无在途变更（device 未附着或从未 updateValue/setStatus），无可发布内容
-                    return true;
-                }
-                // context 取自 eventContext（null 兜底设备轮询——setValueUpdated(true) 公开入口可能绕过 updateValue）
-                EventContext ctx = (this.eventContext != null)
-                        ? this.eventContext
-                        : EventContext.root(EventContext.Source.DEVICE_POLL, null);
-                // 持久化（commit 点，独立 try）：此时 getState() 返回在途 midState（本周期 value+status 已 settle 的 coherent 态）。
-                // 放在发布前、移位前——无总线或发布失败时仍保证持久化。
-                if (persistable && device.getCore() != null) {
-                    try {
-                        device.getCore().getStateManager().saveState(device, this);
-                    } catch (Exception e) {
-                        log.error("Failed to persist state for attribute " + attributeID, e);
-                    }
-                }
-                // 发布总线事件：old=lastState（上次提交），new=midState（本次在途）。
-                // 失败抛到外层 catch → publicState 返回 false（保留发布失败可感知契约；未移位，下次 publicState 可重试）。
-                // midState 的 deviceId 与 device.getId() 一致（DeviceBase.load 已在 init/buildState 前解析稳定 id）。
-                DeviceDataChangedEvent change = new DeviceDataChangedEvent(
-                        device.getId(), attributeID, this.lastState, newState);
-                BusEvent<DeviceDataChangedEvent> event = BusEvent.of(
-                        BusTopic.DEVICE_DATA_UPDATE.getTopicName(), change, ctx);
-                device.getCore().getBusRegistry().publish(event);
-                // 发布成功后移位提交：previous←last, last←mid(已提交), mid=null
-                this.previousState = this.lastState;
-                this.lastState = newState;
-                this.midState = null;
-            } catch (Exception e) {
-                log.error("Failed to publish attribute state " + this.getAttributeID() + " for device " + device.getId(), e);
-                return false;
-            }
-            this.setValueUpdated(false);
+        if(!this.isValueUpdated){
+            // 无在途变更，无可发布内容（早返回，不触门禁）
+            return true;
         }
+        if (device == null) {
+            // 属性未注册到设备时（如单元测试中），无法发布总线事件
+            log.warn("Attribute '{}' is not registered to any device, skip publicState", this.getAttributeID());
+            return true;
+        }
+        if (!device.isReady()) {
+            // 硬门禁（替代原软挂起的 return-true）：设备未就绪（phase < READY）即 publish 是垃圾代码——
+            // 全工作区已无合法预 ready publisher（初值统一在 start() 设、逻辑设备 init 期 updateValue 刻意
+            // 早于 setAttribute 致 device=null 不建 midState），故此处抛而非挂起，让错误当场暴露。
+            // 抛在 try 外：不被下方 catch(Exception) 吞掉，midState/isValueUpdated 原样保留待 markReady flush。
+            // 注：稳定 id 已由 DeviceBase.load 在 init 之前解析（resolveStableId），故此处与 id 无关。
+            throw new IllegalStateException(
+                "设备未就绪（phase=" + device.getPhase() + "），禁止发布 attr " + attributeID
+                + "；初值应设在 start()（markReady 之后），不得在 createAttributes/init 预 ready 期 publish");
+        }
+        AttrState<T> newState = this.midState;
+        if (newState == null) {
+            // 无在途 midState（理论上 isValueUpdated=true 时不会到此），无可发布内容
+            return true;
+        }
+        // context 取自 eventContext（null 兜底设备轮询——setValueUpdated(true) 公开入口可能绕过 updateValue）
+        EventContext ctx = (this.eventContext != null)
+                ? this.eventContext
+                : EventContext.root(EventContext.Source.DEVICE_POLL, null);
+        // 持久化（commit 点，独立于下方发布 try）：此时 midState 是本周期 value+status 已 settle 的 coherent 态。
+        // 放在发布前、移位前——保证持久化先于总线发布。持久化失败属系统级故障（磁盘/DB/序列化），
+        // 抛出带属性/device 上下文的 RuntimeException 暴露给上层定位，绝不静默吞成日志（吞系统级故障会拖死维护者）。
+        // 抛在发布 try 外：不被下方 publish 的 catch(Exception) 二次吞掉。
+        if (persistable && device.getCore() != null) {
+            try {
+                device.getCore().getStateManager().saveState(device, this);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                    "持久化属性 " + attributeID + " 状态失败（device=" + device.getId() + "）", e);
+            }
+        }
+        try {
+            // 发布总线事件：old=lastState（上次提交），new=midState（本次在途）。
+            // 失败抛到本 catch → publicState 返回 false（保留发布失败可感知契约；未移位，下次 publicState 可重试）。
+            // midState 的 deviceId 与 device.getId() 一致（DeviceBase.load 已在 init/buildState 前解析稳定 id）。
+            DeviceDataChangedEvent change = new DeviceDataChangedEvent(
+                    device.getId(), attributeID, this.lastState, newState);
+            BusEvent<DeviceDataChangedEvent> event = BusEvent.of(
+                    BusTopic.DEVICE_DATA_UPDATE.getTopicName(), change, ctx);
+            device.getCore().getBusRegistry().publish(event);
+            // 发布成功后移位提交：previous←last, last←mid(已提交), mid=null
+            this.previousState = this.lastState;
+            this.lastState = newState;
+            this.midState = null;
+        } catch (Exception e) {
+            log.error("Failed to publish attribute state " + this.getAttributeID() + " for device " + device.getId(), e);
+            return false;
+        }
+        this.setValueUpdated(false);
         return true;
     }
 

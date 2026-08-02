@@ -477,30 +477,70 @@ public abstract class DeviceBase implements DeviceControl {
     }
 
     /**
-     * 设备就绪标志（ready gate）：false 期间（init 期/构造期/未完成 register+restore），
-     * {@link AttributeBase#publicState()} 挂起发布但保留 midState，避免用未解析的临时 deviceId 发孤儿事件
-     * （{@code null value in column "type"} 撞 NOT NULL，bug-record-20260801-071800）。
+     * 设备生命周期阶段（READY 门禁的状态机）。初始 {@link DevicePhase#CONSTRUCTED}。
      *
-     * <p>由框架在生命周期统一收口点调 {@link #markReady()} 翻 true（物理 finalizeNewDevice、逻辑 finalizeLogicDevice，
-     * 均在 restorePersistedState 之后）——调用方只调一次 markReady，flush 内置，不让使用者记两步。
+     * <p>{@link AttributeBase#publicState()} 在 {@code phase < READY} 时抛 {@link IllegalStateException}
+     * （硬门禁，替代原 boolean ready 的软挂起）。phase 写入唯一公开入口是 {@link #markReady()}（final）。
+     * load/init/restore/start 等可被集成 override 的方法**不**推进 phase——把推进放进它们会随 override 漏推进
+     * 而失效（load 今天被 ~48 个集成 override）。中间态（LOADED..STARTED）的接线留给 final 模板迁移，
+     * 故当前仅 CONSTRUCTED→READY 经 markReady；publish 门禁只依赖 READY 边界，独立成立。详见 {@link DevicePhase}。
+     *
+     * <p>取值（诊断/状态机用）走 {@link #getPhase()}；判断设备就绪走 {@link #isReady()}，勿用 phase 直比。
      */
-    private boolean ready = false;
+    @Getter
+    private DevicePhase phase = DevicePhase.CONSTRUCTED;
 
-    /** 设备是否已就绪（register+restore 完成，可安全用稳定 id 发布总线事件）。 */
+    /**
+     * 设备是否已就绪（phase &gt;= READY，即 markReady 已调）。
+     *
+     * <p>语义糖：等价 {@code getPhase().compareTo(DevicePhase.READY) >= 0}。供 {@link AttributeBase#publicState()}
+     * 门禁与既有调用方使用；对 mock 设备可直接 stub 本方法。
+     */
     public boolean isReady() {
-        return ready;
+        return phase.compareTo(DevicePhase.READY) >= 0;
     }
 
     /**
-     * 标记设备就绪并 flush init 期挂起的发布。
-     *
-     * <p>封装"翻标志 + flush"两步：调用方只调本方法一次，{@link #flushPendingPublishes()} 内置——
-     * 框架封装的不要让子类/集成记两步（设计原则）。须在 {@link #restorePersistedState()} 之后调用，
-     * 使 flush 发出的是"最终态"（持久化值优先，否则 config 派生值），单次稳定 id 首发，避免默认值→持久值双发。
+     * 严格推进到 READY：当前 phase 必须 &lt; READY（尚未就绪、未终态），否则抛 {@link IllegalStateException}。
+     * 挡两类错：重复 markReady（已 READY/STARTED）、终态后误就绪（DISABLED/REMOVED）。严格模式不静默兜底。
      */
-    public void markReady() {
-        this.ready = true;
+    private void transitionToReady() {
+        if (this.phase.compareTo(DevicePhase.READY) >= 0) {
+            throw new IllegalStateException(
+                "设备生命周期非法迁移：当前 phase=" + this.phase + " 已就绪或已终态，不可重复 markReady"
+                + "（deviceId=" + getId() + "）");
+        }
+        this.phase = DevicePhase.READY;
+    }
+
+    /**
+     * 标记设备就绪：推进 phase + 排空预 ready 挂起发布 + 子类就绪期回调。
+     *
+     * <p>final——禁止集成 override 抢先就绪（phase=READY 唯一写入点）。封装三步，调用方只调一次：
+     * <ol>
+     *   <li>{@link #transitionToReady()}——phase → READY，publish 门禁放开；</li>
+     *   <li>{@link #flushPendingPublishes()}——排空预 ready 期被门禁挂起的源属性 midState（因）；</li>
+     *   <li>{@link #onReady()}——子类就绪期计算（果）：aggregate 等"需 device 就绪才能算+发"的派生初值
+     *       在此统一算并发布。因先于果——源属性已在 ② 提交，aggregate 读到的是已提交因果态。</li>
+     * </ol>
+     * 须在 {@link #restorePersistedState()} 之后调用（物理 finalizeNewDevice / 逻辑 finalizeLogicDevice，
+     * 均如此编排），使 flush 发出"最终态"（持久化值优先，否则 config 派生值），单次稳定 id 首发。
+     */
+    public final void markReady() {
+        transitionToReady();
         flushPendingPublishes();
+        onReady();
+    }
+
+    /**
+     * 设备就绪期回调：phase 已 READY、预 ready 挂起已排空后触发，供子类做就绪期计算。
+     *
+     * <p>典型用途——逻辑设备的 aggregate 属性（alarm_status/running_status 等）依赖源数据属性，
+     * 其初始值计算（{@code setupAfterDeviceAttrsCreated → updateBindAttrValue}）会调 publicState，
+     * 必须在 device 就绪后执行才能过 publish 硬门禁；故从 init 期挪到本回调。物理设备默认不覆写
+     * （初值在 start() 设，不依赖此钩子）。默认 no-op。
+     */
+    protected void onReady() {
     }
 
     /**
@@ -532,16 +572,16 @@ public abstract class DeviceBase implements DeviceControl {
      * 按需更新，只有属性值发生变化时才更新
      */
     public boolean publicAttrsState() {
-        try{
-            for (AttributeBase<?> attribute : attrs.values()) {
-                attribute.publicState();
+        boolean allOk = true;
+        for (AttributeBase<?> attribute : attrs.values()) {
+            // 不吞异常：publicState 抛的就绪门禁 IllegalStateException = 设备未 READY 即 publish 的设计缺陷，
+            // 直接冒泡让运行时暴露，绝不静默 log+return（吞异常会掩盖设计问题、拖死后续维护者）。
+            // publicState 内部的落盘/总线发布失败由其自身处理（落盘失败抛出、发布失败返回 false 可重试），此处仅聚合结果。
+            if (!attribute.publicState()) {
+                allOk = false;
             }
         }
-        catch (Exception e){
-            log.error(I18nHelper.t("error.failed_to_update_state"), e);
-            return false;
-        }
-        return true;
+        return allOk;
     }
 
     /**

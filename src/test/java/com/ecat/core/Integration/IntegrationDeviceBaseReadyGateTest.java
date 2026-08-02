@@ -48,11 +48,11 @@ import static org.mockito.Mockito.when;
  * ready gate 生命周期收口（Phase 1.3）：IntegrationDeviceBase.createEntry 必须在 register+restore 之后
  * 调 markReady，使 init 期默认值发布被门禁挂起、最终用 getOrCreate 解析的稳定 id 单次 flush。
  *
- * <p>端到端守护：预铸持久化稳定 id（≠ 构造临时 UUID），init() 内 publicState 一个默认值；
- * createEntry 完成后断言——① 设备 isReady；② 恰 1 个 DeviceDataChangedEvent；③ 其 deviceId == 稳定 id
- * （非 init 期临时 UUID）。任一缺失即回归：漏 markReady → isReady=false + 0 事件；门禁失效 → 临时 id 事件混入。
- *
- * <p>当前 RED：createEntry 未调 markReady（isReady=false、flush 未发）。
+ * <p>端到端守护：预铸持久化稳定 id（≠ 构造临时 UUID），init() 内对一个属性 updateValue 建 midState（不显式
+ * publicState——硬门禁下预 ready publish 会抛）；createEntry（finalizeNewDevice）markReady 时 flushPendingPublishes
+ * 用 getOrCreate 解析的稳定 id 单次发布。createEntry 完成后断言——① 设备 isReady；② 恰 1 个
+ * DeviceDataChangedEvent；③ 其 deviceId == 稳定 id（非构造临时 UUID）。任一缺失即回归：漏 markReady →
+ * isReady=false + 0 事件（midState 永不 flush）。
  */
 public class IntegrationDeviceBaseReadyGateTest {
 
@@ -100,19 +100,19 @@ public class IntegrationDeviceBaseReadyGateTest {
                 DeviceBase d = new DeviceBase(entry) {
                     @Override
                     public void init() {
-                        // 模拟 init 期设默认值并 publicState（setDisplayValue→setValue→publicState 链）
+                        // init 期 updateValue 建 midState（不显式 publicState——硬门禁下预 ready publish 抛）；
+                        // midState 保留，待 markReady 的 flushPendingPublishes 用稳定 id 单次发布。
                         com.ecat.core.Device.TestPhyDeviceHelper.TestPhyAttr a =
                             new com.ecat.core.Device.TestPhyDeviceHelper.TestPhyAttr("def");
                         setAttribute(a);
                         a.updateValue(1.0, AttributeStatus.NORMAL);
-                        a.publicState();   // 未 READY：应被门禁挂起（0 事件、midState 保留）
                     }
                     @Override public void start() {}
                     @Override public void stop() {}
                     @Override public void release() {}
                 };
                 d.load(mockCore);
-                d.init();   // 物理集成约定：createDeviceFromEntry 内 load+init（init 期 publicState 被门禁挂起）
+                d.init();   // 物理集成约定：createDeviceFromEntry 内 load+init（init 期建 midState，未发布）
                 return d;
             }
         };
@@ -132,7 +132,7 @@ public class IntegrationDeviceBaseReadyGateTest {
             .filter(e -> e.getPayload() instanceof DeviceDataChangedEvent)
             .map(e -> (DeviceDataChangedEvent) e.getPayload())
             .collect(Collectors.toList());
-        assertEquals("init 默认值应被门禁挂起、仅 markReady flush 单次", 1, dataEvents.size());
+        assertEquals("init 期建的 midState 应由 markReady flush 单次发布", 1, dataEvents.size());
         assertEquals("flush 事件必须用稳定 id（非 init 期临时 UUID）", stableId, dataEvents.get(0).getDeviceId());
     }
 }

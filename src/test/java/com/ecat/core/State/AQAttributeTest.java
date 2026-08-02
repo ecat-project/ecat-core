@@ -44,6 +44,7 @@ public class AQAttributeTest {
         when(mockAttrClass.getDisplayName()).thenReturn("AQAttrClass");
         when(mockAttrClass.isValidUnit(any())).thenReturn(true);
         when(mockDevice.getId()).thenReturn("mockDeviceId");
+        when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
         nativeUnit = AirMassUnit.MGM3;
         displayUnit = AirMassUnit.MGM3;
         attr = new AQAttribute(

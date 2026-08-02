@@ -122,6 +122,7 @@ public class CommandAttributeTest {
         attr = new TestCommandAttribute("cmd1", mockAttrClass, commands);
         // mock DeviceBase 以避免 getDevice().getId() NPE
         when(mockDevice.getId()).thenReturn("mockDeviceId");
+        when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
         attr.setDevice(mockDevice);
     }
 

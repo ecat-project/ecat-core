@@ -107,6 +107,11 @@ public class TestPhyDeviceHelper {
             super(attributeID, AttributeClass.VALUE, null, null, 0, false, false);
         }
 
+        /** 指定 persistable 的构造：供持久化失败/恢复路径测试用。 */
+        public TestPhyAttr(String attributeID, boolean persistable) {
+            super(attributeID, AttributeClass.VALUE, null, null, 0, false, false, persistable, null, null);
+        }
+
         @Override
         public String getDisplayValue(UnitInfo toUnit) { return null; }
 

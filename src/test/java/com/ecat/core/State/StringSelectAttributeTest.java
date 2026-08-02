@@ -118,6 +118,7 @@ public class StringSelectAttributeTest {
 
         TestTools.setPrivateField(attr, "device", mockDevice);
         when(mockDevice.getCore()).thenReturn(mockEcatCore);
+        when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
         when(mockEcatCore.getBusRegistry()).thenReturn(mockBusRegistry);
         doNothing().when(mockBusRegistry).publish(any(BusEvent.class));
     }

@@ -89,6 +89,7 @@ public class StringCommandAttributeTest {
         commands = Arrays.asList("ON", "OFF", "RESET");
         attr = new TestStringCommandAttribute("cmd1", mockAttrClass, commands);
         when(mockDevice.getId()).thenReturn("mockDeviceId");
+        when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
         attr.setDevice(mockDevice);
     }
 

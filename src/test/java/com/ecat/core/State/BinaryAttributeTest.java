@@ -35,6 +35,7 @@ public class BinaryAttributeTest {
         MockitoAnnotations.openMocks(this);
         when(mockAttrClass.getDisplayName()).thenReturn("开关");
         when(mockDevice.getId()).thenReturn("testDeviceId");
+        when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
         // mockCallback 需要模拟 apply 返回，否则 asyncTurnOn/asyncTurnOff 会 NPE
         when(mockCallback.apply(any())).thenReturn(CompletableFuture.completedFuture(true));
         attr = new BinaryAttribute(
