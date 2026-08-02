@@ -155,19 +155,41 @@ public class DeviceRegistry implements IDeviceQuery {
     }
 
     /**
-     * 解析稳定 deviceId 并注册。命中 matchIndex（同 coordinate+uniqueId）则用 {@link DeviceBase#setId}
-     * 覆盖构造铸造的默认 UUID，否则保留新 UUID；随后 {@link #commit} 落库+建索引+发事件。
-     * <p>跨重启稳定的核心：重启后构造铸造新 UUID，getOrCreate 用持久化 id 覆盖 → deviceId 不变。
+     * 解析稳定 deviceId（仅 matchIndex→setId，不 commit/不持久化/不发事件）。两个分支都正确：
+     * <ul>
+     *   <li><b>matchIndex 命中</b>（同 coordinate+uniqueId 曾注册过——重启恢复/reconfigure 重建）：
+     *       setId(持久化稳定 id)，把构造铸造的临时 UUID 替换为跨重启稳定值。这是 type=null 根源场景：
+     *       原 setId 发生在 getOrCreate（init 之后），midState 已烘焙临时 id；现前移到 DeviceBase.load
+     *       （init 之前），midState 从诞生起带稳定 id。</li>
+     *   <li><b>matchIndex 未命中</b>（首次创建，全新设备）：不做任何事，id 保留构造铸造的 UUID。
+     *       该 UUID 虽随机生成，但此后永不再变（无后续 setId）→ 它就是这台新设备的稳定 id。
+     *       buildState 烘焙它、commit 用它做 registry key，二者天然一致，消费侧反查命中。
+     *       bug 本质不是"临时 UUID 不好"，而是"id 在 buildState 与 publish 之间被改写"；未命中分支无改写，天然正确。</li>
+     * </ul>
      *
-     * @param device 待注册设备（getId 已被构造铸造为默认 UUID）
+     * <p>幂等：load() 已解析过的设备，getOrCreate 再调结果相同（两者之间无 commit 改变 matchIndex）。
+     * matchIndex 是 final 字段非 null；调用方 {@link DeviceBase#load} 已对 registry==null（mock core）做了守卫。
+     * 设计文档 docs/2026-08-01-device-id-stable-before-state-design.md。
+     */
+    void resolveStableId(DeviceBase device) {
+        String stableId = matchIndex.get(matchKey(device.getCoordinate(), device.getUniqueId()));
+        if (stableId != null) {
+            device.setId(stableId); // 包级私有 setId：命中持久化 id 时覆盖构造铸造的临时 UUID（前移到此，先于 init/buildState）
+        }
+        // 未命中：首次创建，构造 UUID 即稳定 id（永不再变），保留不动
+    }
+
+    /**
+     * 解析稳定 deviceId 并注册。{@link #resolveStableId} 解析 id（DeviceBase.load 通常已解析过，此处幂等），
+     * 随后 {@link #commit} 落库+建索引+发事件。
+     * <p>跨重启稳定的核心：重启后构造铸造新 UUID，resolveStableId 用持久化 id 覆盖 → deviceId 不变。
+     *
+     * @param device 待注册设备（getId 已被构造铸造为默认 UUID；若 load 已调 resolveStableId 则已是稳定值）
      * @param action 事件意图（create/enable→CREATE，reconfigure→RECONFIGURE）
      * @return 注册后的设备（id 已解析为稳定值）
      */
     public DeviceBase getOrCreate(DeviceBase device, DeviceLifecycleEvent.Action action) {
-        String existing = matchIndex.get(matchKey(device.getCoordinate(), device.getUniqueId()));
-        if (existing != null) {
-            device.setId(existing); // 包级私有 setId：同包 DeviceRegistry 可调，覆盖构造默认 UUID
-        }
+        resolveStableId(device);
         commit(device, action);
         return device;
     }

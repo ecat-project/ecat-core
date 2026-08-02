@@ -490,6 +490,13 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
                     log.warn("Attribute '{}' is not registered to any device, skip publicState", this.getAttributeID());
                     return true;
                 }
+                if (!device.isReady()) {
+                    // ready gate：设备未就绪（init 期/restore 期）。挂起发布、保留 midState+isValueUpdated，
+                    // 待 DeviceBase.markReady() 统一 flush——使首发的 state 是 restorePersistedState 之后的最终态
+                    //（持久化值优先于 config/默认派生值），并避免 init 期多次 updateValue 逐条发孤儿事件。
+                    // 注：稳定 id 已由 DeviceBase.load 在 init 之前解析（resolveStableId），故此处与 id 无关。
+                    return true;
+                }
                 AttrState<T> newState = this.midState;
                 if (newState == null) {
                     // 无在途变更（device 未附着或从未 updateValue/setStatus），无可发布内容
@@ -510,6 +517,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
                 }
                 // 发布总线事件：old=lastState（上次提交），new=midState（本次在途）。
                 // 失败抛到外层 catch → publicState 返回 false（保留发布失败可感知契约；未移位，下次 publicState 可重试）。
+                // midState 的 deviceId 与 device.getId() 一致（DeviceBase.load 已在 init/buildState 前解析稳定 id）。
                 DeviceDataChangedEvent change = new DeviceDataChangedEvent(
                         device.getId(), attributeID, this.lastState, newState);
                 BusEvent<DeviceDataChangedEvent> event = BusEvent.of(

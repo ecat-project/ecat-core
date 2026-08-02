@@ -176,6 +176,7 @@ public class AQAttributeTest {
         // Test successful attribute state publication
         DeviceBase device = mock(DeviceBase.class, RETURNS_DEEP_STUBS);
         when(device.getId()).thenReturn("mockDeviceId");
+        when(device.isReady()).thenReturn(true);   // ready gate：READY 才发布
         attr.setDevice(device);
 
         BusRegistry mockBusRegistry = mock(BusRegistry.class);
@@ -195,6 +196,7 @@ public class AQAttributeTest {
         // Test failed attribute state publication
         DeviceBase device = mock(DeviceBase.class);
         when(device.getId()).thenReturn("mockDeviceId");
+        when(device.isReady()).thenReturn(true);   // ready gate：READY 才发布（失败路径仍需先过门禁）
         attr.setDevice(device);
         // updateValue 构建 lastState 后，publicState 才会进入发布分支触发 device.getCore()
         assertTrue(attr.updateValue(111.11));

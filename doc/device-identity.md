@@ -21,7 +21,7 @@
 | 标识 | 核心定位 | 生成主体 | 可变性 | 典型格式 | 核心用途 |
 |---|---|---|---|---|---|
 | **entryId** | 配置记录（ConfigEntry）主键 | ConfigEntryRegistry 创建时铸造 UUID | 删除重建则变 | UUID | 配置条目 CRUD、ConfigFlow 追踪、entry 生命周期事件 |
-| **deviceId** | **设备（Device）主键** | core 在设备首次注册时铸造 UUID，`DeviceRegistry` yml 持久化 | **永久不可变**（跨重启/重配/禁启用稳定） | UUID | 设备注册表 key、事件载荷、历史数据 FK、数据/逻辑绑定 |
+| **deviceId** | **设备（Device）主键** | `DeviceBase` 构造铸造临时 UUID；`DeviceBase.load()` 调 `DeviceRegistry.resolveStableId` 用 yml 持久化值覆盖（早于 init/state 物化）；`DeviceRegistry` yml 持久化 | **永久不可变**（跨重启/重配/禁启用稳定） | UUID | 设备注册表 key、事件载荷、历史数据 FK、数据/逻辑绑定 |
 | **uniqueId** | 硬件锚点（物理设备一对一） | 集成从硬件读（序列号/MAC 等） | 硬件决定，不可改 | 自由（厂家+sn 等） | **coordinate 内**重复发现去重、物理匹配 |
 | **attrId** | 属性标识 | 设备定义（每个测点一个） | 设备类型固定 | 字符串（如 `so2_concentration`） | 属性级数据读写、绑定 |
 
@@ -81,8 +81,10 @@ ConfigEntry "网关 gw-001" (entryId=E1)
 - **不要**拿 entryId 当设备主键（旧模型错点，已废弃）。
 
 ### deviceId —— 设备的永久主键（本轮新引入的核心）
-- 谁：`DeviceBase` 构造时铸造 UUID；`DeviceRegistry.getOrCreate` 用 yml 持久化的值覆盖构造值，保证跨重启稳定。
-- 不变：删除设备再加（同硬件 uniqueId）→ `getOrCreate` 命中持久化记录 → **同一个 deviceId 复原**；重配（reconfigure）、禁用/启用同理保活。
+- 谁：`DeviceBase` 构造时铸造临时 UUID；`DeviceBase.load(core)` 立即调 `DeviceRegistry.resolveStableId`——命中 yml 持久化记录则 `setId` 覆盖为稳定值，**早于 init/updateValue/buildState 物化任何 AttrState**。`getOrCreate` 内部即 `resolveStableId + commit` 两步。
+- 为什么 resolve 必须在 load：init 的 `updateValue/buildState` 会把 `device.getId()` 烘进不可变 `AttrState.deviceId`。若 resolve（setId）晚于 buildState（如旧实现放在 getOrCreate 内），id 突变后已物化的 midState 仍带临时 id → ready-gate flush 发布带临时 id 的事件 → 消费侧 `getDeviceByID(临时id)=null` → valueType/type 解析为 null（详见 §10）。
+- 未命中（首次创建）：构造 UUID 永不再被 setId 改写，它本身就是稳定 id——所以"命中覆盖"与"未命中保留"两分支都自洽。
+- 不变：删除设备再加（同硬件 uniqueId）→ 命中持久化记录 → **同一个 deviceId 复原**；重配（reconfigure 经 `replace`）、禁用/启用同理保活。
 - 用：
   - 设备注册表 key（`DeviceRegistry`、`UnifiedDeviceStore`、集成本地 `devices` map 全以 deviceId 为键）
   - **事件载荷**：`DEVICE_LIFECYCLE`、`DeviceDataChangedEvent` 都带 deviceId
@@ -114,14 +116,13 @@ ConfigEntry "网关 gw-001" (entryId=E1)
 
 ---
 
-## 5. LogicDevice 豁免（特例）
+## 5. LogicDevice 与物理设备同机制（无特例）
 
-逻辑设备（LogicDevice，如 airdevice/airstation 的聚合设备）**不走 deviceId 铸造**：
-- `LogicDevice.getId()` 覆盖返回 `getUniqueId()`（确定性，不铸 UUID）。
-- 不发 `DEVICE_LIFECYCLE` 事件（其生命周期随物理设备/配置）。
-- 原因：LogicDevice 是确定性派生设备，用 uniqueId 作 id 足够稳定，且避免与物理 deviceId 体系混淆。
+逻辑设备（LogicDevice，如 airdevice/airstation 的聚合设备）**与物理设备走完全相同的 deviceId 机制**——早期设计（D5，2026-07-17）曾让 `LogicDevice.getId()` 覆盖返回 `getUniqueId()` 作特例，该豁免在 2026-07-18 DeviceRegistry 统一重构中**已撤销**：
+- LogicDevice **不** override `getId()`/`setId()`（仅 override `init()`、`replaceAttrWithPlaceholder`），构造铸造 UUID，`load()` 经 `resolveStableId` 覆盖为持久化稳定值——与物理设备一字不差。
+- 与物理设备的唯一差异：LogicDevice **不发 `DEVICE_LIFECYCLE` 事件**（其生命周期随物理设备/配置派生，由 `LogicdeviceIntegration` 内部编排 createEntry→init→register→finalizeLogicDevice）。
 
-> 对使用方而言：物理设备用 `getId()`=deviceId；LogicDevice 用 `getId()`=uniqueId。**消费方一般不需要区分**——getId() 返回的就是该设备的稳定主键。
+> 对使用方而言：`getId()` 对物理设备与 LogicDevice 都返回该设备的稳定 deviceId（铸造 UUID，可能已被 resolveStableId 覆盖为持久化值）。消费方无需区分设备种类。
 
 ---
 
@@ -145,7 +146,7 @@ ConfigEntry "网关 gw-001" (entryId=E1)
 
 ```java
 // DeviceBase
-device.getId();          // deviceId（物理=铸造UUID；LogicDevice=uniqueId）
+device.getId();          // deviceId（铸造UUID，load 时可能已被 resolveStableId 覆盖为持久化值；物理/逻辑设备同）
 device.getUniqueId();    // uniqueId（硬件锚点）
 device.getEntry();       // 所属 ConfigEntry（.getEntryId() = entryId，back-ref）
 
@@ -154,9 +155,12 @@ store.getDeviceByID(deviceId);                       // 按设备主键
 store.getDeviceByUniqueId(coordinate, uniqueId);     // 按硬件锚点（域化，2 参）
 store.findDevicesByEntryId(entryId);                 // 1:N 网关枚举
 
-// 设备注册（DeviceRegistry）
-registry.getOrCreate(device, Action.CREATE);         // 铸/复原稳定 deviceId + 发 DEVICE_LIFECYCLE
-registry.unregister(device, deleteRecord);           // deleteRecord=false 软移除（保记录，供 enable 恢复）
+// 设备注册/移除（DeviceRegistry，Phase4 正交化后的 API）
+registry.getOrCreate(device, Action.CREATE);         // resolveStableId（铸/复原稳定 id）+ commit（注册+发 DEVICE_LIFECYCLE）
+registry.replace(oldDevice, newDevice);              // reconfigure：解析 new→old 稳定 id + 单 RECONFIGURE 事件
+registry.disable(device);                            // 软移除：保 yml+matchIndex+state，发 REMOVE（供 enable 恢复）
+registry.remove(device);                             // 逻辑删：保 matchIndex+state，发 REMOVE（供同 uniqueId 重建复原 id）
+registry.purge(device);                              // 物理删：彻底清除记录与 state（一般不用）
 
 // 事件
 BusTopic.DEVICE_LIFECYCLE  // topic = "device.lifecycle"
@@ -175,7 +179,64 @@ DeviceLifecycleEvent{ deviceId, coordinate, entryId, Action{CREATE,RECONFIGURE,R
 
 ---
 
-## 9. 参考
+## 9. 实施状态与验证（2026-08-01：稳定 id 前置于 state 物化）
+
+### 9.1 修复的根因（id 突变 + 陈旧 midState）
+
+`realdata.type=null` 撞 DB NOT NULL 的真因**不是**"逻辑设备 registry 域不可解析"（旧 bug-record 的错误结论，已订正），而是 **device id 突变 + 陈旧 midState**：
+
+1. 构造：`this.id = UUID.randomUUID()`（临时）。
+2. init：`updateValue → buildState` 把临时 id 烘进不可变 `midState.deviceId`。
+3. 注册：`getOrCreate` 内 `setId(稳定id)` 改写 `device.id`，但 **midState 不重建**（不可变，已烘死临时 id）。
+4. `markReady` flush：发布带**临时 id** 的陈旧 midState。
+5. 消费侧（env-data-handle）：`registry.getDeviceByID(临时id)=null` → valueType=null → `realdata.type=null`。
+
+### 9.2 修复（resolve-in-load，方案 A）
+
+把 `getOrCreate` 拆为 `resolveStableId`（仅 matchIndex→setId，不 commit）+ `commit`；`DeviceBase.load(core)` 在 init 之前调 `resolveStableId`（core 为 null 的未初始化测试、或 registry 为 null 的 mock-core 测试均跳过——生产 EcatCore 的 registry 是 final 字段永不为 null）。id 稳定**先于** buildState 物化，从根上消除 id 突变。reconfigure 经 `replace` 自动复用旧设备稳定 id，同治。完整决策链见聚合根 `docs/2026-08-01-device-id-stable-before-state-design.md`。
+
+### 9.3 验证状态表
+
+| 验证项 | 结果 |
+|---|---|
+| TDD 红测试 `DeviceIdStableBeforeStateTest` | RED 精确失败（预测的临时 id mismatch）→ GREEN |
+| ecat-core 全量单测 | **1326 tests, 0 failures, 0 errors** |
+| 运行时残留诊断标记（`[诊断调试]`/`[ADM-DELAY-DIAG]`/`MISMATCH`/`type_null_diag`） | 全 0（已彻底清除临时诊断） |
+| `null value in column "type" violates not-null` 错误 | **0**（修前约 129/60 万次发布） |
+| realdata 入库成功 | 持续增长，无 NOT NULL 失败 |
+| core 启动 cwd | workspace 根（避 `core 读错 .ecat-data` 陷阱） |
+
+### 9.4 端到端逻辑链（两个分支都走一遍）
+
+设构造铸造的临时 UUID 记作 `tmp`，matchIndex 命中的持久化 id 记作 `S`。
+
+**分支 1：matchIndex 命中（重启恢复 / reconfigure 重建）——bug 原发场景，修后正确**
+
+| 步骤 | id 字段 | midState.deviceId | registry key |
+|---|---|---|---|
+| 构造 | `tmp` | — | — |
+| load→resolveStableId（命中→setId(S)） | `S` | — | — |
+| init/buildState | `S` | `S` ✓ | — |
+| getOrCreate（幂等命中→setId(S) 同值）→ commit | `S` | `S` | `S` |
+| markReady→flush→publish | — | newState.deviceId=`S` | `S` |
+
+消费侧 `getDeviceByID(S)` ✓ 命中。
+
+**分支 2：matchIndex 未命中（首次创建全新设备）——本就不踩 bug，修后仍正确**
+
+| 步骤 | id 字段 | midState.deviceId | registry key |
+|---|---|---|---|
+| 构造 | `tmp` | — | — |
+| load→resolveStableId（未命中→保留 tmp） | `tmp` | — | — |
+| init/buildState | `tmp` | `tmp` ✓ | — |
+| getOrCreate（幂等未命中→保留 tmp）→ commit | `tmp` | `tmp` | `tmp`（此 tmp 写入 device yml，成为该设备持久化稳定 id） |
+| markReady→flush→publish | — | newState.deviceId=`tmp` | `tmp` |
+
+消费侧 `getDeviceByID(tmp)` ✓ 命中。关键：这个 `tmp` 自构造起永不再变，所以它就是稳定 id——"随机"不等于"不稳定"，"会被改写"才是 bug。
+
+---
+
+## 10. 参考
 - 完整设计决策：`docs/2026-07-17-device-identity-design.md`（D1–D9、§5 生命周期、§11 state 迁移、§12 生命周期事件）
 - 落地方案集：`docs/device-identity-impl/`（00-core + 13 受影响集成 + demo-iot-gateway 试点）
 - 1:N 网关试点代码：`ecat-integrations/demo-iot-gateway/`（`DemoIotGatewayIntegration` + `DemoSensorDevice`）

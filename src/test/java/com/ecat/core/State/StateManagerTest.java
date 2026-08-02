@@ -106,6 +106,9 @@ public class StateManagerTest {
             throw new RuntimeException("Failed to inject StateManager into EcatCore", e);
         }
         device.load(mockCore);
+        // ready gate：publicState 在 device 未就绪时挂起发布（含 commit 点持久化）。
+        // 本测试聚焦 persist 落盘机制，需 device 已就绪，故 setup 即 markReady。
+        device.markReady();
 
         return device;
     }

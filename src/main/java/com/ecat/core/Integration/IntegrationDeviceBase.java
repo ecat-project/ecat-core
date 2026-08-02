@@ -122,14 +122,24 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         if (device != null) {
             // device.load(core) 已在各集成的 createDeviceFromEntry() 中调用
             addDevice(device);                                   // getOrCreate 解析稳定 id + register
-            device.restorePersistedState();                      // 00-core(D9)：addDevice 后批量恢复 state（id 已解析）
-            // [ADM-DELAY-DIAG] 临时诊断：记录 start() 调用时刻与线程，配合 TaskManager 池积压监控，
-            // 定位"批量 provision 设备 readAndUpdate 长期不执行"根因（调度时间 vs 首跑时间之差）。定位后移除。
-            log.info("[ADM-DELAY-DIAG] device.start() invoked for {} on thread {}", device.getId(), Thread.currentThread().getName());
-            device.start();
+            finalizeNewDevice(device);                           // restore 持久态 + markReady(flush init 挂起态) + start
         }
         log.info("Entry created: {}", entry.getUniqueId());
         return entry;
+    }
+
+    /**
+     * 物理设备就绪收口（addDevice 之后）：批量恢复持久化 state → markReady（翻就绪 + flush init 期被门禁挂起的发布，
+     * 用稳定 id 首发）→ start。
+     *
+     * <p>createEntry 与 reconfigureEntry 共用此序列——markReady 单点落在 restorePersistedState 之后，
+     * 使 flush 发出"最终态"（持久化值优先，否则 config 派生值），单次稳定 id 首发，避免默认值→持久值双发。
+     * init 期（addDevice 之前）的 publicState 被 ready gate 挂起、保留 midState 到此处 flush。
+     */
+    protected void finalizeNewDevice(DeviceBase device) {
+        device.restorePersistedState();
+        device.markReady();
+        device.start();
     }
 
     @Override
@@ -164,8 +174,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
             devices.put(newDevice.getId(), newDevice);
             newDevice.setIntegration(this);
         }
-        newDevice.restorePersistedState();   // 读保留的 state DB（id 已复原）
-        newDevice.start();                   // ⑤ 后起新
+        finalizeNewDevice(newDevice);        // restore 保留 state DB（id 已复原）+ markReady + start（⑤ 后起新）
 
         log.info("Entry reconfigured: {}", entryId);
         return newEntry;

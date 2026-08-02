@@ -384,14 +384,31 @@ public abstract class DeviceBase implements DeviceControl {
         this.attrs = new HashMap<>();
     }
 
+    /**
+     * 注入 core 并立即解析稳定 deviceId。
+     *
+     * <p>稳定 id 解析前置于 init/value 物化：load 是 device 拿到 core（从而能查 registry.matchIndex）的第一刻，
+     * 此处 {@link DeviceRegistry#resolveStableId} 解析后，后续 createDeviceFromEntry 里的 init/updateValue/buildState
+     * 物化的 AttrState 必带稳定 id——从根上消除"setId 改写 device.id 后 publicState flush 陈旧 midState
+     * （带构造临时 UUID）→ 消费侧 registry 反查 null → realdata.type=null"。契约：各集成 createDeviceFromEntry
+     * 内须 device.load(core) 早于 device.init()。
+     *
+     * <p>core 可能为测试用 null（未 setInstance 的 EcatCore.getInstance()）或 mock（getDeviceRegistry() 返 null）→ 跳过；
+     * 生产 EcatCore 的 registry 是 final 字段永不为 null，真实路径必解析。详见 docs/2026-08-01-device-id-stable-before-state-design.md。
+     */
     public void load(EcatCore core) {
         this.core = core;
+        if (core == null) return;   // 测试用 null core（未 setInstance）→ 无 registry 可解析，跳过
+        DeviceRegistry registry = core.getDeviceRegistry();
+        if (registry != null) {
+            registry.resolveStableId(this);
+        }
     }
 
     /**
-     * 设备主键 id（core 铸造的稳定 UUID）。全局唯一、跨重启稳定（DeviceRegistry.getOrCreate 用持久化值覆盖）。
-     * 注册表 key、事件载荷、历史 FK、数据/逻辑关联均用此。
-     * <p>LogicDevice 豁免：其覆盖 getId() 返确定性 uniqueId（见 LogicDevice），不走 UUID 铸造。
+     * 设备主键 id（core 铸造的稳定 UUID）。全局唯一、跨重启稳定（DeviceRegistry.resolveStableId 用持久化值覆盖，
+     * 在 load 时即解析，先于 init 物化任何 AttrState）。注册表 key、事件载荷、历史 FK、数据/逻辑关联均用此。
+     * <p>LogicDevice 与物理设备同机制（构造铸造 UUID，resolveStableId 覆盖为持久化稳定值），无特例。
      *
      * @return 设备主键 UUID（构造铸造，可能已被 getOrCreate 覆盖为持久化值）
      */
@@ -455,6 +472,53 @@ public abstract class DeviceBase implements DeviceControl {
         for (AttributeBase<?> attr : attrs.values()) {
             if (attr.isPersistable()) {
                 core.getStateManager().restoreAttributeState(this, attr);
+            }
+        }
+    }
+
+    /**
+     * 设备就绪标志（ready gate）：false 期间（init 期/构造期/未完成 register+restore），
+     * {@link AttributeBase#publicState()} 挂起发布但保留 midState，避免用未解析的临时 deviceId 发孤儿事件
+     * （{@code null value in column "type"} 撞 NOT NULL，bug-record-20260801-071800）。
+     *
+     * <p>由框架在生命周期统一收口点调 {@link #markReady()} 翻 true（物理 finalizeNewDevice、逻辑 finalizeLogicDevice，
+     * 均在 restorePersistedState 之后）——调用方只调一次 markReady，flush 内置，不让使用者记两步。
+     */
+    private boolean ready = false;
+
+    /** 设备是否已就绪（register+restore 完成，可安全用稳定 id 发布总线事件）。 */
+    public boolean isReady() {
+        return ready;
+    }
+
+    /**
+     * 标记设备就绪并 flush init 期挂起的发布。
+     *
+     * <p>封装"翻标志 + flush"两步：调用方只调本方法一次，{@link #flushPendingPublishes()} 内置——
+     * 框架封装的不要让子类/集成记两步（设计原则）。须在 {@link #restorePersistedState()} 之后调用，
+     * 使 flush 发出的是"最终态"（持久化值优先，否则 config 派生值），单次稳定 id 首发，避免默认值→持久值双发。
+     */
+    public void markReady() {
+        this.ready = true;
+        flushPendingPublishes();
+    }
+
+    /**
+     * flush init 期被 ready 门禁挂起的属性发布：遍历 getAttrs 逐属性 publicState。
+     *
+     * <p>有在途变更（isValueUpdated）的才真发（用稳定 id）；无变更的 publicState 早 return。
+     * 由 {@link #markReady()} 内部调，集成不直接调。
+     */
+    public void flushPendingPublishes() {
+        if (attrs == null) {
+            return;
+        }
+        for (AttributeBase<?> attr : attrs.values()) {
+            try {
+                attr.publicState();
+            } catch (Exception e) {
+                log.error("Failed to flush pending state for attribute {} of device {}",
+                    attr.getAttributeID(), getId(), e);
             }
         }
     }
