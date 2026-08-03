@@ -400,15 +400,10 @@ public class ConfigEntryRegistry {
             return entry;
         }
 
-        // 先通知集成（禁用：停止设备；启用：从配置重建设备）
-        if (enabled) {
-            notifyIntegrationEnable(entry);
-        } else {
-            notifyIntegrationDisable(entry);
-        }
-
-        publishConfigEntryEvent(entry, enabled ? ConfigEntryEvent.Action.ENABLE : ConfigEntryEvent.Action.DISABLE);
-
+        // 先构造启用/禁用态副本：通知集成须用此副本，使 createDeviceFromEntry 内嵌的 entry 引用
+        // 反映正确启用态（DeviceBase.this.entry = 传入 entry；DeviceInfoDto.enabled 读此快照）。
+        // 若传旧（尚未翻 flag）entry，设备内嵌快照恒 disabled → 设备实际在采数但 /devices 与
+        // 9999 SPA 列表显示「已禁用」，误导用户认为 enable 没生效。
         ConfigEntry updated = new ConfigEntry.Builder()
                 .entryId(entry.getEntryId())
                 .coordinate(entry.getCoordinate())
@@ -421,6 +416,15 @@ public class ConfigEntryRegistry {
                 .updateTime(DateTimeUtils.now())
                 .version(entry.getVersion()) // 启用/禁用不增加版本号
                 .build();
+
+        // 通知集成（禁用：停止设备；启用：从配置重建设备）——用 updated 副本，保证集成收到正确 flag 态
+        if (enabled) {
+            notifyIntegrationEnable(updated);
+        } else {
+            notifyIntegrationDisable(updated);
+        }
+
+        publishConfigEntryEvent(updated, enabled ? ConfigEntryEvent.Action.ENABLE : ConfigEntryEvent.Action.DISABLE);
 
         persistence.update(updated);
         entryCache.put(entryId, updated);

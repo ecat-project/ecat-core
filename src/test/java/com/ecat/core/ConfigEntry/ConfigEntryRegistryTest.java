@@ -16,9 +16,13 @@
 
 package com.ecat.core.ConfigEntry;
 
+import com.ecat.core.EcatCore;
+import com.ecat.core.Integration.IntegrationBase;
+import com.ecat.core.Integration.IntegrationRegistry;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
@@ -40,6 +44,9 @@ public class ConfigEntryRegistryTest {
     private ConfigEntryRegistry registry;
     private Path testDir;
     private ConfigEntryPersistence persistence;
+    private EcatCore coreMock;
+    private IntegrationRegistry integrationRegistryMock;
+    private CapturingIntegration capturingIntegration;
 
     @Before
     public void setUp() throws IOException {
@@ -69,7 +76,12 @@ public class ConfigEntryRegistryTest {
             }
         };
 
-        registry = new ConfigEntryRegistry(null, persistence);
+        // mock core + integrationRegistry：默认 getIntegrationRegistry 返回 null → notify 路径早退，
+        // 既有 CRUD 测试行为不变；需测 notify 的测试（如 enable 快照）单独 stub getIntegration 返回 stub 集成
+        coreMock = Mockito.mock(EcatCore.class);
+        integrationRegistryMock = Mockito.mock(IntegrationRegistry.class);
+        capturingIntegration = new CapturingIntegration();
+        registry = new ConfigEntryRegistry(coreMock, persistence);
     }
 
     @After
@@ -574,5 +586,49 @@ public class ConfigEntryRegistryTest {
         Map<String, Object> deviceConfigAfter = (Map<String, Object>) reEnabled.getStepInputs().get("device_config");
         assertNotNull("device_config 步输入应保留", deviceConfigAfter);
         assertEquals("sn 应跨 disable/enable 保留（reconfigure 回填）", "SN-001", deviceConfigAfter.get("sn"));
+    }
+
+    /**
+     * enable 通知须传【启用态】entry 给集成：createDeviceFromEntry 会把收到的 entry 引用存进设备
+     * （DeviceBase.this.entry = entry），DeviceInfoDto.enabled 读的就是这个快照。
+     * 若 setEnabled 先用旧（disabled）entry 调 notifyIntegrationEnable、之后才构造 enabled 新 entry，
+     * 设备内嵌的快照恒 disabled → /devices 与 9999 SPA 列表显示「已禁用」，但设备实际在采数——
+     * 功能正常、显示误导用户（enable 是否生效）。根治：通知用启用态副本。
+     */
+    @Test
+    public void setEnabled_enable_notifiesIntegrationWithEnabledEntrySnapshot() {
+        org.mockito.Mockito.when(coreMock.getIntegrationRegistry()).thenReturn(integrationRegistryMock);
+        org.mockito.Mockito.when(integrationRegistryMock.getIntegration(COORDINATE_DEMO))
+                .thenReturn(capturingIntegration);
+
+        // 建一个 disabled entry（模拟用户刚 disable、待 enable 的设备）
+        ConfigEntry created = registry.createEntry(new ConfigEntry.Builder()
+                .coordinate(COORDINATE_DEMO)
+                .uniqueId("uid-enable-snapshot")
+                .title("snapshot test")
+                .enabled(false)
+                .build());
+        assertNull("enable 前 capturingIntegration 不应收到 enableEntry",
+                capturingIntegration.capturedEnableEntry);
+
+        registry.setEnabled(created.getEntryId(), true);
+
+        assertNotNull("enable 应通知集成 enableEntry", capturingIntegration.capturedEnableEntry);
+        assertTrue("通知须传启用态 entry（设备内嵌快照反映正确启用态，否则 DeviceInfoDto.enabled 恒 false）",
+                capturingIntegration.capturedEnableEntry.isEnabled());
+    }
+
+    // ==================== enable 快照捕获 stub（setUp 每测重建）====================
+
+    private static final String COORDINATE_DEMO = "com.ecat.integration:demo";
+
+    /** 捕获 notifyIntegrationEnable 传入的 entry，验其 isEnabled()。 */
+    private static class CapturingIntegration extends IntegrationBase {
+        ConfigEntry capturedEnableEntry;
+        @Override public void onInit() { }
+        @Override public void onStart() { }
+        @Override public void onPause() { }
+        @Override public ConfigEntry createEntry(ConfigEntry entry) { return entry; }
+        @Override public void enableEntry(ConfigEntry entry) { this.capturedEnableEntry = entry; }
     }
 }
