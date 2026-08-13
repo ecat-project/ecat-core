@@ -18,6 +18,7 @@ package com.ecat.core.Utils;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -277,6 +278,43 @@ public class DateTimeUtils {
      */
     public static ZonedDateTime toUtc(ZonedDateTime dateTime) {
         return withZone(dateTime, ZoneOffset.UTC);
+    }
+
+    // ==================== Instant / UTC 工具(ISO 8601 UTC 交换) ====================
+
+    /**
+     * Instant → ISO 8601 UTC 字符串(如 "2026-08-11T12:00:00Z")。
+     *
+     * <p><b>应用场景</b>:ADM 时间字段统一 {@link Instant},JSON 交换格式 = ISO 8601 UTC(类型层锁死 UTC 杜绝
+     * JVM-wall/UTC 歧义)。{@link DateTimeFormatter#ISO_INSTANT} 输出恒带 {@code Z}、与 Jackson jsr310 默认
+     * Instant 序列化一致,前后端契约统一;使用方按本地 TZ 渲染。</p>
+     *
+     * @param instant 时间对象,null 返回 null
+     * @return ISO 8601 UTC 字符串(带 Z),如 "2026-08-11T12:00:00Z"
+     */
+    public static String formatUtcIso(Instant instant) {
+        if (instant == null) {
+            return null;
+        }
+        return DateTimeFormatter.ISO_INSTANT.format(instant);
+    }
+
+    /**
+     * 解析 ISO 8601 字符串 → Instant(UTC)。
+     *
+     * <p><b>容忍任意 offset</b>:输入 "2026-08-11T12:00:00Z" 或 "...T20:00:00+08:00" 均可,统一转 UTC instant。
+     * 无 offset 的壁钟串(如 "2026-08-11T12:00:00")抛 {@link java.time.format.DateTimeParseException}——
+     * 契约要求 offset/Z,无 offset 的壁钟无 instant 语义,不臆测默认 UTC(严格模式)。</p>
+     *
+     * @param text ISO 8601 字符串(须含 offset/Z)
+     * @return Instant;null/空串返回 null
+     * @throws java.time.format.DateTimeParseException 无 offset 的壁钟串
+     */
+    public static Instant parseUtcIso(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        return OffsetDateTime.parse(text).toInstant();
     }
 
     // 私有构造函数，防止实例化

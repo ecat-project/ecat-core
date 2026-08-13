@@ -18,6 +18,7 @@ package com.ecat.core.Utils;
 
 import org.junit.Test;
 
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -239,4 +240,50 @@ public class DateTimeUtilsTest {
         assertNotNull("东京格式化不应为 null", tokyoFormatted);
         assertNotEquals("不同时区的格式化结果应该不同", utcFormatted, tokyoFormatted);
     }
+
+    // ==================== Instant / UTC 工具测试 ====================
+
+    @Test
+    public void testFormatUtcIso() {
+        Instant instant = Instant.parse("2026-08-11T12:00:00Z");
+        assertEquals("ISO 8601 UTC 格式应带 Z", "2026-08-11T12:00:00Z",
+            DateTimeUtils.formatUtcIso(instant));
+    }
+
+    @Test
+    public void testFormatUtcIso_NullInput() {
+        assertNull("null 输入应返回 null", DateTimeUtils.formatUtcIso(null));
+    }
+
+    @Test
+    public void testParseUtcIso_WithZ() {
+        assertEquals(Instant.parse("2026-08-11T12:00:00Z"),
+            DateTimeUtils.parseUtcIso("2026-08-11T12:00:00Z"));
+    }
+
+    @Test
+    public void testParseUtcIso_WithOffset_NormalizedToUtc() {
+        // +08:00 的 20:00 = UTC 12:00;parse 容忍任意 offset,统一转 UTC instant
+        assertEquals(Instant.parse("2026-08-11T12:00:00Z"),
+            DateTimeUtils.parseUtcIso("2026-08-11T20:00:00+08:00"));
+    }
+
+    @Test
+    public void testParseUtcIso_NullAndEmpty() {
+        assertNull(DateTimeUtils.parseUtcIso(null));
+        assertNull(DateTimeUtils.parseUtcIso(""));
+    }
+
+    @Test(expected = java.time.format.DateTimeParseException.class)
+    public void testParseUtcIso_BareLocalNoOffset_Throws() {
+        // 严格:无 offset 的壁钟串无 instant 语义,parse 须抛(契约要求 offset/Z)
+        DateTimeUtils.parseUtcIso("2026-08-11T12:00:00");
+    }
+
+    @Test
+    public void testUtcIsoRoundTrip() {
+        Instant original = Instant.parse("2026-08-11T12:30:45Z");
+        assertEquals(original, DateTimeUtils.parseUtcIso(DateTimeUtils.formatUtcIso(original)));
+    }
+
 }
