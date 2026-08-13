@@ -70,7 +70,7 @@
     "status": {
       "normal": "数据有效",
       "alarm": "传感器报警",
-      "insufficient": "统计数据不足",
+      "insufficient": "有效数据不足",
       "maintenance": "维护",
       "malfunction": "运行不良",
       "waiting": "等待数据恢复",

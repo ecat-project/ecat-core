@@ -19,12 +19,14 @@ package com.ecat.core.State;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -652,6 +654,18 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     }
 
     /**
+     * 计算本属性当前的"全量活跃状态集合"，供 buildState 塞进 AttrState.statuses 发布给总线消费方。
+     *
+     * <p>这是 ecat-core 的通用多状态扩展点：默认实现（本类）返回单元素集合 {status}（单一状态语义）；
+     * 子类可覆写以组装多个并存状态（如物理硬件同一时刻可同时处于多个状态——设备自报质控态 + 告警态并存）。
+     * 覆写时返回的集合应包含当前胜出者 status（getStatus()），以保证 getStatus 与 statuses 自洽。
+     */
+    protected Set<AttributeStatus> computeStatuses() {
+        // 默认：只有它自己的单 status。Collections.singleton 返回不可变单元素 Set。
+        return Collections.singleton(status);
+    }
+
+    /**
      * 从当前可变字段构建不可变 AttrState 状态。
      * <p>须在 synchronized(this) 内调用（由 updateValue 保证），确保各字段读取自洽。
      * 集合类 value 由 AttrState 自行防御性拷贝；标量与不可变类型零拷贝。
@@ -663,6 +677,8 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
             .valueType(targetType)
             .value(value)
             .status(status)
+            // 全量活跃状态集合：默认 {status}（computeStatuses 默认）；子类可覆写 computeStatuses 组装多状态
+            .statuses(computeStatuses())
             .nativeUnit(nativeUnit)
             .displayUnit(displayUnit)
             .displayPrecision(displayPrecision)

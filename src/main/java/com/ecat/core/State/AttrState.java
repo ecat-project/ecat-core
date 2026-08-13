@@ -7,6 +7,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * 属性状态——不可变的强类型状态对象（≡ Home Assistant 的 State）。
@@ -38,6 +40,8 @@ public final class AttrState<T> {
     private final T value;
     private final Class<T> valueType;
     private final AttributeStatus status;
+    /** 全量活跃状态集合（含胜出者，去重保序）；不可变。默认 {status}；子类覆写 computeStatuses 可组装多状态。 */
+    private final Set<AttributeStatus> statuses;
     private final UnitInfo nativeUnit;
     private final UnitInfo displayUnit;
     private final int displayPrecision;
@@ -55,6 +59,13 @@ public final class AttrState<T> {
         this.value = defensiveCopy(b.value);
         this.valueType = b.valueType;
         this.status = b.status;
+        // statuses 永不 null：computeStatuses 塞了集合→不可变 Set 拷贝；未塞→兜底 {status}（status 构造期已校验非 null）。
+        // 不走 defensiveCopy()：它把 Collection 转 unmodifiableList，会破 Set 契约（getStatuses 必须返回 Set）。
+        if (b.statuses != null) {
+            this.statuses = Collections.unmodifiableSet(new LinkedHashSet<>(b.statuses));
+        } else {
+            this.statuses = Collections.singleton(b.status);
+        }
         this.nativeUnit = b.nativeUnit;
         this.displayUnit = b.displayUnit;
         this.displayPrecision = b.displayPrecision;
@@ -82,6 +93,8 @@ public final class AttrState<T> {
     public T getValue() { return value; }
     public Class<T> getValueType() { return valueType; }
     public AttributeStatus getStatus() { return status; }
+    /** 返回全量活跃状态集合（不可变 Set，去重保序）。默认 {status}；子类覆写 computeStatuses 可组装多状态。 */
+    public Set<AttributeStatus> getStatuses() { return statuses; }
     public UnitInfo getNativeUnit() { return nativeUnit; }
     public UnitInfo getDisplayUnit() { return displayUnit; }
     public int getDisplayPrecision() { return displayPrecision; }
@@ -119,6 +132,7 @@ public final class AttrState<T> {
         private T value;
         private Class<T> valueType;
         private AttributeStatus status;
+        private Set<AttributeStatus> statuses;
         private UnitInfo nativeUnit;
         private UnitInfo displayUnit;
         private int displayPrecision;
@@ -132,6 +146,8 @@ public final class AttrState<T> {
         public Builder<T> value(T v) { this.value = v; return this; }
         public Builder<T> valueType(Class<T> v) { this.valueType = v; return this; }
         public Builder<T> status(AttributeStatus v) { this.status = v; return this; }
+        /** logic 层填充全量状态集合用；物理属性不调（走兜底 {status}）。 */
+        public Builder<T> statuses(Set<AttributeStatus> allStatuses) { this.statuses = allStatuses; return this; }
         public Builder<T> nativeUnit(UnitInfo v) { this.nativeUnit = v; return this; }
         public Builder<T> displayUnit(UnitInfo v) { this.displayUnit = v; return this; }
         public Builder<T> displayPrecision(int v) { this.displayPrecision = v; return this; }
