@@ -351,4 +351,16 @@ public class ConfigItemBuilder {
     public static TableConfigItem table(String key, boolean required, ConfigSchema rowSchema) {
         return new TableConfigItem(key, required, rowSchema);
     }
+
+    /**
+     * 构造受限多选配置项（值=List&lt;String&gt;，每项须落在 options 值域内；前端渲染为 checkbox 组）。
+     * 典型用途：表格行内受限多选（如推送粒度实时/分钟/小时）。
+     *
+     * @param key      字段 key
+     * @param required 是否必需（语义=至少选一项）
+     * @return multi_select 配置项
+     */
+    public static MultiSelectConfigItem multiSelect(String key, boolean required) {
+        return new MultiSelectConfigItem(key, required);
+    }
 }

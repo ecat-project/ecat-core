@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -91,5 +92,30 @@ public class TableConfigItemTest {
         TableConfigItem t = ConfigItemBuilder.table("p", true, rowSchema()).minRows(3);
         Object r = t.validate(Arrays.asList(row("a", "x")));
         assertTrue("少于 minRows 应返回字符串错误", r instanceof String);
+    }
+
+    @Test
+    public void allowAddAllowDelete_defaultTrue() {
+        TableConfigItem t = ConfigItemBuilder.table("p", true, rowSchema());
+        assertTrue("未显式设置时 allowAdd 默认 true（向后兼容：所有现存 table 用法仍可增行）", t.isAllowAdd());
+        assertTrue("未显式设置时 allowDelete 默认 true（向后兼容：所有现存 table 用法仍可删行）", t.isAllowDelete());
+    }
+
+    @Test
+    public void allowAddAllowDelete_fluentSetterSetFalse() {
+        TableConfigItem t = ConfigItemBuilder.table("p", true, rowSchema())
+                .allowAdd(false)
+                .allowDelete(false);
+        assertFalse("allowAdd(false) 后应为 false", t.isAllowAdd());
+        assertFalse("allowDelete(false) 后应为 false", t.isAllowDelete());
+    }
+
+    @Test
+    public void validate_notAffectedByAllowFlags() {
+        TableConfigItem t = ConfigItemBuilder.table("p", true, rowSchema()).allowAdd(false).allowDelete(false);
+        List<Map<String, Object>> rows = Arrays.asList(row("temp", "a"));
+        assertNull("增删开关只是前端渲染控制，不影响行校验语义", t.validate(rows));
+        Object r = t.validate(Arrays.asList(row(null, null)));
+        assertTrue("关闭增删后行内字段错误照常上报", r instanceof Map);
     }
 }

@@ -47,6 +47,23 @@ public class TableConfigItem extends AbstractConfigItem<List<Map<String, Object>
     /** 可选：最多行数约束。 */
     private Integer maxRows;
 
+    /**
+     * 是否允许用户在前端添加行，默认 true（向后兼容：所有现存 table 用法不变）。
+     * <p>
+     * 应用场景：行来源是外部动态清单的表——行由服务端生成（如设备因子清单），用户不应增删行、
+     * 只编辑单元格值。此时 {@code allowAdd(false)} 让前端隐藏"添加行"按钮。
+     * 仅控制前端渲染，不影响 validate 行为。
+     */
+    private boolean allowAdd = true;
+
+    /**
+     * 是否允许用户在前端删除行，默认 true（向后兼容）。
+     * <p>
+     * 与 {@link #allowAdd} 同场景成对使用：服务端生成的固定行集不允许用户删行。
+     * 仅控制前端渲染，不影响 validate 行为。
+     */
+    private boolean allowDelete = true;
+
     public TableConfigItem(String key, boolean required, ConfigSchema rowSchema) {
         super(key, required);
         this.rowSchema = Objects.requireNonNull(rowSchema, "rowSchema 不能为空");
@@ -60,6 +77,12 @@ public class TableConfigItem extends AbstractConfigItem<List<Map<String, Object>
 
     public TableConfigItem minRows(int n) { this.minRows = n; return this; }
     public TableConfigItem maxRows(int n) { this.maxRows = n; return this; }
+
+    /** 禁止/允许用户添加行（默认允许），见 {@link #allowAdd}。 */
+    public TableConfigItem allowAdd(boolean allow) { this.allowAdd = allow; return this; }
+
+    /** 禁止/允许用户删除行（默认允许），见 {@link #allowDelete}。 */
+    public TableConfigItem allowDelete(boolean allow) { this.allowDelete = allow; return this; }
 
     @Override
     public String getFieldType() { return "table"; }

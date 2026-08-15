@@ -315,6 +315,21 @@ new ArrayConfigItem<>(key, required, Arrays.asList("a", "b"))
     .size(1, 5)                       // 最少选 1 个，最多选 5 个
 ```
 
+### MultiSelectConfigItem — 受限多选（checkbox 组）
+
+值是 `List<String>`，每个元素必须落在预定义 options 值域内；前端渲染为 checkbox 组
+（fieldType=`multi_select`）。与 ArrayConfigItem 的区别：本类专用于表格行内受限多选
+（如 HJ212 推送因子表里每个因子选择推送粒度：实时/分钟/小时可多选），选项集合小且固定。
+required 语义 = 至少选一项（空集报错）；非 required 时空集与 null 均合法。
+
+```java
+new MultiSelectConfigItem(key, required)
+    .displayName("推送粒度")
+    .addOption("REALTIME", "实时")
+    .addOption("MINUTE", "分钟")
+    .addOption("HOUR", "小时")
+```
+
 ### YamlConfigItem — 只读 YAML 显示
 
 ```java
