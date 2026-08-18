@@ -16,6 +16,8 @@
 
 package com.ecat.core;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import com.ecat.core.Bus.BusRegistry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.ConfigEntry.YmlConfigEntryPersistence;
@@ -28,6 +30,8 @@ import com.ecat.core.I18n.I18nRegistry;
 import com.ecat.core.Integration.IntegrationManager;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.Log.LogManager;
+import com.ecat.core.Observability.SystemHealthService;
+import com.ecat.core.Shutdown.CoreShutdown;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
 import com.ecat.core.Utils.platform.PlatformInfo;
@@ -42,7 +46,10 @@ import lombok.Getter;
  */
 public class EcatCore {
     private static EcatCore instance;
-    
+
+    /** shutdown 只跑一次：hook 与手工调用双入口时幂等（第二次直接返回）。 */
+    private final AtomicBoolean shutdownOnce = new AtomicBoolean(false);
+
     public static EcatCore getInstance() {
         return instance;
     }
@@ -76,6 +83,13 @@ public class EcatCore {
      */
     @Getter
     private ConfigFlowRegistry configFlowRegistry;
+
+    /**
+     * 平台自观测（B2 system_health）：调度/总线/线程三层内存指标快照，
+     * core-api 的 /core-api/system/health 端点从这里读
+     */
+    @Getter
+    private SystemHealthService systemHealth;
 
     /**
      * ConfigFlow 服务（flow 推进与管理能力）
@@ -151,6 +165,7 @@ public class EcatCore {
         integrationRegistry = new IntegrationRegistry();
         busRegistry = new BusRegistry();
         taskManager = new TaskManager();
+        systemHealth = new SystemHealthService(taskManager, busRegistry);
         stateManager = new StateManager(".ecat-data/core/states/",
             taskManager.getMdcScheduledExecutorService());
         configFlowRegistry = new ConfigFlowRegistry();
@@ -175,15 +190,16 @@ public class EcatCore {
     }
 
     /**
-     * 优雅关闭：提交所有状态持久化数据，释放资源
+     * 优雅关闭（C2 停机编排）：阶段化收尾——调度引擎停新工作 → 设备型集成 onPause（源先停，
+     * 终态事件仍被消费）→ 服务型集成 onPause（总线 drain + 尾批 flush，重启零丢尾主干）→
+     * 状态持久化 → onRelease + 线程池收尾。每阶段有界，超时 WARN 不硬等；
+     * 顺序依据与预算见 {@link com.ecat.core.Shutdown.CoreShutdown}。
      */
     public void shutdown() {
-        if (stateManager != null) {
-            stateManager.shutdown();
+        if (!shutdownOnce.compareAndSet(false, true)) {
+            return;
         }
-        if (taskManager != null) {
-            taskManager.shutdownAll();
-        }
+        CoreShutdown.forRegistries(taskManager, stateManager, integrationRegistry).run();
     }
 
     public static void main(String[] args) {
@@ -198,11 +214,12 @@ public class EcatCore {
         
         System.out.println("EcatCore initialized successfully.");
 
-        // 添加关闭钩子，确保优雅退出
+        // 添加关闭钩子，确保优雅退出（具名：ThreadNamingArchTest 规则 3 立法，
+        // 无名 shutdown hook 线程在线程普查（system/health threads）中不可归属）
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("EcatCore is shutting down...");
             core.shutdown();
-        }));
+        }, "ecat-core-shutdown"));
 
         // 保持运行，直到收到终止信号
         try {

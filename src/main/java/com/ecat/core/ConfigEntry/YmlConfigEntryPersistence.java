@@ -80,10 +80,20 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
             return allEntries;
         }
 
+        // 被跳过的 entry 文件（解析失败/空文件）：启动汇总点名用
+        List<SkippedEntryFile> skipped = new ArrayList<>();
         // 递归遍历所有子目录查找 yml 文件
-        loadEntriesFromDirectory(baseDir, allEntries);
+        loadEntriesFromDirectory(baseDir, allEntries, skipped);
 
         log.info("Loaded {} config entries from {}", allEntries.size(), BASE_DIR);
+        if (!skipped.isEmpty()) {
+            // 静默丢弃改显式（操作员可见）：entry 文件损坏被跳过 = 配置条目凭空缺额（设备不加载、
+            // 数量对不上文件数），必须有一行 ERROR 汇总点名，不能只在「Loaded N」计数里隐没。
+            // 坐标从存储布局（BASE_DIR/{groupId}/{artifactId}/{entryId}.yml）推导——解析失败的
+            // 文件读不出 coordinate 字段，目录结构是唯一可靠的定位信息。
+            log.error("{} 个 entry 文件解析失败被跳过（配置条目因此缺额）: {}",
+                skipped.size(), describeSkipped(skipped));
+        }
         return allEntries;
     }
 
@@ -92,8 +102,10 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
      *
      * @param directory  目录
      * @param allEntries 所有条目列表
+     * @param skipped    被跳过的损坏文件收集（解析失败/空文件），loadAll 汇总点名用
      */
-    private void loadEntriesFromDirectory(File directory, List<ConfigEntry> allEntries) {
+    private void loadEntriesFromDirectory(File directory, List<ConfigEntry> allEntries,
+                                          List<SkippedEntryFile> skipped) {
         File[] files = directory.listFiles();
         if (files == null) {
             return;
@@ -102,18 +114,66 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         for (File file : files) {
             if (file.isDirectory()) {
                 // 递归遍历子目录
-                loadEntriesFromDirectory(file, allEntries);
+                loadEntriesFromDirectory(file, allEntries, skipped);
             } else if (file.getName().endsWith(".yml")) {
                 try (InputStream input = new FileInputStream(file)) {
                     Map<String, Object> data = yaml.load(input);
                     if (data != null) {
                         allEntries.add(convertToConfigEntry(data));
+                    } else {
+                        // 空文件（yaml.load 返回 null）：此前完全静默，现显式记录
+                        log.warn("跳过空 entry 文件（无 entry 内容）: {}", file.getAbsolutePath());
+                        skipped.add(new SkippedEntryFile(file));
                     }
                 } catch (Exception e) {
-                    log.warn("Failed to load config file: {}", file.getAbsolutePath(), e);
+                    // 一行 WARN 带异常摘要（不带全栈：启动期多个坏文件时全栈刷屏；计数与清单由汇总行负责）
+                    log.warn("跳过无法解析的 entry 文件: {} 原因: {}",
+                        file.getAbsolutePath(), summarizeException(e));
+                    skipped.add(new SkippedEntryFile(file));
                 }
             }
         }
+    }
+
+    /** 被跳过的 entry 文件（损坏/空），供 loadAll 汇总。 */
+    private static final class SkippedEntryFile {
+        final File file;
+
+        SkippedEntryFile(File file) {
+            this.file = file;
+        }
+    }
+
+    /**
+     * 跳过清单的可读描述：按存储布局还原 {@code groupId:artifactId(entryId)}；
+     * 布局外的游离文件（不在 groupId/artifactId 目录下）退回相对路径。
+     */
+    private static String describeSkipped(List<SkippedEntryFile> skipped) {
+        List<String> items = new ArrayList<>();
+        for (SkippedEntryFile s : skipped) {
+            File artifactDir = s.file.getParentFile();
+            File groupDir = artifactDir != null ? artifactDir.getParentFile() : null;
+            String name = s.file.getName();
+            String entryId = name.endsWith(".yml")
+                ? name.substring(0, name.length() - ".yml".length()) : name;
+            if (groupDir != null) {
+                items.add(groupDir.getName() + ":" + artifactDir.getName() + "(" + entryId + ")");
+            } else {
+                items.add(s.file.getPath());
+            }
+        }
+        return String.join("; ", items);
+    }
+
+    /** 异常摘要：简单类名 + 消息首行（多行消息截到首行，避免一行 WARN 展开成多行刷屏）。 */
+    private static String summarizeException(Exception e) {
+        String message = e.getMessage();
+        if (message == null) {
+            return e.getClass().getSimpleName();
+        }
+        int lineBreak = message.indexOf('\n');
+        String firstLine = lineBreak >= 0 ? message.substring(0, lineBreak) : message;
+        return e.getClass().getSimpleName() + ": " + firstLine;
     }
 
     @Override

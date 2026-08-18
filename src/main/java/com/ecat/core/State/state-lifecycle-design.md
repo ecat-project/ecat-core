@@ -72,17 +72,27 @@ getState() = midState = M2   ← 同周期可读
 
 ```
 publicState():
-  if isValueUpdated && midState != null:
-     持久化: saveState（此时 getState()=midState，已 coherent）   ← 独立 try，发布失败也持久化
-     发布: BusEvent<DeviceDataChangedEvent>(old=lastState, new=midState)   ← 失败则 return false（可重试）
-     移位: previousState←lastState, lastState←midState, midState=null   ← 仅发布成功后
-     isValueUpdated=false
+  synchronized(attr):                     ← 摘取临界区（与并发 updateValue/setStatus 互斥）
+     if isValueUpdated && midState != null:
+        摘取: newState=midState, oldState=lastState, 记当时代数 g=pendingGeneration
+  持久化: saveState（此时 getState()=midState，已 coherent）   ← 独立 try，发布失败也持久化，锁外
+  发布: BusEvent<DeviceDataChangedEvent>(old=oldState, new=newState)   ← 失败则 return false（可重试），锁外
+  synchronized(attr):                     ← 移位临界区
+     移位: previousState←oldState, lastState←newState
+     if pendingGeneration == g:  midState=null; isValueUpdated=false   ← 提交期间无新写才清
 ```
 
 提交后：`previousState=S0, lastState=M2(v1,NORMAL), midState=null`。
 
 **关键不变量**：发布事件 old=`lastState`（上次提交=消费者上次所见），new=`midState`（本次在途）。
 链永远连续，不存在「幽灵中间态」污染 old。
+
+**并发契约（修丢更新竞态，2026-08）**：`updateValue`/`setStatus`/`setValueUpdated(true)` 全程持
+`synchronized(attr)` 并递增 `pendingGeneration`；`publicState` 的摘取与移位各为一个临界区，发布/持久化
+在锁外（总线订阅者含同步级联，锁内扇出会引入跨属性锁序反转）。移位仅在「摘取后代数未变」时清
+`midState`/`isValueUpdated`——发布窗口内新到的并发写入已重建 `midState` 并推进代数，留给下一周期发布，
+不会被提交序列清掉（原实现摘取/清零全程无锁，末次写入会被静默蒸发）。注意：发布窗口内多次并发
+`updateValue` 仍按 last-write-wins 合并进在途 `midState`（同周期合并语义不变，撕裂中间态不上总线）。
 
 ### 3.3 异常路径（设备故障，本周期无有效值）
 
@@ -159,9 +169,11 @@ Placeholder 属性在工厂 `createAlarm/createBlank` 内 `setStatus` 时 device
 ## 6. 不变量
 
 1. `previousState` 恒为 `lastState` 的前驱（发布事件的 old）。
-2. `publicState` 成功后 `midState=null`；`lastState`=刚提交态。
+2. `publicState` 成功且提交期间无新写后 `midState=null`；`lastState`=刚提交态（提交期间有新写则
+   `midState` 保留为新写在途态，待下周期发布）。
 3. `getState()` 永不返回「撕裂的已提交态」——已提交态（`lastState`）构建于字段 settle 时刻，自洽。
-4. `midState` 非空 ⇔ 自上次 `publicState` 后有 `updateValue`/`setStatus` 变更（`isValueUpdated=true`）。
+4. `isValueUpdated=true` ⇒ 自上次提交后有 `updateValue`/`setStatus` 变更且尚未随某次成功提交清零
+   （`midState` 非空 ⇔ 存在未提交在途态；发布窗口内被新写覆盖的中间值按 last-write-wins 合并）。
 5. 持久化内容 = commit 时的 `midState`（coherent），与发布解耦。
 
 ---

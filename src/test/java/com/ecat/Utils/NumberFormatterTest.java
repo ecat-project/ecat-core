@@ -1,6 +1,7 @@
 package com.ecat.Utils;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -332,5 +333,66 @@ public class NumberFormatterTest {
         String expected = "12345.00";
         String actual = NumberFormatter.formatValue(value, precision);
         assertEquals("Long输入: 12345应格式化为12345.00", expected, actual);
+    }
+
+    // ==================== ThreadLocal 缓存改造的等价性护栏 ====================
+    // formatValue 热路径（每次 attr 状态提交 ≥1 次调用）原先每次 new DecimalFormat（618ns/次、
+    // ≈1.3KB 分配），改造为 ThreadLocal<DecimalFormat[]> 按精度复用（59ns/次）。以下用例锁定
+    // 缓存复用不得改变任何输出（含 HALF_EVEN 银行家算法语义）。
+
+    // 缓存命中路径：同一精度连续调用输出与首次一致（DecimalFormat 带状态复用不得串味）
+    @Test
+    public void testCachedFormatterRepeatedCallsConsistent() {
+        assertEquals("首次调用", "12.34", NumberFormatter.formatValue(12.345, 2));
+        assertEquals("缓存命中后再调用", "12.34", NumberFormatter.formatValue(12.345, 2));
+        assertEquals("缓存命中同精度不同值", "-7.68", NumberFormatter.formatValue(-7.675, 2));
+        assertEquals("再次回到首值", "12.34", NumberFormatter.formatValue(12.345, 2));
+    }
+
+    // 多精度交错：按精度各缓存一份，不得互相污染 pattern / 舍入
+    @Test
+    public void testInterleavedPrecisionsNoCrossContamination() {
+        assertEquals(2.5 + "取整应保持 HALF_EVEN 偶舍", "2", NumberFormatter.formatValue(2.5, 0));
+        assertEquals("一位小数", "2.5", NumberFormatter.formatValue(2.5, 1));
+        assertEquals("两位小数补零", "2.50", NumberFormatter.formatValue(2.5, 2));
+        assertEquals("三位小数补零", "2.500", NumberFormatter.formatValue(2.5, 3));
+        assertEquals("回到取整仍正确", "4", NumberFormatter.formatValue(3.5, 0));
+        assertEquals("回到一位小数仍正确", "2.5", NumberFormatter.formatValue(2.5, 1));
+        assertEquals("回到两位小数仍正确", "2.50", NumberFormatter.formatValue(2.5, 2));
+    }
+
+    // 缓存上界外的精度（displayPrecision 合法域是任意 ≥0 整数）：按次构造，输出仍正确
+    @Test
+    public void testPrecisionBeyondCacheBoundStillFormats() {
+        assertEquals("上界外精度按次构造不缓存", "0.00000000000000000000",
+                NumberFormatter.formatValue(0, 20));
+        // 21 位：值 1.5 → setScale(21) 补零
+        assertEquals("上界外精度补零", "1.500000000000000000000",
+                NumberFormatter.formatValue(1.5, 21));
+    }
+
+    // ThreadLocal 隔离：多线程并发调用同精度，各线程拿到各自 formatter，输出互不串扰
+    @Test
+    public void testConcurrentThreadsCorrectResults() throws Exception {
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(4);
+        try {
+            java.util.List<java.util.concurrent.Future<Boolean>> futures = new java.util.ArrayList<>();
+            for (int t = 0; t < 4; t++) {
+                futures.add(pool.submit(() -> {
+                    // 每线程多次交错调用，任何一次输出错位即失败
+                    for (int i = 0; i < 2_000; i++) {
+                        if (!"12.34".equals(NumberFormatter.formatValue(12.345, 2))) return false;
+                        if (!"2".equals(NumberFormatter.formatValue(2.5, 0))) return false;
+                        if (!"2.500".equals(NumberFormatter.formatValue(2.5, 3))) return false;
+                    }
+                    return true;
+                }));
+            }
+            for (java.util.concurrent.Future<Boolean> f : futures) {
+                assertTrue("并发线程输出必须逐位一致", f.get());
+            }
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }

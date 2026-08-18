@@ -20,6 +20,8 @@ import ch.qos.logback.classic.pattern.ClassicConverter;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.ecat.core.Utils.Mdc.MdcCoordinateConverter;
 
+import java.util.Map;
+
 /**
  * Logback 坐标转换器
  *
@@ -39,7 +41,10 @@ public class CoordinateConverter extends ClassicConverter {
 
     @Override
     public String convert(ILoggingEvent event) {
-        String coordinate = MdcCoordinateConverter.getCoordinate();
+        // 必须读事件自带 MDC 快照而非线程 ThreadLocal：文件通道全包 AsyncAppender，
+        // 格式化发生在异步投递线程，该线程的 ThreadLocal MDC 恒为空（与 TraceIdConverter 同病）。
+        Map<String, String> mdc = event.getMDCPropertyMap();
+        String coordinate = mdc == null ? null : mdc.get(MdcCoordinateConverter.COORDINATE_KEY);
         if (coordinate == null || coordinate.isEmpty()) {
             return DEFAULT_COORDINATE;
         }

@@ -24,7 +24,8 @@ import com.ecat.core.State.AttrState;
  * 消费方据此做告警/变化检测/录制——没有 old/new 的设备数据事件对下游无意义。
  *
  * <p>{@code oldState} 可为 null（属性首次出现 / 设备新增时无旧值）；{@code newState} 永远非空。
- * 两个 AttrState 都是发布时刻在 synchronized 块内原子捕获的不可变状态，订阅者拿到的事件
+ * 两个 AttrState 都是 publicState 提交序列在 synchronized(attr) 块内原子摘取的不可变状态
+ * （old=上次已提交 lastState、new=本次在途 midState，同一临界区内成对捕获），订阅者拿到的事件
  * 绝对自洽、绝不撕裂（修原先发布可变 AttributeBase 导致的竞争脏数据）。
  *
  * @author coffee

@@ -23,9 +23,9 @@ import com.ecat.core.Bus.event.DeviceLifecycleEvent;
 import com.ecat.core.Bus.event.EventContext;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 统一设备注册表（物理 + 逻辑设备同表），管理所有设备对象的注册与访问。
@@ -41,11 +41,20 @@ public class DeviceRegistry implements IDeviceQuery {
     /**
      * 使用Map结构存储设备ID和设备对象的映射关系
      * Key为设备ID(String类型)，Value为设备对象(DeviceBase类型)
+     *
+     * <p>并发安全（修 CME/丢注册竞态）：REST 线程（getDeviceByUniqueId/getAllDevices 迭代）、
+     * ConfigFlow 提交线程与 bus consumer 线程（commit/register put）对本表并发读写且无外部互斥，
+     * 裸 HashMap 在此组合下可抛 CME、并发 put 丢条目（JDK8 resize 并发结构损坏）。
+     * ConcurrentHashMap 迭代弱一致（不抛 CME）+ 并发 put 不丢，注册表读多写少场景零争用损耗。
      */
-    private final Map<String, DeviceBase> registry = new HashMap<>();
+    private final Map<String, DeviceBase> registry = new ConcurrentHashMap<>();
 
-    /** (coordinate, uniqueId) → id 匹配索引：启动 {@link #load()} 从 device yml 建立，供 getOrCreate 跨重启稳定 id。 */
-    private final Map<String, String> matchIndex = new HashMap<>();
+    /**
+     * (coordinate, uniqueId) → id 匹配索引：启动 {@link #load()} 从 device yml 建立，供 getOrCreate 跨重启稳定 id。
+     * 与 {@link #registry} 同理用 ConcurrentHashMap：load()（启动线程）clear+put 与运行期
+     * commit/remove/purge（REST/consumer 线程）put/remove 并发。
+     */
+    private final Map<String, String> matchIndex = new ConcurrentHashMap<>();
 
     /** 设备持久化（device yml），由 EcatCore.init 注入（可空→仅内存模式，不发事件不落盘）。 */
     private DevicePersistence persistence;

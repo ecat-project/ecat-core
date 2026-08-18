@@ -4,10 +4,12 @@ import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Mdc.TraceContext;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -29,8 +31,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p><b>反压=丢最旧保新</b>（时间序列语义正确）：{@link #onEvent(Object)} 队列满时丢最旧腾位，绝不阻塞
  * 总线发布线程（设备轮询线程）。
  *
+ * <p><b>因果链续传（14 号架构 §5.4-3）</b>：总线是同步扇出——{@code onEvent} 在发布线程（poll 线程）
+ * 内执行，此刻 MDC 中的 traceId（ULID）即事件因果锚点。onEvent 把它随载荷一起入队，消费线程取出时
+ * restore 进自身 MDC，consume 内的日志与任何再发布事件都指向同一 ULID——poll→发布→消费一 grep 到底。
+ * 发布线程无 traceId（如裸线程发布的系统事件）则不设置，消费线程 MDC 保持原状（如实缺失，不造 id）。
+ *
+ * <p><b>自观测（B2 system_health）</b>：每个实例构造时以弱引用登记进 {@link #LIVE_CONSUMERS}，
+ * 供健康端点枚举各消费者队列深度/丢批/处理计数；消费逻辑本身零额外成本（计数器早已有，只加枚举）。
+ *
  * @param <E> 事件/载荷类型
- * 
+ *
  * @author coffee
  */
 public abstract class BusConsumerBase<E> {
@@ -38,7 +48,14 @@ public abstract class BusConsumerBase<E> {
     /** 慢消费/慢 flush 阈值（毫秒）——超过则触发 {@link #onSlowConsume}，便于子类记日志/告警。 */
     static final long SLOW_CONSUME_MS = 1000L;
 
-    private final ArrayBlockingQueue<E> queue;
+    /**
+     * 全部存活 consumer 实例（弱引用——集成卸载后实例可被 GC，注册表不构成泄漏源）。
+     * system_health 读端点时经 {@link #liveConsumers()} 快照枚举。
+     */
+    private static final CopyOnWriteArrayList<WeakReference<BusConsumerBase<?>>> LIVE_CONSUMERS =
+            new CopyOnWriteArrayList<>();
+
+    private final ArrayBlockingQueue<Object> queue;
     private final ExecutorService worker;
     private final AtomicLong dropped = new AtomicLong();
     private final AtomicLong processed = new AtomicLong();
@@ -55,19 +72,24 @@ public abstract class BusConsumerBase<E> {
 
     protected BusConsumerBase(String name, int capacity) {
         this.name = name;
-        this.queue = new ArrayBlockingQueue<E>(capacity);
+        this.queue = new ArrayBlockingQueue<Object>(capacity);
         this.worker = Executors.newSingleThreadExecutor(new NamedDaemonFactory(name));
         this.inheritedMdc = TraceContext.capture();
+        LIVE_CONSUMERS.add(new WeakReference<>(this));
         // 不在此 submit worker —— 留给子类在自身字段初始化后调 start()，规避 this 逃逸。
     }
 
     /**
      * 总线入口：非阻塞投递；队列满则丢最旧保新。final——DEV-1 确认所有 device.data.update 消费者都用
      * drop-oldest，锁死防止子类误改成阻塞型，破坏「绝不回压设备轮询线程」硬约束。
+     *
+     * <p>因果续传在此捕获：同步扇出保证本方法运行在发布线程，其 MDC traceId 与
+     * {@code BusEvent.getCausationId()} 同源同值。
      */
     public final void onEvent(E event) {
-        while (!queue.offer(event)) {
-            E stale = queue.poll();
+        Entry<E> entry = new Entry<>(event, TraceContext.getTraceId());
+        while (!queue.offer(entry)) {
+            Object stale = queue.poll();
             if (stale != null) {
                 dropped.incrementAndGet();
             }
@@ -87,7 +109,7 @@ public abstract class BusConsumerBase<E> {
     /** 阻塞取下一条事件；被中断时恢复中断标志并返回 null（循环据此退出）。 */
     protected final E awaitNext() {
         try {
-            return queue.take();
+            return unwrap(queue.take());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
@@ -97,11 +119,29 @@ public abstract class BusConsumerBase<E> {
     /** 最多等待 timeoutMs；超时或被中断返回 null（被中断时恢复中断标志）。 */
     protected final E pollNext(long timeoutMs) {
         try {
-            return queue.poll(timeoutMs, TimeUnit.MILLISECONDS);
+            return unwrap(queue.poll(timeoutMs, TimeUnit.MILLISECONDS));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
         }
+    }
+
+    /**
+     * 出队解包 + 因果续传：把发布线程捕获的 traceId restore 进消费线程 MDC。
+     * causation 为 null（发布线程无 traceId）时清掉上一条残留的 traceId，保持 MDC 如实。
+     */
+    @SuppressWarnings("unchecked")
+    private E unwrap(Object queued) {
+        if (queued == null) {
+            return null;
+        }
+        Entry<?> entry = (Entry<?>) queued;
+        if (entry.causationId != null) {
+            TraceContext.setTraceId(entry.causationId);
+        } else {
+            TraceContext.clearTraceId();
+        }
+        return (E) entry.event;
     }
 
     /** processed 计数 +1（事件被消费线程接收/入 buffer 时调）。 */
@@ -130,9 +170,15 @@ public abstract class BusConsumerBase<E> {
     }
 
     /** 把队列中残留事件排空到一个新 List（保持 FIFO 顺序）。shutdown drain 用——worker 已停时由调用线程独占调用。 */
+    @SuppressWarnings("unchecked")
     protected final List<E> drainQueue() {
         List<E> out = new ArrayList<E>();
-        queue.drainTo(out);
+        List<Object> raw = new ArrayList<Object>();
+        queue.drainTo(raw);
+        for (Object queued : raw) {
+            // 队列只装 Entry<E>（onEvent 唯一入队方），强转安全
+            out.add((E) ((Entry<?>) queued).event);
+        }
         return out;
     }
 
@@ -148,6 +194,40 @@ public abstract class BusConsumerBase<E> {
     public long getDroppedCount() { return dropped.get(); }
     public long getProcessedCount() { return processed.get(); }
     public int getQueueSize() { return queue.size(); }
+
+    /** 队列总容量（size + remainingCapacity，消费中不影响）。system_health 队列深度百分比用。 */
+    public int getQueueCapacity() { return queue.size() + queue.remainingCapacity(); }
+
+    /** worker 是否已停（shutdown/shutdownNow 后为 true）。健康端点过滤已停消费者用。 */
+    public boolean isShutdown() { return worker.isShutdown(); }
+
+    /**
+     * 当前存活（未 shutdown、弱引用未死）的 consumer 快照，按构造顺序。
+     * 读路径顺带清理已 GC 的弱引用——注册表不随时间膨胀。
+     */
+    public static List<BusConsumerBase<?>> liveConsumers() {
+        List<BusConsumerBase<?>> out = new ArrayList<>();
+        for (WeakReference<BusConsumerBase<?>> ref : LIVE_CONSUMERS) {
+            BusConsumerBase<?> consumer = ref.get();
+            if (consumer == null) {
+                LIVE_CONSUMERS.remove(ref);
+            } else if (!consumer.isShutdown()) {
+                out.add(consumer);
+            }
+        }
+        return out;
+    }
+
+    /** 队列元素：载荷 + 发布线程捕获的因果 traceId（ULID）。 */
+    private static final class Entry<E> {
+        final E event;
+        final String causationId;
+
+        Entry(E event, String causationId) {
+            this.event = event;
+            this.causationId = causationId;
+        }
+    }
 
     private static final class NamedDaemonFactory implements ThreadFactory {
         private final String name;

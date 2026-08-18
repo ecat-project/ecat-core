@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 测试专用日志配置（logback 查找顺序 logback-test.xml 优先于 main 的 logback.xml）：
+     此前 ecat-core 测试经 classpath 默认加载生产五通道 logback.xml，把 surefire 的
+     测试日志（startup-report/红测试 fixture 输出等）写进了 workspace/logs/app.log，
+     污染生产日志目录与日志量测量。测试改为仅控制台输出、无 turbo filter、无文件，
+     生产配置不受影响（LogbackConfigLoadTest 等经 JoranConfigurator 显式加载原 xml，
+     不依赖默认查找）。 -->
+<configuration>
+    <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    <root level="info">
+        <appender-ref ref="console"/>
+    </root>
+</configuration>

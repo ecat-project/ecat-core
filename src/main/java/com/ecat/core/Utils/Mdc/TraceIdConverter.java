@@ -18,7 +18,8 @@ package com.ecat.core.Utils.Mdc;
 
 import ch.qos.logback.classic.pattern.ClassicConverter;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import org.slf4j.MDC;
+
+import java.util.Map;
 
 /**
  * Logback TraceId 转换器
@@ -42,12 +43,14 @@ public class TraceIdConverter extends ClassicConverter {
 
     @Override
     public String convert(ILoggingEvent event) {
-        // 首先从 MDC 获取
-        String traceId = MDC.get(TraceContext.TRACE_ID_KEY);
+        // 必须读事件自带 MDC 快照而非线程 ThreadLocal：文件通道全包 AsyncAppender，
+        // 格式化发生在异步投递线程，该线程的 ThreadLocal MDC 恒为空（曾致生产 95k+ 行 [-] 空槽）。
+        Map<String, String> mdc = event.getMDCPropertyMap();
+        String traceId = mdc == null ? null : mdc.get(TraceContext.TRACE_ID_KEY);
         if (traceId == null || traceId.isEmpty()) {
             return DEFAULT_TRACE_ID;
         }
-        // 返回 UUID 前 8 位
-        return traceId.length() >= 8 ? traceId.substring(0, 8) : traceId;
+        // 26 字符 ULID 全量透传（不截断）：ULID 字典序即时间序，grep 完整 id 才能串起全链路
+        return traceId;
     }
 }

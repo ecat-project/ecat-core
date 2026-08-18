@@ -105,18 +105,7 @@ public class MdcScheduledExecutorService extends MdcExecutorService implements S
      * @return 包装后的任务
      */
     private Runnable wrapPeriodicRunnable(Runnable task, Map<String, String> context) {
-        return () -> {
-            Map<String, String> previousContext = TraceContext.capture();
-            try {
-                // 恢复上下文（coordinate 等）
-                TraceContext.restore(context);
-                // 为每次执行生成新的 Trace ID
-                TraceContext.setTraceId(TraceContext.generateTraceId());
-                task.run();
-            } finally {
-                TraceContext.restore(previousContext);
-            }
-        };
+        return TraceContext.wrapPeriodicRunnable(task, context);
     }
 
     @Override

@@ -168,7 +168,8 @@ public class ConfigFlowRegistry {
      */
     public void registerActiveFlow(String flowId, AbstractConfigFlow flow) {
         trackedFlows.put(flowId, new TrackedFlow(flow));
-        log.info("Registered active flow: flowId={}, class={}", flowId, flow.getClass().getSimpleName());
+        // 例行注册（discovery 探测/测试流程高频 register+abort 对）降 DEBUG，避免 INFO 风暴
+        log.debug("Registered active flow: flowId={}, class={}", flowId, flow.getClass().getSimpleName());
     }
 
     /**
@@ -178,7 +179,7 @@ public class ConfigFlowRegistry {
     public void registerIfAbsent(String flowId, AbstractConfigFlow flow) {
         if (!trackedFlows.containsKey(flowId)) {
             trackedFlows.put(flowId, new TrackedFlow(flow));
-            log.info("Registered active flow: flowId={}, class={}", flowId, flow.getClass().getSimpleName());
+            log.debug("Registered active flow: flowId={}, class={}", flowId, flow.getClass().getSimpleName());
         }
     }
 
@@ -260,7 +261,8 @@ public class ConfigFlowRegistry {
         TrackedFlow tracked = trackedFlows.remove(flowId);
         if (tracked != null) {
             tracked.flow.onRelease();
-            log.info("Aborted active flow: flowId={}", flowId);
+            // 例行 abort（discovery 探测取消/last-writer-win 置换）与 register 成对高频出现，降 DEBUG
+            log.debug("Aborted active flow: flowId={}", flowId);
         }
     }
 

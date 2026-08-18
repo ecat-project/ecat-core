@@ -107,6 +107,13 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     private volatile AttrState<T> lastState;
     // 上一态：lastState 的前驱，永远指向真正的上一个 state（即发布事件的 old）。不再被中间态覆盖，语义干净。
     protected volatile AttrState<T> previousState;
+    // 在途变更代数（guarded by this，读写均在 synchronized(this) 内）：每次注册在途变更
+    // （updateValue / setStatus / setValueUpdated(true)）时递增。publicState 在锁内摘取在途 midState
+    // 作 newState 时记录当时代数；发布（锁外）完成后的移位提交仅当代数未变才清 midState/isValueUpdated
+    // ——提交窗口内新到的并发写入已重建 midState 并推进代数，不会被提交序列误清（修丢更新竞态：
+    // 原 publicState 全程无锁，midState=null/isValueUpdated=false 会清掉窗口内并发 updateValue 的写入，
+    // 该值既不上总线也不进 lastState，静默蒸发）。
+    private long pendingGeneration;
     // 事件溯源上下文：谁触发本次变更（设备轮询/用户操作/逻辑重发布/跨集成）。默认设备轮询；
     // 用户/逻辑入口在调用 updateValue 前用 setEventContext 覆盖。
     private volatile EventContext eventContext;
@@ -410,9 +417,12 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
         return getDisplayValue(displayUnit);
     }
 
-    public void setValueUpdated(boolean isValueUpdated){
+    public synchronized void setValueUpdated(boolean isValueUpdated){
         if(isValueUpdated){
             this.updateTime = Instant.now();
+            // 注册在途变更：递增代数。publicState 以「摘取时代的数」与提交时代数比对，
+            // 区分「我的提交」与「我提交期间新到的写」（见 pendingGeneration 注释）。
+            this.pendingGeneration++;
         }
         this.isValueUpdated = isValueUpdated;
     }
@@ -485,29 +495,43 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      *（避免值新/状态旧的瞬态撕裂态被持久化）。
      */
     public boolean publicState() {
-        if(!this.isValueUpdated){
-            // 无在途变更，无可发布内容（早返回，不触门禁）
-            return true;
-        }
-        if (device == null) {
-            // 属性未注册到设备时（如单元测试中），无法发布总线事件
-            log.warn("Attribute '{}' is not registered to any device, skip publicState", this.getAttributeID());
-            return true;
-        }
-        if (!device.isReady()) {
-            // 硬门禁（替代原软挂起的 return-true）：设备未就绪（phase < READY）即 publish 是垃圾代码——
-            // 全工作区已无合法预 ready publisher（初值统一在 start() 设、逻辑设备 init 期 updateValue 刻意
-            // 早于 setAttribute 致 device=null 不建 midState），故此处抛而非挂起，让错误当场暴露。
-            // 抛在 try 外：不被下方 catch(Exception) 吞掉，midState/isValueUpdated 原样保留待 markReady flush。
-            // 注：稳定 id 已由 DeviceBase.load 在 init 之前解析（resolveStableId），故此处与 id 无关。
-            throw new IllegalStateException(
-                "设备未就绪（phase=" + device.getPhase() + "），禁止发布 attr " + attributeID
-                + "；初值应设在 start()（markReady 之后），不得在 createAttributes/init 预 ready 期 publish");
-        }
-        AttrState<T> newState = this.midState;
-        if (newState == null) {
-            // 无在途 midState（理论上 isValueUpdated=true 时不会到此），无可发布内容
-            return true;
+        AttrState<T> newState;
+        AttrState<T> oldState;
+        long extractGeneration;
+        // 摘取（检查+取 midState/lastState+记代数）与并发 updateValue/setStatus（全程 synchronized(this)）互斥：
+        // 原实现本方法全程无锁，「读 midState → 发布 → 移位 → midState=null → isValueUpdated=false」
+        // 与并发 updateValue 竞争——后者重建的 midState 被 midState=null 清掉、标志被复位，该次写入
+        // 既不上总线也不进 lastState，静默蒸发（实测末写永不发布）。发布/持久化保持锁外：总线订阅者
+        // 含同步级联（LogicBindConsumer 再入其他属性 publicState），锁内发布会引入跨属性锁序反转死锁
+        // 与慢订阅者阻塞轮询写路径。
+        synchronized (this) {
+            if(!this.isValueUpdated){
+                // 无在途变更，无可发布内容（早返回，不触门禁）
+                return true;
+            }
+            if (device == null) {
+                // 属性未注册到设备时（如单元测试中），无法发布总线事件
+                log.warn("Attribute '{}' is not registered to any device, skip publicState", this.getAttributeID());
+                return true;
+            }
+            if (!device.isReady()) {
+                // 硬门禁（替代原软挂起的 return-true）：设备未就绪（phase < READY）即 publish 是垃圾代码——
+                // 全工作区已无合法预 ready publisher（初值统一在 start() 设、逻辑设备 init 期 updateValue 刻意
+                // 早于 setAttribute 致 device=null 不建 midState），故此处抛而非挂起，让错误当场暴露。
+                // 抛在 try 外：不被下方 catch(Exception) 吞掉，midState/isValueUpdated 原样保留待 markReady flush。
+                // 注：稳定 id 已由 DeviceBase.load 在 init 之前解析（resolveStableId），故此处与 id 无关。
+                throw new IllegalStateException(
+                    "设备未就绪（phase=" + device.getPhase() + "），禁止发布 attr " + attributeID
+                    + "；初值应设在 start()（markReady 之后），不得在 createAttributes/init 预 ready 期 publish");
+            }
+            newState = this.midState;
+            if (newState == null) {
+                // 无在途 midState（理论上 isValueUpdated=true 时不会到此），无可发布内容
+                return true;
+            }
+            // old/new 在同一锁内原子捕获（对齐 DeviceDataChangedEvent 载荷契约：事件绝对自洽、链连续无幽灵中间态）
+            oldState = this.lastState;
+            extractGeneration = this.pendingGeneration;
         }
         // context 取自 eventContext（null 兜底设备轮询——setValueUpdated(true) 公开入口可能绕过 updateValue）
         EventContext ctx = (this.eventContext != null)
@@ -526,23 +550,29 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
             }
         }
         try {
-            // 发布总线事件：old=lastState（上次提交），new=midState（本次在途）。
+            // 发布总线事件：old=lastState（上次提交），new=摘取的本次在途态。
             // 失败抛到本 catch → publicState 返回 false（保留发布失败可感知契约；未移位，下次 publicState 可重试）。
-            // midState 的 deviceId 与 device.getId() 一致（DeviceBase.load 已在 init/buildState 前解析稳定 id）。
+            // newState 的 deviceId 与 device.getId() 一致（DeviceBase.load 已在 init/buildState 前解析稳定 id）。
             DeviceDataChangedEvent change = new DeviceDataChangedEvent(
-                    device.getId(), attributeID, this.lastState, newState);
+                    device.getId(), attributeID, oldState, newState);
             BusEvent<DeviceDataChangedEvent> event = BusEvent.of(
                     BusTopic.DEVICE_DATA_UPDATE.getTopicName(), change, ctx);
             device.getCore().getBusRegistry().publish(event);
-            // 发布成功后移位提交：previous←last, last←mid(已提交), mid=null
-            this.previousState = this.lastState;
-            this.lastState = newState;
-            this.midState = null;
+            // 发布成功后移位提交（锁内）：previous←old, last←new(已提交)。
+            // 仅当摘取之后无新在途写（代数未变）才清 midState/isValueUpdated——提交期间新到的
+            // updateValue/setStatus 已重建 midState 并推进代数，此处不清，留给下一周期发布（防丢更新）。
+            synchronized (this) {
+                this.previousState = oldState;
+                this.lastState = newState;
+                if (this.pendingGeneration == extractGeneration) {
+                    this.midState = null;
+                    this.setValueUpdated(false);
+                }
+            }
         } catch (Exception e) {
             log.error("Failed to publish attribute state " + this.getAttributeID() + " for device " + device.getId(), e);
             return false;
         }
-        this.setValueUpdated(false);
         return true;
     }
 
@@ -648,7 +678,12 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     public boolean updateValue(T newValue, AttributeStatus newStatus){
         // null 表示"不改变当前状态"（保留既有 status 字段），而非置空——buildState 要求 status 非空。
         if (newStatus != null) {
-            this.status = newStatus;
+            // status 写入纳入互斥：原先锁外写 this.status 与 setStatus 的锁内写混用两套纪律，
+            // 并发 publicState 摘取/订阅者读取可见撕裂。小临界区只管 status 写；随后的
+            // updateValue 临界区完成值写入+midState 重建（原子性级别与 setStatus 的单临界区对齐）。
+            synchronized (this) {
+                this.status = newStatus;
+            }
         }
         return updateValue(newValue);
     }

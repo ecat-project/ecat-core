@@ -52,6 +52,10 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -61,12 +65,15 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * IntegrationManager is responsible for loading and managing integrations.
@@ -79,6 +86,111 @@ public class IntegrationManager {
 
     private static String INTEGRATIONS_CONFIG_PATH = ".ecat-data/core/integrations.yml";
     private static String INTEGRATION_ITEM_PATH = ".ecat-data/integrations/%s.yml";
+
+    /**
+     * integrations.yml 写-写互斥锁：{@code updateIntegrationsConfig}（覆盖写）与
+     * {@code saveIntegrationConfig}（读-改-写）经此串行化；{@code loadIntegrationsConfig}（纯读）不加锁
+     * ——写方经 tmp+rename 原子替换，读者任意时刻打开的都是完整文件。
+     *
+     * <p>修并发写竞态：这些方法被 REST 线程（enable/disable/upgrade/add）并发调用，原先无任何互斥——
+     * 并发「load 全量 → 内存改 → 覆盖写回」互相抹掉对方的键（丢更新），且读者在写者
+     * 「已截断、未写完」窗口读到半截 YAML。低频操作（配置变更），单锁串行化无争用顾虑。
+     * 独立锁对象而非 synchronized(this)：避免与本类其他 synchronized 区域（如有）互相影响。
+     */
+    private final Object configFileSync = new Object();
+
+    // ==================== integrations.yml 读缓存（F6）+ jar 依赖扫描缓存（F4） ====================
+
+    /**
+     * 文件 stat 戳（mtime 毫秒 + 字节数 + fileKey/inode）：两戳相等视为文件未变。
+     *
+     * <p>选型（如实记录）：{@link BasicFileAttributes#fileKey()} 在 Linux（ext4 等）即 inode，
+     * A4-2 写方的 tmp+rename 原子替换必然换 inode——即使新旧文件同毫秒同字节数也必然 miss，
+     * 这是读缓存失效判定的主信号；mtime/size 是 fileKey 不可用文件系统（Windows FAT 返回 null）
+     * 下的唯一信号。不持 FileChannel stamp 的原因：需要长开句柄，与「读者短开短关、写方随时 rename」
+     * 的并发模型冲突（Windows 上还会阻塞 rename 重试路径）。
+     *
+     * <p>已知边界：fileKey 为 null 且 mtime 毫秒粒度内发生同字节数的外部替换，缓存不可见
+     * （本进程写路径无此窗口——写后主动换新缓存，见 {@link #updateIntegrationsConfig}）。
+     */
+    private static final class FileStatStamp {
+        private final long lastModifiedMillis;
+        private final long size;
+        private final Object fileKey;
+
+        FileStatStamp(long lastModifiedMillis, long size, Object fileKey) {
+            this.lastModifiedMillis = lastModifiedMillis;
+            this.size = size;
+            this.fileKey = fileKey;
+        }
+
+        boolean sameAs(FileStatStamp other) {
+            return other != null
+                && lastModifiedMillis == other.lastModifiedMillis
+                && size == other.size
+                && Objects.equals(fileKey, other.fileKey);
+        }
+    }
+
+    /** 读缓存单槽：配置路径 + stat 戳 + 解析快照（读出口一律深拷贝，调用方改坏不回流缓存）。 */
+    private static final class ConfigReadCacheEntry {
+        private final String path;
+        private final FileStatStamp stamp;
+        private final Map<String, Map<String, Object>> parsed;
+
+        ConfigReadCacheEntry(String path, FileStatStamp stamp, Map<String, Map<String, Object>> parsed) {
+            this.path = path;
+            this.stamp = stamp;
+            this.parsed = parsed;
+        }
+    }
+
+    /** 最近一次 integrations.yml 解析快照（volatile 单槽；null = 无缓存）。 */
+    private volatile ConfigReadCacheEntry configReadCache;
+
+    /** miss 重解析 single-flight 锁：读命中路径无锁；锁序恒为 configFileSync → 本锁，无反转路径。 */
+    private final Object configParseLock = new Object();
+
+    /** integrations.yml 实际 IO+解析次数（仅 miss 递增）：包内可见，单测断言缓存命中。 */
+    final AtomicLong configParseCount = new AtomicLong();
+
+    /** jar 依赖缓存槽：stat 戳 + 依赖坐标（不可变列表，命中时拷出可变副本）。 */
+    private static final class JarDependencyCacheEntry {
+        private final FileStatStamp stamp;
+        private final List<String> dependencyCoordinates;
+
+        JarDependencyCacheEntry(FileStatStamp stamp, List<String> dependencyCoordinates) {
+            this.stamp = stamp;
+            this.dependencyCoordinates = dependencyCoordinates;
+        }
+    }
+
+    /** jar 依赖坐标缓存（F4）：key = jar 绝对路径。条目随 stat 变化自然失效；重启即清空。 */
+    private final ConcurrentHashMap<String, JarDependencyCacheEntry> jarDependencyCache = new ConcurrentHashMap<>();
+
+    /** jar 实际扫描次数（JarFile 开 + ecat-config.yml 解析，仅 miss 递增）：包内可见，单测断言缓存命中。 */
+    final AtomicLong jarScanCount = new AtomicLong();
+
+    /**
+     * 读文件 stat 戳。
+     *
+     * @return 戳；文件不存在/不可 stat 时返回 null（调用方按必然 miss 处理）
+     */
+    private static FileStatStamp stampOf(File file) {
+        try {
+            BasicFileAttributes attrs = Files.readAttributes(file.toPath(), BasicFileAttributes.class);
+            return new FileStatStamp(
+                attrs.lastModifiedTime().toMillis(), attrs.size(), attrs.fileKey());
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 启动契约：单次 createEntry 的耗时预算（毫秒），超限即 WARN 点名（见 {@link #warnIfCreateEntryBlocking}）。
+     * 包内可见供单测收紧预算（默认 5000）。
+     */
+    long createEntryBudgetMs = 5000L;
 
     private final EcatCore core;
     private final IntegrationRegistry integrationRegistry;
@@ -203,24 +315,28 @@ public class IntegrationManager {
      * @return 加载完成的 IntegrationBase 实例
      */
     private IntegrationBase loadSingleIntegration(IntegrationInfo info) throws Exception {
-        return loadSingleIntegration(info, Collections.singletonList(info));
+        return loadSingleIntegration(info, Collections.singletonList(info), null);
     }
 
     /**
      * 加载单个集成的完整生命周期：instantiateIntegration → onLoad → register → registerConfigFlow → onInit → onStart。
      *
-     * <p>启动期与运行时共用此方法，差异仅在 loadOrder 范围：
-     * 启动期传入完整 loadOrder（含所有待加载集成，供 findParentClassloader 递归未注册的依赖链）；
-     * 运行时由 {@link #loadSingleIntegration(IntegrationInfo)} 传入仅含自身的列表。
+     * <p>启动期与运行时共用此方法，差异仅在 loadOrder 范围与计时：
+     * 启动期传入完整 loadOrder（含所有待加载集成，供 findParentClassloader 递归未注册的依赖链）
+     * 与非 null tracker（分集成耗时进启动健康报告）；运行时由 {@link #loadSingleIntegration(IntegrationInfo)}
+     * 传入仅含自身的列表与 null tracker（不计入启动报告）。
      *
      * <p>严格模式：任意环节失败即向上抛出，由调用方（enable/add）负责回滚 yml 状态，
      * 避免出现「yml 标 RUNNING 但无实例/无 flow」的僵尸态。
      *
      * @param info      集成信息
      * @param loadOrder 用于 findParentClassloader 递归的 IntegrationInfo 列表
+     * @param tracker   启动耗时追踪器（启动期传入；运行时传 null 不记录）
      * @return 加载完成的 IntegrationBase 实例
      */
-    private IntegrationBase loadSingleIntegration(IntegrationInfo info, List<IntegrationInfo> loadOrder) throws Exception {
+    private IntegrationBase loadSingleIntegration(IntegrationInfo info, List<IntegrationInfo> loadOrder,
+                                                  StartupLoadTracker tracker) throws Exception {
+        long startNanos = System.nanoTime();
         LoadJarResult checkService = instantiateIntegration(info, loadOrder);
         IntegrationBase integration = checkService.getIntegration();
         IntegrationLoadOption loadOption = new IntegrationLoadOption(checkService.getClassLoader());
@@ -231,6 +347,9 @@ public class IntegrationManager {
         registerConfigFlow(info.getCoordinate(), integration);
         integration.onInit();
         integration.onStart();
+        if (tracker != null) {
+            tracker.recordLoadNanos(info.getCoordinate(), System.nanoTime() - startNanos);
+        }
         return integration;
     }
 
@@ -429,8 +548,9 @@ public class IntegrationManager {
      * 加载所有已加载集成的现有 ConfigEntries
      * <p>
      * 在所有集成启动完成后调用，从持久化条目重新创建设备。
+     * 仅启动期调用（运行时 enable 走单坐标 {@link #loadExistingConfigEntriesForCoordinate(String)}）。
      */
-    private void loadExistingConfigEntries() {
+    private void loadExistingConfigEntries(StartupLoadTracker tracker) {
         ConfigEntryRegistry entryRegistry = getEntryRegistry();
         if (entryRegistry == null) {
             log.debug("ConfigEntryRegistry not available");
@@ -438,8 +558,15 @@ public class IntegrationManager {
         }
 
         for (String coordinate : integrationRegistry.getAllCoordinates()) {
-            loadExistingConfigEntriesForCoordinate(coordinate);
+            loadExistingConfigEntriesForCoordinate(coordinate, tracker);
         }
+    }
+
+    /**
+     * 加载指定集成的现有 ConfigEntries（运行时 enable 复用入口，不计入启动报告）
+     */
+    private void loadExistingConfigEntriesForCoordinate(String coordinate) {
+        loadExistingConfigEntriesForCoordinate(coordinate, null);
     }
 
     /**
@@ -451,9 +578,12 @@ public class IntegrationManager {
      * 3. 如果有合并结果，持久化并使用合并后的 entries
      * 4. 对每个启用的 entry 调用 createEntry()
      *
+     * <p>包内可见：单测直接驱动（注入假集成断言启动报告内容）。
+     *
      * @param coordinate 集成坐标
+     * @param tracker    启动耗时追踪器（启动期传入；运行时传 null 不记录）
      */
-    private void loadExistingConfigEntriesForCoordinate(String coordinate) {
+    void loadExistingConfigEntriesForCoordinate(String coordinate, StartupLoadTracker tracker) {
         ConfigEntryRegistry entryRegistry = getEntryRegistry();
         if (entryRegistry == null) {
             return;
@@ -468,43 +598,79 @@ public class IntegrationManager {
 
         log.info("Loading {} existing entries for {}", entries.size(), coordinate);
 
-        // 1. 调用 mergeEntries() 进行版本升级
-        List<ConfigEntry> mergedEntries = integration.mergeEntries(entries);
-        if (mergedEntries != null) {
-            // 2. 持久化合并后的 entries
-            for (ConfigEntry merged : mergedEntries) {
-                entryRegistry.updateEntry(merged.getEntryId(), merged);
-            }
-            entries = mergedEntries;
-            log.info("Merged {} entries for {}", entries.size(), coordinate);
-        }
-
-        // 3. 创建设备
-        for (ConfigEntry entry : entries) {
-            if (!entry.isEnabled()) {
-                continue;
-            }
-            try {
-                integration.createEntry(entry);
-                log.info("Loaded entry: {} for {}", entry.getEntryId(), coordinate);
-            } catch (UnsupportedOperationException e) {
-                // Integration doesn't support ConfigEntry, skip this integration
-                log.debug("Integration {} doesn't support ConfigEntry", coordinate);
-                break;
-            } catch (Exception e) {
-                log.error("Failed to load entry {}: {}", entry.getEntryId(), e.getMessage());
-            }
-        }
-
-        // 4. 通知集成所有已持久化 entry 加载完毕（即使 entries 为空也必须调用）
+        long coordinateStartNanos = System.nanoTime();
         try {
-            integration.onAllExistEntriesLoaded(entries);
-            log.info("All entries loaded for {}, ready={}", coordinate,
-                integration.isReady());
-        } catch (UnsupportedOperationException e) {
-            log.debug("Integration {} doesn't support onAllExistEntriesLoaded", coordinate);
-        } catch (Exception e) {
-            log.error("onAllExistEntriesLoaded failed for {}: {}", coordinate, e.getMessage());
+            // 1. 调用 mergeEntries() 进行版本升级
+            List<ConfigEntry> mergedEntries = integration.mergeEntries(entries);
+            if (mergedEntries != null) {
+                // 2. 持久化合并后的 entries
+                for (ConfigEntry merged : mergedEntries) {
+                    entryRegistry.updateEntry(merged.getEntryId(), merged);
+                }
+                entries = mergedEntries;
+                log.info("Merged {} entries for {}", entries.size(), coordinate);
+            }
+
+            // 3. 创建设备
+            for (ConfigEntry entry : entries) {
+                if (!entry.isEnabled()) {
+                    continue;
+                }
+                try {
+                    long entryStartNanos = System.nanoTime();
+                    integration.createEntry(entry);
+                    warnIfCreateEntryBlocking(entry.getEntryId(), coordinate,
+                            System.nanoTime() - entryStartNanos);
+                    log.info("Loaded entry: {} for {}", entry.getEntryId(), coordinate);
+                    if (tracker != null) {
+                        tracker.recordEntryRestored();
+                    }
+                } catch (UnsupportedOperationException e) {
+                    // Integration doesn't support ConfigEntry, skip this integration
+                    log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+                    break;
+                } catch (Exception e) {
+                    log.error("Failed to load entry {}: {}", entry.getEntryId(), e.getMessage());
+                    if (tracker != null) {
+                        tracker.recordFailure(coordinate, "entry:" + entry.getEntryId());
+                    }
+                }
+            }
+
+            // 4. 通知集成所有已持久化 entry 加载完毕（即使 entries 为空也必须调用）
+            try {
+                integration.onAllExistEntriesLoaded(entries);
+                log.info("All entries loaded for {}, ready={}", coordinate,
+                    integration.isReady());
+            } catch (UnsupportedOperationException e) {
+                log.debug("Integration {} doesn't support onAllExistEntriesLoaded", coordinate);
+            } catch (Exception e) {
+                log.error("onAllExistEntriesLoaded failed for {}: {}", coordinate, e.getMessage());
+                if (tracker != null) {
+                    tracker.recordFailure(coordinate, "onAllExistEntriesLoaded");
+                }
+            }
+        } finally {
+            if (tracker != null) {
+                tracker.recordEntryRestoreNanos(coordinate, System.nanoTime() - coordinateStartNanos);
+            }
+        }
+    }
+
+    /**
+     * 启动契约执法点（C1 立法）：createEntry 禁阻塞。
+     *
+     * <p>createEntry 只允许做对象构建与注册（毫秒级）；连接建立/健康检查/外部依赖等待必须移到
+     * 集成自拥后台线程（参照 vision-analysis 后台拉起改造），设备按 late-ready 收口
+     * （markReady 只在真能供数后）。超预算即 WARN 点名——新代码此为契约违规；
+     * 存量慢集成（串口首查等）不强制迁移，由 D 阶段轮询骨架统一收编。
+     */
+    private void warnIfCreateEntryBlocking(String entryId, String coordinate, long nanos) {
+        long ms = TimeUnit.NANOSECONDS.toMillis(nanos);
+        if (ms > createEntryBudgetMs) {
+            log.warn("createEntry 阻塞 {}ms 超出 {}ms 预算: entry={} integration={} "
+                    + "——启动契约：createEntry 禁阻塞（存量豁免至 D 阶段骨架收编）",
+                    ms, createEntryBudgetMs, entryId, coordinate);
         }
     }
 
@@ -517,6 +683,11 @@ public class IntegrationManager {
         // Map<String, Object> coreitgs = coreIntegrationsConfig.getOrDefault("integrations", null);
 
         // TODO: merge coreitgs and itgs for needed
+
+        // 启动健康报告：总耗时从本方法进入（jar 扫描前）计到 ALL_LOADED 发布点；
+        // 分集成耗时沿加载/entry 恢复路径埋点（arch-review 02 号 F1：慢集成曾在日志里完全不可见）
+        final long startupStartNanos = System.nanoTime();
+        final StartupLoadTracker tracker = new StartupLoadTracker();
 
         Map<String, Map<String, Object>> integrationsConfig = loadIntegrationsConfig();
         Map<String, Object> itgs = integrationsConfig.getOrDefault("integrations", new HashMap<>());
@@ -630,8 +801,9 @@ public class IntegrationManager {
                     // 启动期传入完整 loadOrder，供 findParentClassloader 递归未注册的依赖链。
                     // 启动期容忍单个集成加载失败（仅记日志，不中断其他集成加载）。
                     try {
-                        loadSingleIntegration(info, loadOrder);
+                        loadSingleIntegration(info, loadOrder, tracker);
                     } catch (Exception e) {
+                        tracker.recordFailure(info.getCoordinate(), "load");
                         log.error("集成 " + info.getArtifactId() + " 加载失败: " + e.getMessage(), e);
                     }
                 });
@@ -643,8 +815,15 @@ public class IntegrationManager {
         // 等待所有集成加载完成后，保存初始依赖关系快照
         try {
             executorService.shutdown();
-            if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-                log.warn("集成加载超时，部分集成可能未完全加载");
+            // 语义修正（修 ALL_LOADED 栅栏竞态）：awaitTermination 返回 false = 池中加载任务仍在执行，
+            // 「超时≠全部加载完成」。原实现固定 60s 超时后仅 warn 即照常广播 ALL_LOADED——订阅方
+            // （airstation/airdevice 创建逻辑设备、agent-bridge 对账）会面对不完整世界做出错误决策。
+            // 现改为阻塞等待到真完成（365 天量级的上限仅为防御 deadline 算术溢出，等价「无限等」），
+            // 只有确认全部加载任务结束（返回 true）才发布 ALL_LOADED；false（理论仅异常池可达）不发布。
+            boolean allLoaded = executorService.awaitTermination(365, TimeUnit.DAYS);
+            if (!allLoaded) {
+                log.error("集成加载未完成（awaitTermination=false，仍有加载任务在执行），"
+                    + "INTEGRATIONS_ALL_LOADED 不发布：禁止在加载未完成时宣布「全部加载完成」");
             }
             // 重新创建线程池（后续操作可能需要）
             executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1, new NamedThreadFactory("integration-manager")));
@@ -656,16 +835,24 @@ public class IntegrationManager {
             saveInitialDependencySnapshot();
 
             // 加载所有已加载集成的现有 ConfigEntries
-            loadExistingConfigEntries();
+            loadExistingConfigEntries(tracker);
 
-            // 发布所有集成加载完成事件（同步），通知逻辑设备子集成可以创建逻辑设备
-            BusRegistry busRegistry = getBusRegistry();
-            if (busRegistry != null) {
-                busRegistry.publish(BusEvent.of(
-                    BusTopic.INTEGRATIONS_ALL_LOADED.getTopicName(),
-                    new AllLoadedEvent(),
-                    EventContext.root(EventContext.Source.SYSTEM, null)));
-                log.info("Published INTEGRATIONS_ALL_LOADED event");
+            // 启动健康报告（一行 INFO，`startup-report:` 前缀可 grep）：总耗时 + 慢集成 top5 + 失败数。
+            // 输出点=ALL_LOADED 发布处——A4-2 语义下此处已等真完成，报告即最终账；
+            // allLoaded=false（理论仅异常池可达）时同样输出，失败清单本身就是诊断线索。
+            log.info(tracker.render(System.nanoTime() - startupStartNanos));
+
+            // 发布所有集成加载完成事件（同步），通知逻辑设备子集成可以创建逻辑设备。
+            // 仅在确认全部加载任务完成后发布（allLoaded=true）：发布时刻订阅方看到的是完整世界。
+            if (allLoaded) {
+                BusRegistry busRegistry = getBusRegistry();
+                if (busRegistry != null) {
+                    busRegistry.publish(BusEvent.of(
+                        BusTopic.INTEGRATIONS_ALL_LOADED.getTopicName(),
+                        new AllLoadedEvent(),
+                        EventContext.root(EventContext.Source.SYSTEM, null)));
+                    log.info("Published INTEGRATIONS_ALL_LOADED event");
+                }
             }
 
         } catch (InterruptedException e) {
@@ -1708,98 +1895,256 @@ public class IntegrationManager {
     }
 
 
-    // 加载完整配置（自动创建文件）
+    // 加载完整配置（自动创建文件）。F6 读缓存：stat 戳未变直接返回解析快照的深拷贝，
+    // 免去 14 个调用点（状态查询/enable/disable/add/remove/upgrade/findDependents 等）各自的重复 IO+解析。
     public Map<String, Map<String, Object>> loadIntegrationsConfig() {
+        // 无锁读取是安全的：写方（updateIntegrationsConfig）经 tmp+rename 原子替换，读者任意时刻
+        // 打开的都是完整文件（旧版或新版），不存在「已截断、未写完」的中间态窗口。
+        // 缓存命中返回的同样是完整旧版或新版的深拷贝，对外语义与重读磁盘一致。
+        // 读方不加锁也避免紧循环读者（状态查询等）占住 configFileSync 使写方饥饿。
+        // saveIntegrationConfig 的读-改-写原子性由其自身持锁保证（其内部的 load 调用发生在锁内）。
         File configFile = new File(INTEGRATIONS_CONFIG_PATH);
-        
-        // 确保文件存在（不存在则创建空文件）
-        if (!configFile.exists()) {
-            createEmptyConfigFile(configFile);
-            return new HashMap<>();
+
+        FileStatStamp stamp = stampOf(configFile);
+        ConfigReadCacheEntry cached = configReadCache;
+        if (isConfigCacheHit(cached, configFile, stamp)) {
+            return deepCopyConfig(cached.parsed);
         }
-        
-        try (InputStream inputStream = new FileInputStream(configFile)) {
-            Yaml yaml = new Yaml();
-            Map<String, Map<String, Object>> config = yaml.load(inputStream);
-            return config != null ? config : new HashMap<>();
-        } catch (IOException e) {
-            log.error("读取配置文件失败: " + e.getMessage());
-            return new HashMap<>();
+
+        synchronized (configParseLock) {
+            // 锁内复核：等待期间并发 miss 可能已填充。
+            stamp = stampOf(configFile);
+            cached = configReadCache;
+            if (isConfigCacheHit(cached, configFile, stamp)) {
+                return deepCopyConfig(cached.parsed);
+            }
+
+            // 确保文件存在（不存在则创建空文件）。createNewFile 原子：并发读者/写者同建只有一个成功写入。
+            if (!configFile.exists()) {
+                configReadCache = null; // 文件消失：废弃缓存，重建后的内容以下一次 miss 重解析为准
+                createEmptyConfigFile(configFile);
+                return new HashMap<>();
+            }
+
+            try (InputStream inputStream = new FileInputStream(configFile)) {
+                configParseCount.incrementAndGet();
+                Yaml yaml = new Yaml();
+                Map<String, Map<String, Object>> config = yaml.load(inputStream);
+                Map<String, Map<String, Object>> result = config != null ? config : new HashMap<>();
+                // 解析前后 stat 一致 → 解析内容确属该戳，可入缓存；不一致说明解析期间文件被原子替换
+                // （读到的是旧或新的完整版本，仍正确），放弃缓存让下一次读重解析，杜绝「戳与内容错配」。
+                FileStatStamp after = stampOf(configFile);
+                if (after != null && after.sameAs(stamp)) {
+                    configReadCache = new ConfigReadCacheEntry(configFile.getPath(), after, result);
+                }
+                return deepCopyConfig(result);
+            } catch (IOException e) {
+                log.error("读取配置文件失败: " + e.getMessage());
+                return new HashMap<>();
+            }
         }
+    }
+
+    /** 缓存命中判定：路径一致（防静态路径字段被多实例构造改写后串台）+ stat 戳一致。 */
+    private static boolean isConfigCacheHit(ConfigReadCacheEntry cached, File configFile, FileStatStamp stamp) {
+        return cached != null && stamp != null
+            && cached.path.equals(configFile.getPath())
+            && cached.stamp.sameAs(stamp);
+    }
+
+    /**
+     * 深拷贝配置树（LinkedHashMap 保序，递归拷 Map/List，标量直传）。
+     *
+     * <p>缓存命中/未命中两路读出口共用：调用方拿到的是私有可变副本（与「每次重读磁盘」的既有
+     * 语义一致——saveIntegrationConfig 等读改写路径直接在返回值上改），缓存内快照不被调用方污染。
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Map<String, Object>> deepCopyConfig(Map<String, Map<String, Object>> source) {
+        Map<String, Map<String, Object>> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, Object>> entry : source.entrySet()) {
+            copy.put(entry.getKey(), (Map<String, Object>) deepCopyValue(entry.getValue()));
+        }
+        return copy;
+    }
+
+    /** 递归拷贝 yml 值树：Map 拷为 LinkedHashMap、List 逐项拷、标量（String/Boolean/Number/Date）不可变直传。 */
+    @SuppressWarnings("unchecked")
+    private static Object deepCopyValue(Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> entry : ((Map<String, Object>) value).entrySet()) {
+                copy.put(entry.getKey(), deepCopyValue(entry.getValue()));
+            }
+            return copy;
+        }
+        if (value instanceof List) {
+            List<Object> copy = new ArrayList<>();
+            for (Object item : (List<?>) value) {
+                copy.add(deepCopyValue(item));
+            }
+            return copy;
+        }
+        return value;
     }
 
     // 保存core/integrations.yml单个集成配置（追加模式）
     public void saveIntegrationConfig(String integrationName, Map<String, Object> integrationConfig) {
-        Map<String, Map<String, Object>> fullConfig = loadIntegrationsConfig();
+        // 读-改-写全程持锁：原先三段（load 全量 → 内存改 → 覆盖写回）无互斥，
+        // 两个并发 save 各基于旧快照写回，后写者抹掉先写者的键（丢更新）。
+        // synchronized 可重入，内部对 load/update 的调用不产生自锁。
+        synchronized (configFileSync) {
+            Map<String, Map<String, Object>> fullConfig = loadIntegrationsConfig();
 
-        // 初始化integrations节点
-        Map<String, Object> integrationsNode = fullConfig.computeIfAbsent(
-            "integrations", k -> new LinkedHashMap<>()
-        );
+            // 初始化integrations节点
+            Map<String, Object> integrationsNode = fullConfig.computeIfAbsent(
+                "integrations", k -> new LinkedHashMap<>()
+            );
 
-        // 只保存必要的字段：
-        // 1. 标识字段（用于定位 JAR 包）：groupId, artifactId, version
-        // 2. 运行时状态：enabled, state, update, _deleted, pendingVersion
-        // 不保存静态依赖（dependencies）等其他配置，这些从 JAR 包读取
-        Map<String, Object> runtimeConfig = new LinkedHashMap<>();
+            // 只保存必要的字段：
+            // 1. 标识字段（用于定位 JAR 包）：groupId, artifactId, version
+            // 2. 运行时状态：enabled, state, update, _deleted, pendingVersion
+            // 不保存静态依赖（dependencies）等其他配置，这些从 JAR 包读取
+            Map<String, Object> runtimeConfig = new LinkedHashMap<>();
 
-        // 保存标识字段（用于定位 JAR 包）
-        if (integrationConfig.containsKey("groupId")) {
-            runtimeConfig.put("groupId", integrationConfig.get("groupId"));
-        }
-        if (integrationConfig.containsKey("artifactId")) {
-            runtimeConfig.put("artifactId", integrationConfig.get("artifactId"));
-        }
-        if (integrationConfig.containsKey("version")) {
-            runtimeConfig.put("version", integrationConfig.get("version"));
-        }
+            // 保存标识字段（用于定位 JAR 包）
+            if (integrationConfig.containsKey("groupId")) {
+                runtimeConfig.put("groupId", integrationConfig.get("groupId"));
+            }
+            if (integrationConfig.containsKey("artifactId")) {
+                runtimeConfig.put("artifactId", integrationConfig.get("artifactId"));
+            }
+            if (integrationConfig.containsKey("version")) {
+                runtimeConfig.put("version", integrationConfig.get("version"));
+            }
 
-        // 保存运行时状态
-        if (integrationConfig.containsKey("enabled")) {
-            runtimeConfig.put("enabled", integrationConfig.get("enabled"));
-        }
-        if (integrationConfig.containsKey("state")) {
-            runtimeConfig.put("state", integrationConfig.get("state"));
-        }
-        if (integrationConfig.containsKey("pendingVersion")) {
-            runtimeConfig.put("pendingVersion", integrationConfig.get("pendingVersion"));
-        }
-        if (integrationConfig.containsKey("_deleted")) {
-            runtimeConfig.put("_deleted", integrationConfig.get("_deleted"));
-        }
+            // 保存运行时状态
+            if (integrationConfig.containsKey("enabled")) {
+                runtimeConfig.put("enabled", integrationConfig.get("enabled"));
+            }
+            if (integrationConfig.containsKey("state")) {
+                runtimeConfig.put("state", integrationConfig.get("state"));
+            }
+            if (integrationConfig.containsKey("pendingVersion")) {
+                runtimeConfig.put("pendingVersion", integrationConfig.get("pendingVersion"));
+            }
+            if (integrationConfig.containsKey("_deleted")) {
+                runtimeConfig.put("_deleted", integrationConfig.get("_deleted"));
+            }
 
-        // 添加时间戳
-        runtimeConfig.put("update", new Date().toString());
+            // 添加时间戳
+            runtimeConfig.put("update", new Date().toString());
 
-        // 添加/更新集成配置
-        integrationsNode.put(integrationName, runtimeConfig);
+            // 添加/更新集成配置
+            integrationsNode.put(integrationName, runtimeConfig);
 
-        // 写回文件
-        updateIntegrationsConfig(fullConfig);
+            // 写回文件
+            updateIntegrationsConfig(fullConfig);
+        }
     }
 
     // 覆盖更新core/integrations.yml完整配置
     public void updateIntegrationsConfig(Map<String, Map<String, Object>> config) {
-        File configFile = new File(INTEGRATIONS_CONFIG_PATH);
+        synchronized (configFileSync) {
+            File configFile = new File(INTEGRATIONS_CONFIG_PATH);
 
-        // 确保文件存在（不存在则创建空文件）
-        if (!configFile.exists()) {
-            createEmptyConfigFile(configFile);
+            // 确保文件存在（不存在则创建空文件）
+            if (!configFile.exists()) {
+                createEmptyConfigFile(configFile);
+            }
+
+            // 原子替换写（修并发写竞态的持久损坏）：先写同目录临时文件，再 rename 覆盖目标。
+            // 原实现 new FileOutputStream(configFile) 打开即截断——两个并发写者按各自偏移
+            // 写在互相截断的文件上产生 NUL 稀疏洞（损坏留盘，波及后续所有读者）；读者在
+            // 「已截断、未写完」窗口还会读到半截 YAML。同文件系统 rename 是原子的：
+            // 任意时刻读者看到的要么是旧完整文件、要么是新完整文件。
+            // 调用方（saveIntegrationConfig）持锁期间串行写；tmp 唯一命名防残留互踩。
+            File tmpFile = null;
+            boolean written = false;
+            try {
+                File parent = configFile.getParentFile() != null
+                    ? configFile.getParentFile() : new File(".");
+                tmpFile = File.createTempFile(configFile.getName() + ".", ".tmp", parent);
+
+                try (FileOutputStream fos = new FileOutputStream(tmpFile);
+                     OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8")) {
+
+                    // 配置YAML输出格式为标准块格式
+                    DumperOptions options = new DumperOptions();
+                    options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+                    options.setPrettyFlow(true);
+
+                    Yaml yaml = new Yaml(options);
+                    yaml.dump(config, writer);
+                    // close 前 flush（try-with-resources 的 close 亦会 flush）；不做 fsync——
+                    // 旧实现从不 fsync，本修复目标是并发原子性而非掉电持久性，rename 后掉电最坏
+                    // 情况与旧实现同级（保留旧文件或留下孤儿 tmp），不引入新的写延迟。
+                    writer.flush();
+                }
+
+                try {
+                    moveAtomicallyWithRetry(tmpFile, configFile);
+                    tmpFile = null; // move 成功，文件已不存在，跳过清理
+                    written = true;
+                } catch (AtomicMoveNotSupportedException e) {
+                    // 个别文件系统不支持原子 rename（FAT/部分网络盘）：退化为普通覆盖 move。
+                    // 锁内写者仍互斥；仅对锁外读者的窗口从原子降为「删除+重建」瞬态，记录告警。
+                    log.warn("文件系统不支持原子 rename，integrations.yml 降级为非原子替换: " + e.getMessage());
+                    Files.move(tmpFile.toPath(), configFile.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING);
+                    tmpFile = null;
+                    written = true;
+                }
+            } catch (IOException e) {
+                log.error("写入配置文件失败: " + e.getMessage());
+            } finally {
+                if (tmpFile != null && tmpFile.exists() && !tmpFile.delete()) {
+                    tmpFile.deleteOnExit();
+                }
+            }
+
+            // 写后主动换新缓存：内容取刚写入的 config（深拷贝防调用方后续改动回流），stat 取自替换后的文件。
+            // 好处一：写后读立即可见新配置（下一次读命中缓存而非重解析）；好处二：关闭本进程写路径的
+            // 「同戳窗口」——即使环境 stat 粒度撞戳（同毫秒同字节数），缓存内容也已与磁盘一致。
+            if (written) {
+                FileStatStamp newStamp = stampOf(configFile);
+                configReadCache = newStamp != null
+                    ? new ConfigReadCacheEntry(configFile.getPath(), newStamp, deepCopyConfig(config))
+                    : null; // 写后 stat 不到属异常态：废弃缓存，下次读以磁盘为准
+            } else {
+                configReadCache = null; // 写失败：磁盘终态未知，废弃缓存，下次读以磁盘为准
+            }
         }
+    }
 
-        try (FileOutputStream fos = new FileOutputStream(configFile);
-             OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8")) {
-
-            // 配置YAML输出格式为标准块格式
-            DumperOptions options = new DumperOptions();
-            options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
-            options.setPrettyFlow(true);
-
-            Yaml yaml = new Yaml(options);
-            yaml.dump(config, writer);
-        } catch (IOException e) {
-            log.error("写入配置文件失败: " + e.getMessage());
+    /**
+     * 原子替换替换写（tmp → target rename）：带 Windows 短暂占用重试。
+     *
+     * <p>POSIX 上 rename 覆盖已存在目标且原子；Windows（NTFS/Win2003 等部署目标）在目标文件被
+     * 其他句柄打开（并发读者 loadIntegrationsConfig）时 move 抛 IOException——Java NIO 打开文件
+     * 不带 FILE_SHARE_DELETE。读者存活毫秒级，故对 move 做有界重试（5 次 × 20ms）而非放弃
+     * （放弃=本次配置写入丢失，仅留错误日志）。重试穷尽仍失败由调用方 catch IOException 记日志，
+     * 旧文件完整保留（tmp+rename 的降级保证：不产生截断损坏）。
+     */
+    private static void moveAtomicallyWithRetry(File tmpFile, File configFile) throws IOException {
+        IOException last = null;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                Files.move(tmpFile.toPath(), configFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                return;
+            } catch (AtomicMoveNotSupportedException notSupported) {
+                throw notSupported; // 能力缺失不是暂时态，交给调用方降级分支
+            } catch (IOException e) {
+                last = e;
+                try {
+                    Thread.sleep(20L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("integrations.yml 原子替换被中断", ie);
+                }
+            }
         }
+        throw last;
     }
 
     // 加载integrations/xx.yml单个集成的配置
@@ -2164,34 +2509,81 @@ public class IntegrationManager {
      * @return 依赖列表
      */
     private List<String> findDependencies(String coordinate, Map<String, Object> integrationConfig) {
-        List<String> dependencies = new ArrayList<>();
-
         String groupId = (String) integrationConfig.get("groupId");
         String artifactId = (String) integrationConfig.get("artifactId");
         String version = (String) integrationConfig.get("version");
 
         if (groupId == null || artifactId == null || version == null) {
-            return dependencies;
+            return new ArrayList<>();
         }
 
-        String localRepoPath = System.getProperty("user.home") + "/.m2/repository";
-        String jarPath = localRepoPath + "/" + groupId.replace('.', '/') + "/" + artifactId + "/" + version + "/" + artifactId + "-" + version + ".jar";
-        File jarFile = new File(jarPath);
+        File jarFile = new File(getJarPath(groupId, artifactId, version));
+        if (!jarFile.exists()) {
+            return new ArrayList<>();
+        }
+        return readJarDependencyCoordinates(jarFile);
+    }
 
-        if (jarFile.exists()) {
-            try {
-                IntegrationInfo info = com.ecat.core.Utils.JarDependencyLoader.readPartialIntegrationInfoFromJar(jarFile);
-                if (info.getDependencyInfoList() != null) {
-                    for (com.ecat.core.Integration.DependencyInfo dep : info.getDependencyInfoList()) {
-                        dependencies.add(dep.getCoordinate());
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("读取 JAR 依赖信息失败: {} - {}", jarPath, e.getMessage());
+    /**
+     * 读取 jar 的依赖坐标列表（F4 扫描缓存入口）。
+     *
+     * <p>重复扫描面（原先每次调用都重新开 JarFile + 解析 ecat-config.yml）：
+     * {@code getIntegrationStatus}（每次状态查询）、{@code findDependents}（遍历全部集成的 O(N) 扫描，
+     * add/enable/remove 都走）、{@code saveInitialDependencySnapshot}（启动全量）——状态轮询场景下
+     * 一次 {@code getAllIntegrationStatus} 即 N 次串行 jar 解析。
+     *
+     * <p>缓存依据：依赖元数据在同一 (jar 路径, stat 戳) 下不可变——新版本落不同路径（GAV 含 version，
+     * 自然 miss），同版本重装/重部署改变 mtime/size/inode（stat 失效）。扫描失败不缓存（坏 jar
+     * 修复后应可重扫）。返回可变列表，与既有调用方语义一致。
+     *
+     * <p>包内可见：单测直接驱动（构造含 ecat-config.yml 的真实 jar 夹具断言命中/失效）。
+     *
+     * @param jarFile 集成 jar 文件
+     * @return 依赖坐标列表（无依赖/读取失败返回空列表）
+     */
+    List<String> readJarDependencyCoordinates(File jarFile) {
+        String cacheKey = jarFile.getAbsolutePath();
+        FileStatStamp before = stampOf(jarFile);
+        if (before != null) {
+            JarDependencyCacheEntry cached = jarDependencyCache.get(cacheKey);
+            if (cached != null && cached.stamp.sameAs(before)) {
+                return new ArrayList<>(cached.dependencyCoordinates);
             }
         }
 
-        return dependencies;
+        jarScanCount.incrementAndGet();
+        List<String> coordinates = new ArrayList<>();
+        try {
+            IntegrationInfo info = JarDependencyLoader.readPartialIntegrationInfoFromJar(jarFile);
+            if (info.getDependencyInfoList() != null) {
+                for (DependencyInfo dep : info.getDependencyInfoList()) {
+                    coordinates.add(dep.getCoordinate());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("读取 JAR 依赖信息失败: {} - {}", jarFile.getPath(), e.getMessage());
+            return new ArrayList<>(); // 与既有行为一致：读失败按无依赖处理，且不缓存失败结果
+        }
+
+        // 扫描前后 stat 一致才入缓存（解析期间 jar 被替换则放弃，防戳与内容错配）。
+        // 缓存持独立快照（不可变视图包新列表）：miss 路径返回的 coordinates 归调用方所有，
+        // 调用方改动不得透过 unmodifiable 视图回流。
+        FileStatStamp after = stampOf(jarFile);
+        if (before != null && before.sameAs(after)) {
+            jarDependencyCache.put(cacheKey, new JarDependencyCacheEntry(after,
+                Collections.unmodifiableList(new ArrayList<>(coordinates))));
+        }
+        return coordinates;
+    }
+
+    /**
+     * 显式失效 jar 依赖扫描缓存。
+     *
+     * <p>当前运行时没有 reload 动作（升级/安装走 PENDING_* + 重启，重启即新进程、缓存天然清空），
+     * stat 失效是实际生效机制；本方法留给未来 reload 类动作与单测隔离使用。
+     */
+    void invalidateJarDependencyCache() {
+        jarDependencyCache.clear();
     }
 
     /**

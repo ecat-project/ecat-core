@@ -526,7 +526,9 @@ public class ConfigFlowService {
         flow.getContext().setCoordinate(coordinate);
         flow.setSourceType(source);
         flow.setDiscoveryPayload(payload);
-        log.info("触发 discovery: flowId={}, coordinate={}, source={}", flow.getFlowId(), coordinate, source);
+        // 周期性 discovery 源（zeroconf reannounce / 测试残留循环）每轮都会走到这里，INFO 实测 1100+ 行/窗口；
+        // 降 DEBUG 保留排查价值（flowId/coordinate/source），SHOW_FORM 落位时另有 actionable 提示可见
+        log.debug("触发 discovery: flowId={}, coordinate={}, source={}", flow.getFlowId(), coordinate, source);
         ConfigFlowInstance instance = drive(flow, flow.startStepId(), null);
         notifyDiscoveryIfPending(flow, instance);   // 落 SHOW_FORM 时发 actionable 提示（前端实时收到）
         return instance;
