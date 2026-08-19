@@ -30,6 +30,7 @@ import com.ecat.core.I18n.I18nRegistry;
 import com.ecat.core.Integration.IntegrationManager;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.Log.LogManager;
+import com.ecat.core.Observability.BootTraceContext;
 import com.ecat.core.Observability.SystemHealthService;
 import com.ecat.core.Shutdown.CoreShutdown;
 import com.ecat.core.State.StateManager;
@@ -160,6 +161,9 @@ public class EcatCore {
     // }
 
     public void init() {
+        // boot 作用域（arch-review 25 号杠杆④）：main 线程 MDC 设 boot ULID，
+        // 整段启动序列（init + loadIntegrations 的 entry 恢复）共用一个 id，可按代际 grep 分段。
+        BootTraceContext.beginBoot();
         platformInfo = PlatformInfo.getInstance();
         i18nProxy = new I18nProxy(Const.CORE_COORDINATE, EcatCore.class, EcatCore.class.getClassLoader());
         integrationRegistry = new IntegrationRegistry();
@@ -199,7 +203,9 @@ public class EcatCore {
         if (!shutdownOnce.compareAndSet(false, true)) {
             return;
         }
-        CoreShutdown.forRegistries(taskManager, stateManager, integrationRegistry).run();
+        // 停机编排段用独立 shutdown ULID 标注（与 boot 段分离），见 BootTraceContext。
+        BootTraceContext.runWithShutdownTrace(() ->
+            CoreShutdown.forRegistries(taskManager, stateManager, integrationRegistry).run());
     }
 
     public static void main(String[] args) {
