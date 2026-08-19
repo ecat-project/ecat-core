@@ -87,4 +87,62 @@ public class StartupLoadTrackerTest {
         assertTrue(line, line.contains("com.ecat:i4=200ms"));
         assertFalse("top5 最多 5 项", line.contains("com.ecat:i5"));
     }
+
+    /** 看门狗超时独立成节（与 failures 分列点名挂死元凶）；无超时不输出该节。 */
+    @Test
+    public void render_listsTimeoutsInOwnSectionWhenPresent() {
+        StartupLoadTracker tracker = new StartupLoadTracker();
+        tracker.recordTimeout("com.ecat:hung", "onStart");
+        tracker.recordTimeout("com.ecat:hung", "entry-restore");
+        tracker.recordFailure("com.ecat:other", "load");
+
+        String line = tracker.render(ms(1000));
+        assertTrue(line, line.contains("timeouts=2"));
+        assertTrue(line, line.contains("timeoutList=[com.ecat:hung:onStart, com.ecat:hung:entry-restore]"));
+        assertTrue("failures 节保持独立", line.contains("failed=1"));
+
+        StartupLoadTracker clean = new StartupLoadTracker();
+        assertFalse("无超时不输出 timeouts 节", clean.render(ms(100)).contains("timeouts="));
+    }
+
+    /** boot id 嵌入（25 号杠杆④）：BootTraceContext 有 boot id 时报告行带 boot=<ULID>。 */
+    @Test
+    public void render_embedsBootIdWhenPresent() {
+        com.ecat.core.Observability.BootTraceContext.beginBoot();
+        try {
+            StartupLoadTracker tracker = new StartupLoadTracker();
+            tracker.recordLoadNanos("com.ecat:only", ms(5));
+            String line = tracker.render(ms(100));
+            assertTrue(line, line.contains(" boot=" + com.ecat.core.Observability.BootTraceContext.getBootId()));
+        } finally {
+            org.slf4j.MDC.remove("traceId");
+        }
+    }
+
+    /**
+     * 结构化快照（SRP 瘦身后）：只导出不可再算的事实——boot 标识/起点/总耗时/全量分项耗时
+     * （生命周期+entry 恢复两段合计，按总耗时降序）；计数与失败名单不进快照（日志行与 registry 现算）。
+     */
+    @Test
+    public void toSnapshot_exportsPerIntegrationMsSortedDesc() {
+        StartupLoadTracker tracker = new StartupLoadTracker();
+        tracker.recordLoadNanos("com.ecat:slow", ms(2000));
+        tracker.recordEntryRestoreNanos("com.ecat:slow", ms(3000));
+        tracker.recordLoadNanos("com.ecat:fast", ms(100));
+        tracker.recordEntryRestored();
+        tracker.recordFailure("com.ecat:bad", "load");
+        tracker.recordTimeout("com.ecat:hung", "onStart");
+
+        com.ecat.core.Observability.StartupReportHolder.Snapshot snap = tracker.toSnapshot(ms(6000));
+        assertEquals("totalMs=整个启动阶段耗时（入参），非 top1 集成耗时", 6000, snap.getTotalMs());
+        assertEquals("分项耗时=两段合计", Long.valueOf(5000),
+                snap.getPerIntegrationMs().get("com.ecat:slow"));
+        assertEquals(Long.valueOf(100), snap.getPerIntegrationMs().get("com.ecat:fast"));
+        assertEquals("按总耗时降序（端点输出顺序稳定）",
+                java.util.Arrays.asList("com.ecat:slow", "com.ecat:fast"),
+                new java.util.ArrayList<>(snap.getPerIntegrationMs().keySet()));
+        long startedAt = snap.getStartedAtMillis();
+        assertTrue("起点=快照生成时刻回推总耗时（加载阶段起点推导值）",
+                startedAt > 0 && startedAt <= System.currentTimeMillis());
+    }
 }

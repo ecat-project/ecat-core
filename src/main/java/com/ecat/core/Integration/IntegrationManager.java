@@ -23,6 +23,8 @@ import com.ecat.core.Bus.event.AllLoadedEvent;
 import com.ecat.core.Bus.event.BusEvent;
 import com.ecat.core.Bus.event.EventContext;
 import com.ecat.core.Bus.event.IntegrationLifecycleEvent;
+import com.ecat.core.Observability.StartupReportHolder;
+import com.ecat.core.Task.GuardedExecutor;
 import com.ecat.core.Task.NamedThreadFactory;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Utils.LoadJarUtils;
@@ -70,8 +72,11 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -191,6 +196,16 @@ public class IntegrationManager {
      * 包内可见供单测收紧预算（默认 5000）。
      */
     long createEntryBudgetMs = 5000L;
+
+    /**
+     * 硬超时看门狗预算（毫秒）：启动期 onStart / entry 恢复整段经 GuardedExecutor 执行
+     * （arch-review 27 号 W1），超时→该集成被跳过+点账、启动继续完成。
+     * 包内可见供单测收紧预算（默认取 {@code ecat.guarded.timeout-ms}，未配置 60s）。
+     */
+    long guardedTimeoutMs = GuardedExecutor.defaultTimeoutMs();
+
+    /** 启动期被看门狗超时跳过的坐标：其 entry 恢复一并跳过（onStart 挂死的集成不该再喂 entry）。 */
+    private final Set<String> startupTimedOutCoordinates = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private final EcatCore core;
     private final IntegrationRegistry integrationRegistry;
@@ -346,11 +361,49 @@ public class IntegrationManager {
         integrationRegistry.register(info.getCoordinate(), integration);
         registerConfigFlow(info.getCoordinate(), integration);
         integration.onInit();
-        integration.onStart();
+        guardedOnStart(integration, info.getCoordinate(), tracker);
         if (tracker != null) {
             tracker.recordLoadNanos(info.getCoordinate(), System.nanoTime() - startNanos);
         }
         return integration;
+    }
+
+    /**
+     * 看门狗下执行 onStart（arch-review 27 号 W1）：挂死的 onStart 不再拖死整个启动——
+     * 超时时刻 future 以 TimeoutException 完成，本方法向上抛出（启动期调用方记 failure 继续
+     * 加载他人；运行时 enable 路径维持「任意失败→回滚」契约）。超时坐标记入
+     * {@code startupTimedOutCoordinates}，entry 恢复阶段跳过该集成。
+     *
+     * <p>gate=坐标：同集成 onStart 天然串行，异集成互不阻塞。不可中断的 onStart 在超时后
+     * 继续占用 guarded 池槽位直到自然结束（有界隔离，见 GuardedExecutor 诚实边界）。
+     */
+    void guardedOnStart(IntegrationBase integration, String coordinate, StartupLoadTracker tracker) {
+        GuardedExecutor.GuardedFuture<?> future;
+        try {
+            future = GuardedExecutor.submit(coordinate, "onStart:" + coordinate,
+                    () -> {
+                        integration.onStart();
+                        return null;
+                    }, guardedTimeoutMs);
+        } catch (RejectedExecutionException e) {
+            // 池满：视为该集成本次启动失败（有账：GuardedExecutor stats 已点名）
+            throw new RuntimeException("onStart 提交被拒(看门狗池满): " + coordinate, e);
+        }
+        try {
+            future.get();
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof TimeoutException) {
+                startupTimedOutCoordinates.add(coordinate);
+                if (tracker != null) {
+                    tracker.recordTimeout(coordinate, "onStart");
+                }
+            }
+            throw new RuntimeException("onStart 失败: " + coordinate, cause);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("onStart 等待被中断: " + coordinate, e);
+        }
     }
 
     /**
@@ -550,7 +603,7 @@ public class IntegrationManager {
      * 在所有集成启动完成后调用，从持久化条目重新创建设备。
      * 仅启动期调用（运行时 enable 走单坐标 {@link #loadExistingConfigEntriesForCoordinate(String)}）。
      */
-    private void loadExistingConfigEntries(StartupLoadTracker tracker) {
+    void loadExistingConfigEntries(StartupLoadTracker tracker) {
         ConfigEntryRegistry entryRegistry = getEntryRegistry();
         if (entryRegistry == null) {
             log.debug("ConfigEntryRegistry not available");
@@ -558,7 +611,52 @@ public class IntegrationManager {
         }
 
         for (String coordinate : integrationRegistry.getAllCoordinates()) {
-            loadExistingConfigEntriesForCoordinate(coordinate, tracker);
+            if (startupTimedOutCoordinates.contains(coordinate)) {
+                log.warn("集成 {} 的 onStart 已被看门狗超时跳过, entry 恢复一并跳过", coordinate);
+                tracker.recordTimeout(coordinate, "entry-restore:skipped");
+                tracker.recordFailure(coordinate, "entry-restore:skipped-onStart-timeout");
+                continue;
+            }
+            guardedRestoreEntries(coordinate, tracker);
+        }
+    }
+
+    /**
+     * 看门狗下执行单坐标 entry 恢复（gate=坐标）：挂死的 createEntry/mergeEntries 整段
+     * 超时后本坐标被放弃（剩余 entry 跳过、标 FAILED 点账），其他坐标照常恢复，启动永远完成。
+     */
+    void guardedRestoreEntries(String coordinate, StartupLoadTracker tracker) {
+        GuardedExecutor.GuardedFuture<?> future;
+        try {
+            future = GuardedExecutor.submit(coordinate, "entry-restore:" + coordinate,
+                    () -> {
+                        loadExistingConfigEntriesForCoordinate(coordinate, tracker);
+                        return null;
+                    }, guardedTimeoutMs);
+        } catch (RejectedExecutionException e) {
+            log.error("集成 {} entry 恢复提交被拒(看门狗池满): {}", coordinate, e.getMessage());
+            tracker.recordFailure(coordinate, "entry-restore:rejected");
+            return;
+        }
+        try {
+            future.get();
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof TimeoutException) {
+                log.error("集成 {} entry 恢复超时({}ms), 本集成剩余 entry 跳过, 继续其他集成, stats={}",
+                        coordinate, guardedTimeoutMs, GuardedExecutor.getStats());
+                tracker.recordTimeout(coordinate, "entry-restore");
+                tracker.recordFailure(coordinate, "entry-restore:timeout");
+            } else {
+                // loadExistingConfigEntriesForCoordinate 内部已 per-entry 容错；到这里的非超时异常
+                // 属未预期路径，记失败但不中断启动
+                log.error("集成 {} entry 恢复异常", coordinate, cause);
+                tracker.recordFailure(coordinate, "entry-restore:" + cause);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("集成 {} entry 恢复等待被中断", coordinate);
+            tracker.recordFailure(coordinate, "entry-restore:interrupted");
         }
     }
 
@@ -688,6 +786,8 @@ public class IntegrationManager {
         // 分集成耗时沿加载/entry 恢复路径埋点（arch-review 02 号 F1：慢集成曾在日志里完全不可见）
         final long startupStartNanos = System.nanoTime();
         final StartupLoadTracker tracker = new StartupLoadTracker();
+        // 上一轮运行遗留的超时标记清零（本方法只在启动期调用，逐次启动独立成账）
+        startupTimedOutCoordinates.clear();
 
         Map<String, Map<String, Object>> integrationsConfig = loadIntegrationsConfig();
         Map<String, Object> itgs = integrationsConfig.getOrDefault("integrations", new HashMap<>());
@@ -840,7 +940,11 @@ public class IntegrationManager {
             // 启动健康报告（一行 INFO，`startup-report:` 前缀可 grep）：总耗时 + 慢集成 top5 + 失败数。
             // 输出点=ALL_LOADED 发布处——A4-2 语义下此处已等真完成，报告即最终账；
             // allLoaded=false（理论仅异常池可达）时同样输出，失败清单本身就是诊断线索。
-            log.info(tracker.render(System.nanoTime() - startupStartNanos));
+            // 结构化快照留存（25 号 A 项）：core-api 的 boot / integration-load-times 端点从
+            // StartupReportHolder 读最近一代；快照与日志行各自渲染、共用同一 totalNanos 同账
+            long totalNanos = System.nanoTime() - startupStartNanos;
+            StartupReportHolder.record(tracker.toSnapshot(totalNanos));
+            log.info(tracker.render(totalNanos));
 
             // 发布所有集成加载完成事件（同步），通知逻辑设备子集成可以创建逻辑设备。
             // 仅在确认全部加载任务完成后发布（allLoaded=true）：发布时刻订阅方看到的是完整世界。

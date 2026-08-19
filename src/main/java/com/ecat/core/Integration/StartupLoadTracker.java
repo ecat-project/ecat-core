@@ -18,12 +18,16 @@ package com.ecat.core.Integration;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import com.ecat.core.Observability.BootTraceContext;
+import com.ecat.core.Observability.StartupReportHolder;
 
 /**
  * 启动加载分集成耗时追踪器 —— 启动健康报告（startup-report）的数据源。
@@ -48,6 +52,8 @@ class StartupLoadTracker {
     private final Map<String, long[]> perIntegrationNanos = new ConcurrentHashMap<>();
     private final AtomicInteger entriesRestored = new AtomicInteger();
     private final List<String> failures = new CopyOnWriteArrayList<>();
+    /** 看门狗超时清单（GuardedExecutor 执法）：与 failures 分列，报告里独立成节便于点名慢元凶 */
+    private final List<String> timeouts = new CopyOnWriteArrayList<>();
 
     /** 记录某集成的生命周期加载耗时（成功路径） */
     void recordLoadNanos(String coordinate, long nanos) {
@@ -70,22 +76,38 @@ class StartupLoadTracker {
     }
 
     /**
+     * 记录一次看门狗超时（GuardedExecutor 执法，stage：onStart / entry-restore）。
+     * 与 {@link #recordFailure} 分开记账：超时是「被硬超时跳过」不是普通失败，
+     * 报告中独立成 timeouts 节，直接点名挂死元凶。
+     */
+    void recordTimeout(String coordinate, String stage) {
+        timeouts.add(coordinate + ":" + stage);
+    }
+
+    /**
      * 渲染一行报告。totalNanos 为调用方传入的整个启动加载阶段耗时（loadIntegrations 进入
      * 到 ALL_LOADED 发布点），报告即最终账——A4-2 后该点已等真完成。
+     *
+     * <p>boot 代际（arch-review 25 号杠杆④）：BootTraceContext 已有 boot id 时嵌入
+     * {@code boot=<ULID>}，多代启动共用一个日志文件时按 id 分段。
      */
     String render(long totalNanos) {
-        List<Map.Entry<String, long[]>> sorted = new ArrayList<>(perIntegrationNanos.entrySet());
-        sorted.sort(Comparator.comparingLong(
-                (Map.Entry<String, long[]> e) -> e.getValue()[SLOT_LIFECYCLE] + e.getValue()[SLOT_ENTRY_RESTORE])
-                .reversed());
+        List<Map.Entry<String, long[]>> sorted = sortedByTotalDesc();
 
         StringBuilder sb = new StringBuilder("startup-report: ");
         sb.append("total=").append(TimeUnit.NANOSECONDS.toMillis(totalNanos)).append("ms");
+        String bootId = BootTraceContext.getBootId();
+        if (bootId != null) {
+            sb.append(" boot=").append(bootId);
+        }
         sb.append(" integrations=").append(perIntegrationNanos.size());
         sb.append(" entries=").append(entriesRestored.get());
         sb.append(" failed=").append(failures.size());
         if (!failures.isEmpty()) {
             sb.append(" failures=").append(failures);
+        }
+        if (!timeouts.isEmpty()) {
+            sb.append(" timeouts=").append(timeouts.size()).append(" timeoutList=").append(timeouts);
         }
         sb.append(" top5=[");
         for (int i = 0; i < sorted.size() && i < 5; i++) {
@@ -99,6 +121,36 @@ class StartupLoadTracker {
         }
         sb.append(']');
         return sb.toString();
+    }
+
+    /**
+     * 结构化快照（25 号 A 项）：与 {@link #render} 同源同账，存入 StartupReportHolder
+     * 供 core-api 的 boot / integration-load-times 端点读取——日志环会被流量冲掉，
+     * 端点是事后查看启动耗时的唯一出口。按 SRP 只导出不可再算的事实（boot 标识/总耗时/
+     * 全量分项耗时），计数与失败名单留给 render 的日志行与 registry 现算。
+     */
+    StartupReportHolder.Snapshot toSnapshot(long totalNanos) {
+        long totalMs = TimeUnit.NANOSECONDS.toMillis(totalNanos);
+        Map<String, Long> perIntegrationMs = new LinkedHashMap<>();
+        for (Map.Entry<String, long[]> e : sortedByTotalDesc()) {
+            long[] nanos = e.getValue();
+            perIntegrationMs.put(e.getKey(),
+                    TimeUnit.NANOSECONDS.toMillis(nanos[SLOT_LIFECYCLE] + nanos[SLOT_ENTRY_RESTORE]));
+        }
+        long generatedAtMillis = System.currentTimeMillis();
+        return new StartupReportHolder.Snapshot(
+                BootTraceContext.getBootId(),
+                generatedAtMillis - totalMs, // 加载阶段起点：快照生成时刻回推总耗时
+                totalMs,
+                perIntegrationMs);
+    }
+
+    private List<Map.Entry<String, long[]>> sortedByTotalDesc() {
+        List<Map.Entry<String, long[]>> sorted = new ArrayList<>(perIntegrationNanos.entrySet());
+        sorted.sort(Comparator.comparingLong(
+                (Map.Entry<String, long[]> e) -> e.getValue()[SLOT_LIFECYCLE] + e.getValue()[SLOT_ENTRY_RESTORE])
+                .reversed());
+        return sorted;
     }
 
     private void addNanos(String coordinate, int slot, long nanos) {
