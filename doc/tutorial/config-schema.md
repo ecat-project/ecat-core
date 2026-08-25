@@ -41,6 +41,7 @@ public class SailheroDeviceConfigSchema implements ConfigSchemaProvider {
 | `EnumConfigItem` | `"select"` | 下拉选择 | `.addOptions(map).buildValidator()` |
 | `DynamicEnumConfigItem` | `"dynamic_enum"` | 动态下拉 | 构造函数传入 `Supplier<Map<String, String>>` |
 | `ArrayConfigItem` | `"array"` | 数组/多选 | `.size(min, max)` |
+| `DateTimeConfigItem` | `"datetime"` | 日期时间文本（精度四选一，默认到秒） | `.precision(DateTimePrecision)` |
 | `SchemaConfigItem` | `"schema"` | 嵌套/引用 Schema | 见下方 |
 
 ### 构造函数
@@ -101,6 +102,33 @@ new DynamicEnumConfigItem("serial_port", true, new Supplier<Map<String, String>>
 ```
 
 每次调用 `get()` 时会重新获取选项列表，适合需要动态刷新的场景（如重新扫描串口）。
+
+### DateTimeConfigItem
+
+日期时间字段，值为文本，格式由 `DateTimePrecision` 精度决定。精度采用**封闭枚举**（不支持任意 format 字符串），每种精度同时锚定三端契约：后端值格式、严格校验规则、前端原生控件类型。
+
+| 精度 | 值格式（后端） | 前端控件 |
+|---|---|---|
+| `DATE` | `yyyy-MM-dd` | `<input type="date">` |
+| `DATETIME_MINUTE` | `yyyy-MM-dd HH:mm` | `datetime-local` |
+| `DATETIME_SECOND`（默认） | `yyyy-MM-dd HH:mm:ss` | `datetime-local` + `step="1"` |
+| `TIME` | `HH:mm:ss` | `<input type="time">` + `step="1"` |
+
+```java
+// 仅日期
+new DateTimeConfigItem("start_date", true, "2026-08-25")
+    .displayName("开始日期")
+    .precision(DateTimePrecision.DATE);
+
+// 到秒（默认精度，可省略 precision 调用）
+new DateTimeConfigItem("start_time", true)
+    .displayName("回补开始时间");
+```
+
+要点：
+- 默认精度 `DATETIME_SECOND`，存量代码零改动兼容。
+- 校验严格（非宽松解析）：非法日历日（如 2 月 30 日）与尾随多余字符均报错；含日期的精度容忍 `datetime-local` 原样提交的 `T` 分隔符。
+- 默认值必须符合所选精度格式，否则前端控件无法回显。
 
 ---
 
