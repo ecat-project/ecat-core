@@ -41,7 +41,7 @@ public class SailheroDeviceConfigSchema implements ConfigSchemaProvider {
 | `EnumConfigItem` | `"select"` | 下拉选择 | `.addOptions(map).buildValidator()` |
 | `DynamicEnumConfigItem` | `"dynamic_enum"` | 动态下拉 | 构造函数传入 `Supplier<Map<String, String>>` |
 | `ArrayConfigItem` | `"array"` | 数组/多选 | `.size(min, max)` |
-| `DateTimeConfigItem` | `"datetime"` | 日期时间文本（精度四选一，默认到秒） | `.precision(DateTimePrecision)` |
+| `DateTimeConfigItem` | `"datetime"` | 日期时间文本（精度四选一，默认到秒） | `.precision(DateTimeConfigItem.Precision)` |
 | `SchemaConfigItem` | `"schema"` | 嵌套/引用 Schema | 见下方 |
 
 ### 构造函数
@@ -105,7 +105,7 @@ new DynamicEnumConfigItem("serial_port", true, new Supplier<Map<String, String>>
 
 ### DateTimeConfigItem
 
-日期时间字段，值为文本，格式由 `DateTimePrecision` 精度决定。精度采用**封闭枚举**（不支持任意 format 字符串），每种精度同时锚定三端契约：后端值格式、严格校验规则、前端原生控件类型。
+日期时间字段，值为文本，格式由 `DateTimeConfigItem.Precision` 精度决定。精度采用**封闭枚举**（不支持任意 format 字符串），每种精度同时锚定三端契约：后端值格式、严格校验规则、前端原生控件类型。
 
 | 精度 | 值格式（后端） | 前端控件 |
 |---|---|---|
@@ -118,7 +118,7 @@ new DynamicEnumConfigItem("serial_port", true, new Supplier<Map<String, String>>
 // 仅日期
 new DateTimeConfigItem("start_date", true, "2026-08-25")
     .displayName("开始日期")
-    .precision(DateTimePrecision.DATE);
+    .precision(DateTimeConfigItem.Precision.DATE);
 
 // 到秒（默认精度，可省略 precision 调用）
 new DateTimeConfigItem("start_time", true)

@@ -19,12 +19,14 @@ package com.ecat.core.ConfigFlow.ConfigItem;
 import java.text.ParsePosition;
 import java.text.SimpleDateFormat;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+
 /**
- * 日期时间配置项：值为文本，格式由 {@link DateTimePrecision} 精度决定，
+ * 日期时间配置项：值为文本，格式由 {@link Precision} 精度决定，
  * 前端渲染为对应的原生时间选择器（fieldType=datetime，config-flow lib 的
  * datetime 渲染器按 schema 的 precision 字段选控件与值形态）。
  * <p>
- * 精度四选一（详见 {@link DateTimePrecision}）：
+ * 精度四选一（详见 {@link Precision}）：
  * <ul>
  *   <li>{@code DATE} —— yyyy-MM-dd，日期选择器；</li>
  *   <li>{@code DATETIME_MINUTE} —— yyyy-MM-dd HH:mm，日期时间选择器；</li>
@@ -36,7 +38,7 @@ import java.text.SimpleDateFormat;
  * 示例：
  * <pre>{@code
  * // 仅日期
- * new DateTimeConfigItem("start_date", true).precision(DateTimePrecision.DATE);
+ * new DateTimeConfigItem("start_date", true).precision(DateTimeConfigItem.Precision.DATE);
  * // 到秒（默认，可省略 precision 调用）
  * new DateTimeConfigItem("start_time", true).displayName("回补开始时间");
  * }</pre>
@@ -46,10 +48,10 @@ import java.text.SimpleDateFormat;
 public class DateTimeConfigItem extends AbstractConfigItem<String> {
 
     /** 默认精度对应值格式（向后兼容常量） */
-    public static final String FORMAT = DateTimePrecision.DATETIME_SECOND.getPattern();
+    public static final String FORMAT = Precision.DATETIME_SECOND.getPattern();
 
     /** 字段精度（决定值格式/校验/前端控件），默认到秒 */
-    private DateTimePrecision precision = DateTimePrecision.DATETIME_SECOND;
+    private Precision precision = Precision.DATETIME_SECOND;
 
     /**
      * 构造函数
@@ -97,12 +99,12 @@ public class DateTimeConfigItem extends AbstractConfigItem<String> {
     }
 
     /**
-     * 设置字段精度（值格式 + 前端控件形态），默认 {@link DateTimePrecision#DATETIME_SECOND}。
+     * 设置字段精度（值格式 + 前端控件形态），默认 {@link Precision#DATETIME_SECOND}。
      *
      * @param precision 精度；null 视为保持默认
      * @return this
      */
-    public DateTimeConfigItem precision(DateTimePrecision precision) {
+    public DateTimeConfigItem precision(Precision precision) {
         if (precision != null) {
             this.precision = precision;
         }
@@ -112,7 +114,7 @@ public class DateTimeConfigItem extends AbstractConfigItem<String> {
     /**
      * 精度对象（fastjson2 getter 驱动序列化，前端经 field.precision 读取）。
      */
-    public DateTimePrecision getPrecision() {
+    public Precision getPrecision() {
         return precision;
     }
 
@@ -161,5 +163,82 @@ public class DateTimeConfigItem extends AbstractConfigItem<String> {
     @Override
     public String getFieldType() {
         return "datetime";
+    }
+
+    /**
+     * 日期时间字段精度枚举。
+     * <p>
+     * 每种精度同时锚定三端契约，保证前后端永远对得上：
+     * <ul>
+     *   <li><b>值格式</b>（Java pattern）：后端校验与存储格式；</li>
+     *   <li><b>原生控件</b>：前端 config-flow lib 据此选 {@code <input>} 类型
+     *       （date / datetime-local / time，秒级加 step="1"）；</li>
+     *   <li><b>前端值形态</b>：原生控件产出值经 lib 归一为对应格式。</li>
+     * </ul>
+     * 序列化为 {@link #getCode()}（随 ConfigItem JSON 的 precision 字段下发，前端同名匹配）。
+     * 不提供任意 format 字符串：原生选择器只能产出这些形态，自由格式会断裂前后端契约
+     * （纯文本自由格式需求用 TextConfigItem + 自定义校验）。
+     */
+    public enum Precision {
+
+        /** 仅日期：{@code yyyy-MM-dd}，前端 {@code <input type="date">} */
+        DATE("date", "yyyy-MM-dd"),
+
+        /** 日期时间到分：{@code yyyy-MM-dd HH:mm}，前端 {@code <input type="datetime-local">} */
+        DATETIME_MINUTE("datetime_minute", "yyyy-MM-dd HH:mm"),
+
+        /** 日期时间到秒（默认）：{@code yyyy-MM-dd HH:mm:ss}，前端 datetime-local + step="1" */
+        DATETIME_SECOND("datetime_second", "yyyy-MM-dd HH:mm:ss"),
+
+        /** 仅时间到秒：{@code HH:mm:ss}，前端 {@code <input type="time">}（step="1"） */
+        TIME("time", "HH:mm:ss");
+
+        /** 序列化码（前后端契约，勿改） */
+        private final String code;
+
+        /** 值格式（Java pattern） */
+        private final String pattern;
+
+        Precision(String code, String pattern) {
+            this.code = code;
+            this.pattern = pattern;
+        }
+
+        /**
+         * 序列化码（前后端契约，勿改）。
+         * {@code @JSONField(value = true)}：fastjson2 序列化/反序列化本枚举时用此值而非 name()，
+         * 保证 schema JSON 里 precision 恒为小写码（前端同名匹配）。
+         */
+        @JSONField(value = true)
+        public String getCode() {
+            return code;
+        }
+
+        public String getPattern() {
+            return pattern;
+        }
+
+        /** 是否含日期部分（决定校验前是否做 'T' 分隔归一） */
+        public boolean hasDatePart() {
+            return this != TIME;
+        }
+
+        /**
+         * 按序列化码解析精度；大小写不敏感（容忍误传枚举 name 大写），
+         * 未知/空码回退 {@link #DATETIME_SECOND}（默认精度，兼容旧 schema 与旧副本）。
+         *
+         * @param code 序列化码（可空）
+         * @return 精度枚举，永不返回 null
+         */
+        public static Precision fromCode(String code) {
+            if (code != null) {
+                for (Precision p : values()) {
+                    if (p.code.equalsIgnoreCase(code)) {
+                        return p;
+                    }
+                }
+            }
+            return DATETIME_SECOND;
+        }
     }
 }
