@@ -67,6 +67,23 @@ public class NoConversionUnit implements UnitInfo {
         return "NoConversionUnit." + getName(); // NoConversionUnit 要与类名保持一致，会影响数据持久化，不要轻易修改
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof NoConversionUnit)) {
+            return false;
+        }
+        NoConversionUnit other = (NoConversionUnit) o;
+        return name == null ? other.name == null : name.equals(other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return name == null ? 0 : name.hashCode();
+    }
+
     /**
      * Creates a NoConversionUnit instance with the specified name and display name.
      * @param name

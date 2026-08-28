@@ -1,6 +1,7 @@
 package com.ecat.Utils;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -332,5 +333,25 @@ public class NumberFormatterTest {
         String expected = "12345.00";
         String actual = NumberFormatter.formatValue(value, precision);
         assertEquals("Long输入: 12345应格式化为12345.00", expected, actual);
+    }
+
+    @Test
+    public void testFormatValueNaNReturnsEmpty() {
+        assertEquals("", NumberFormatter.formatValue(Double.NaN, 2));
+        assertEquals("", NumberFormatter.formatValue(Float.NaN, 2));
+        assertEquals("", NumberFormatter.formatValue(null, 2));
+    }
+
+    @Test
+    public void testFormatValueInfinityReturnsEmpty() {
+        assertEquals("", NumberFormatter.formatValue(Double.POSITIVE_INFINITY, 2));
+        assertEquals("", NumberFormatter.formatValue(Double.NEGATIVE_INFINITY, 0));
+    }
+
+    @Test
+    public void testRoundToDoubleNaNOrInfinityReturnsNaN() {
+        assertTrue(Double.isNaN(NumberFormatter.roundToDouble(Double.NaN, 2)));
+        assertTrue(Double.isNaN(NumberFormatter.roundToDouble(Double.POSITIVE_INFINITY, 2)));
+        assertTrue(Double.isNaN(NumberFormatter.roundToDouble(null, 2)));
     }
 }

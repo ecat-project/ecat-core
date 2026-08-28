@@ -72,6 +72,12 @@ public class UnitInfoFactory {
             }
             // 加载枚举类
             Class<?> clazz = Class.forName(className);
+            if (NoConversionUnit.class.equals(clazz)) {
+                // 风向 Degree 等：getFullUnitString() = "NoConversionUnit.Degree"，但本类不是枚举
+                UnitInfo result = NoConversionUnit.of(enumName);
+                CACHE.put(enumFullName, result);
+                return result;
+            }
             if (!clazz.isEnum()) {
                 throw new IllegalArgumentException(className + " is not an enum");
             }

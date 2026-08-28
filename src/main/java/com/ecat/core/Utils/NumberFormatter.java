@@ -41,6 +41,9 @@ public class NumberFormatter {
         if (displayPrecision < 0) {
             throw new IllegalArgumentException("小数位数不能为负数: " + displayPrecision);
         }
+        if (!isFiniteNumber(value)) {
+            return "";
+        }
 
         // 使用 BigDecimal 确保精度，避免 double 舍入误差
         BigDecimal bd = new BigDecimal(value.toString());
@@ -72,12 +75,29 @@ public class NumberFormatter {
         if (displayPrecision < 0) {
             throw new IllegalArgumentException("小数位数不能为负数: " + displayPrecision);
         }
+        if (!isFiniteNumber(value)) {
+            return Double.NaN;
+        }
 
         // 使用 BigDecimal 确保精度，避免 double 舍入误差
         BigDecimal bd = new BigDecimal(value.toString());
         // 使用银行家算法（HALF_EVEN）进行舍入
         bd = bd.setScale(displayPrecision, RoundingMode.HALF_EVEN);
         return bd.doubleValue();
+    }
+
+    /**
+     * BigDecimal(String) 无法解析 NaN / Infinity / null，会抛出 message 为 null 的 NumberFormatException。
+     */
+    private static boolean isFiniteNumber(Number value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof Double || value instanceof Float) {
+            double d = value.doubleValue();
+            return !Double.isNaN(d) && !Double.isInfinite(d);
+        }
+        return true;
     }
 
     /**

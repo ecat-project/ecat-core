@@ -104,7 +104,10 @@ public abstract class NumberAttribute<T extends Number> extends AttributeBase<T>
 
         Number displayValue;
         if (nativeUnit.getClass().equals(toUnit.getClass())) {
-            double ratio = nativeUnit.convertUnit(toUnit);
+            Double ratio = nativeUnit.convertUnit(toUnit);
+            if (ratio == null) {
+                return formatNumberValue(value, displayPrecision);
+            }
             displayValue = multiplyNumber(value, ratio);
         } else {
             throw new RuntimeException(I18nHelper.t("error.invalid_unit_conversion"));
@@ -155,6 +158,9 @@ public abstract class NumberAttribute<T extends Number> extends AttributeBase<T>
      * @return 格式化后的字符串
      */
     protected String formatNumberValue(Number value, int precision) {
+        if (value == null) {
+            return null;
+        }
         return NumberFormatter.formatValue(value.doubleValue(), precision);
     }
 
