@@ -20,7 +20,6 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.time.Instant;
 import java.util.Collections;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -755,62 +754,52 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     }
 
     /**
-     * 子类可按需override此方法实现具体的用户侧业务的属性设置
-     * 使用原始单位设置原始数据，会触发参数修改订阅.
+     * 唯一写入口（final，22 号 setValue final 化）：值变更门禁、失败记账（accountedWrite）
+     * 与确认后收尾（updateValue+publicState）全部由本入口持有——子类没有「忘了收尾/绕过记账」
+     * 这个选项（部落纪律升级为编译期法律，审计标尺 E4→E2）。
      *
-     * <p><b>确认后更新语义（写闸塌缩后保留，19 号 v2 S3）</b>：IO 载荷（onChangedCallback）
+     * <p><b>确认后更新语义（19 号 v2 S3 保留）</b>：IO 载荷（{@link #setValueImpl}）
      * 为朴素 CF 组合——<b>成功后</b>才 updateValue+publicState；失败（false/异常）不发布、
-     * 状态不残留。IO 与设备轮询的互斥/超时由载荷自身的 SDK 事务承担（源锁串行+事务硬超时），
-     * 不再有执行闸的预算守卫与键路由。
+     * 状态不残留。IO 与设备轮询的互斥/超时由载荷自身的 SDK 事务承担（源锁串行+事务硬超时）。
+     * impl 的同步抛出是 IO 失败的一种形态——包装为异常 future 透传并记账（不误标为类型
+     * 转换失败；写入口族契约=不抛穿 fire-and-forget 调用线程）。
      *
      * @param newValue
      * @return
      *        true: 设置成功（IO 已确认成功且值已发布）
      *       false: 设置失败（IO 失败/被拒，值未发布）
      */
-    protected CompletableFuture<Boolean> setValue(T newValue){
+    protected final CompletableFuture<Boolean> setValue(T newValue){
         if(!valueChangeable){
             return CompletableFuture.completedFuture(false);
         }
-        CompletableFuture<Boolean> io = onChangedCallback != null
-            ? onChangedCallback.apply(new AttrChangedCallbackParams<T>(this, newValue))
-            : CompletableFuture.completedFuture(Boolean.TRUE); // 无回调=本地属性，IO 恒成功
-        return accountedWrite(io.thenApply(confirmed -> confirmUpdateTail(newValue, confirmed)));
-    }
-
-    /**
-     * 自带 IO 载荷的确认后更新（IO 写模板，与 setValue 并列的唯二主入口，19 号 v2 S3 写闸
-     * 塌缩后形态）：集成自覆写 {@code setValue(T)} 且 IO 不经 onChangedCallback 的属性族
-     * （modbus 数值族、thermofisher CLink/AK 族等）用本方法——ioBody = 真正的设备写
-     * （SDK 事务体，如 executeWithLambda 包裹的发帧 join），<b>成功后</b>才本地收尾
-     * updateValue+publicState；失败/false/异常不发布、值不残留。
-     *
-     * <p>ioBody 在调用线程上同步执行：互斥与超时全部由事务体自身承担——SDK 源锁
-     * （executeWithLambda/executePolling 同源 acquire/release）保证与轮询串行，事务级
-     * 硬超时保证挂死 IO 有界（原闸请求级预算守卫退役，预算=SDK 事务超时已兜）。
-     *
-     * <p>与 {@code setValue(T)} 的关系：后者 = 本方法 + 「onChangedCallback 或恒真」的默认
-     * 载荷；覆写 setValue 的族不应在 IO 成功后再调 super.setValue（会二次触发回调/发布）
-     * ——统一走本方法收尾。
-     *
-     * @param newValue 待写入并（确认成功后）发布的值
-     * @param ioBody   IO 载荷：真正的设备写（SDK 事务体，可抛异常=失败），在调用线程上同步执行
-     * @return true: IO 确认成功且值已发布；false/异常: IO 失败，值未发布
-     */
-    protected CompletableFuture<Boolean> setValueWithIoBody(T newValue, Callable<Boolean> ioBody){
-        if(!valueChangeable){
-            return CompletableFuture.completedFuture(false);
-        }
-        CompletableFuture<Boolean> io = new CompletableFuture<>();
+        CompletableFuture<Boolean> io;
         try {
-            io.complete(ioBody.call());
+            io = setValueImpl(newValue);
         } catch (Exception e) {
+            io = new CompletableFuture<>();
             io.completeExceptionally(e);
         }
         return accountedWrite(io.thenApply(confirmed -> confirmUpdateTail(newValue, confirmed)));
     }
 
-    /** 确认后收尾（两主入口共用）：IO 确认成功才本地写值 + 发布。 */
+    /**
+     * IO 载荷钩子（写这台设备的扩展点）：默认 = onChangedCallback（Plain 族「回调即 IO」
+     * 形态）或恒真（无回调=本地属性，IO 恒成功）。需要真正设备写的属性族（modbus 数值族、
+     * thermofisher CLink/AK 族、saimosen 钢瓶气族等）覆写本钩子，只返回 IO 结果
+     * （true=设备已确认）——收尾/记账/门禁由 final {@link #setValue} 统一持有，
+     * 覆写者无需（也不应）自调 updateValue/publicState。
+     *
+     * <p>与 asyncTurnOnImpl / sendCommandImpl / selectOptionImpl（35 处生产实现）同族：
+     * {@code *Impl} = 「怎么写这台设备」的唯一表达位。
+     */
+    protected CompletableFuture<Boolean> setValueImpl(T newValue){
+        return onChangedCallback != null
+            ? onChangedCallback.apply(new AttrChangedCallbackParams<T>(this, newValue))
+            : CompletableFuture.completedFuture(Boolean.TRUE); // 无回调=本地属性，IO 恒成功
+    }
+
+    /** 确认后收尾（final 入口持有）：IO 确认成功才本地写值 + 发布。 */
     private boolean confirmUpdateTail(T newValue, boolean confirmed) {
         if (confirmed) {
             // IO 确认成功后本地写值 + 发布
@@ -835,8 +824,8 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      *                     （SelectAttribute.selectOption 的 publicState 布尔参语义）
      * @return onChangedCallback 结果 future；无回调时恒 true
      */
-    protected CompletableFuture<Boolean> confirmPublishTail(T newValue, Supplier<String> successLog,
-                                                            boolean publishState) {
+    CompletableFuture<Boolean> confirmPublishTail(T newValue, Supplier<String> successLog,
+                                                  boolean publishState) {
         updateValue(newValue);
         if (publishState) {
             publicState();
@@ -871,7 +860,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      * 忽略 future 时失败仍有痕）。计数走本类静态句柄——无 device/无 core 的裸属性形态
      * （单测）与生产形态同口径（进程级可达，旧「裸属性跳过计数」的可达性限制不复存在）。
      */
-    protected CompletableFuture<Boolean> accountedWrite(CompletableFuture<Boolean> write) {
+    CompletableFuture<Boolean> accountedWrite(CompletableFuture<Boolean> write) {
         write.whenComplete((ok, t) -> {
             if (t != null || !Boolean.TRUE.equals(ok)) {
                 COMMAND_FAILED.incrementAndGet();
@@ -884,15 +873,15 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     }
 
     /**
-     * 子类无需重写此方法，此方法调用setValue(T newValue)方法执行
-     * 使用指定单位设置原始数据，会触发参数修改订阅.
+     * 带单位换算的写入口（final，单位换算归 core 持有；22 号 setValue final 化）：
+     * 换算为原生单位值后经 {@link #setValue(T)} 唯一入口执行。子类无需也禁止重写。
      * @param newValue
      * @param fromUnit newValue的单位
      * @return
      *        true: 设置成功
      *       false: 设置失败
      */
-    protected CompletableFuture<Boolean> setValue(T newValue, UnitInfo fromUnit){
+    protected final CompletableFuture<Boolean> setValue(T newValue, UnitInfo fromUnit){
         if(!valueChangeable){
             return CompletableFuture.completedFuture(false);
         }

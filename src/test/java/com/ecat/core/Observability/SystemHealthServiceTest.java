@@ -183,14 +183,14 @@ public class SystemHealthServiceTest {
         assertThat("每条都有栈首帧键（无栈时值可为 null）", list.get(0).containsKey("firstFrame"), is(true));
     }
 
-    /** 写失败驱动夹具：最小 Integer 属性经 IO 写模板收 false（State 包消费测试同款形态）。 */
+    /** 写失败驱动夹具：最小 Integer 属性经 setValueImpl 钩子收 false（State 包消费测试同款形态）。 */
     private static class FailingWriteAttr extends AttributeBase<Integer> {
         FailingWriteAttr() {
             super("health_fail_attr", null, null, null, 0, false, true,
                     (Function<AttrChangedCallbackParams<Integer>, CompletableFuture<Boolean>>) null);
         }
-        @Override protected CompletableFuture<Boolean> setValue(Integer newValue) {
-            return setValueWithIoBody(newValue, () -> Boolean.FALSE);
+        @Override protected CompletableFuture<Boolean> setValueImpl(Integer newValue) {
+            return CompletableFuture.completedFuture(Boolean.FALSE);
         }
         @Override public String getDisplayValue(UnitInfo toUnit) { return String.valueOf(value); }
         @Override protected Integer convertFromUnitImp(Integer v, UnitInfo u) { return v; }

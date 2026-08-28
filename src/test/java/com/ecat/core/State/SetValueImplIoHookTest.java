@@ -31,13 +31,13 @@ import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 import com.ecat.core.I18n.I18nKeyPath;
 
 /**
- * setValueWithIoBody（IO 写模板，与 setValue 并列的唯二主入口，19 号 v2 S3 写闸塌缩后
- * 形态）语义测试：ioBody = SDK 事务体（在调用线程同步执行，互斥/超时由事务自身承担），
- * 成功才收尾发布；失败/异常不发布不残留（commandFailed 记账 21 号起 counter 咽喉
- * 自持于 AttributeBase，经 commandFailedCount() 读，不依赖注册表/引擎/执行 API 装配）。
- * 确定性同步（future.get，禁 sleep）。
+ * setValueImpl（IO 载荷钩子，22 号 setValue final 化后形态；类名保留 ioBody 语义=钩子内
+ * 同步事务体）语义测试：IO = SDK 事务体（在调用线程同步执行，互斥/超时由事务自身承担），
+ * 成功才由 final setValue 入口收尾发布；失败/异常不发布不残留（commandFailed 记账 21 号起
+ * counter 咽喉自持于 AttributeBase，经 commandFailedCount() 读，不依赖注册表/引擎/执行 API
+ * 装配）。确定性同步（future.get，禁 sleep）。
  */
-public class SetValueWithIoBodyTest {
+public class SetValueImplIoHookTest {
 
     private DeviceBase mockDevice;
     private EcatCore mockCore;
@@ -45,18 +45,22 @@ public class SetValueWithIoBodyTest {
     private final List<BusEvent<?>> published = new ArrayList<>();
     private AutoCloseable mocks;
 
-    /** 最小 Integer 属性：IO 载荷可注入（模拟集成覆写 setValue 收敛进 IO 写模板）。 */
+    /** 最小 Integer 属性：IO 载荷可注入（模拟集成覆写 setValueImpl 钩子收敛进 IO 写模板）。 */
     static class IoBodyAttr extends AttributeBase<Integer> {
         final AtomicInteger ioRuns = new AtomicInteger();
         volatile Callable<Boolean> ioBody = () -> Boolean.TRUE;
         IoBodyAttr() {
             super("io_body_attr", null, null, null, 0, false, true, (Function<AttrChangedCallbackParams<Integer>, CompletableFuture<Boolean>>) null);
         }
-        @Override protected CompletableFuture<Boolean> setValue(Integer newValue) {
-            return setValueWithIoBody(newValue, () -> {
-                ioRuns.incrementAndGet();
-                return ioBody.call();
-            });
+        @Override protected CompletableFuture<Boolean> setValueImpl(Integer newValue) {
+            ioRuns.incrementAndGet();
+            try {
+                return CompletableFuture.completedFuture(ioBody.call());
+            } catch (Exception e) {
+                CompletableFuture<Boolean> failed = new CompletableFuture<>();
+                failed.completeExceptionally(e);
+                return failed;
+            }
         }
         @Override public String getDisplayValue(UnitInfo toUnit) { return String.valueOf(value); }
         @Override protected Integer convertFromUnitImp(Integer v, UnitInfo u) { return v; }

@@ -171,20 +171,34 @@ abstract class CommandAttribute<T> extends AttributeBase<T> {
     protected abstract CompletableFuture<Boolean> sendCommandImpl(T cmd);
 
     /**
-     * Send command to device, and update the value(last command) selfly
+     * 输入规范化钩子（final sendCommand 的预处理缝，默认恒等）：在命令列表校验<b>之前</b>
+     * 把调用方传入的命令归一为注册命令（如大小写不敏感匹配、别名映射）——校验在 final
+     * 入口内，规范化必须先行才能让别名形态通过校验。仅 teledyne T700（APPLY→GENERATE_APPLY
+     * 等别名）需要覆写；覆写不得产生 IO 副作用（它是纯函数缝）。
+     */
+    protected T normalizeCommand(T cmd) {
+        return cmd;
+    }
+
+    /**
+     * Send command to device, and update the value(last command) selfly（final 入口，与
+     * selectOption 对齐——22 号 D-22-3：收尾/记账/门禁由本入口持有，子类只覆写
+     * {@link #sendCommandImpl(T)}；输入规范化覆写 {@link #normalizeCommand(Object)}）
      * @param cmd command to send， must in commands list
      * @return
      *        true: 命令下发成功
      *       false: 命令下发失败
      */
-    public CompletableFuture<Boolean> sendCommand(T cmd){
+    public final CompletableFuture<Boolean> sendCommand(T cmd){
         if(!valueChangeable){
             return CompletableFuture.completedFuture(false);
         }
 
-        // 验证命令是否在有效列表中
-        if(!commands.contains(cmd)){
-            log.error("命令 {} 不在有效命令列表中: {}", cmd, commands);
+        final T normalizedCmd = normalizeCommand(cmd);
+
+        // 验证命令是否在有效列表中（规范化后的形态——别名经 normalizeCommand 归一为注册命令）
+        if(!commands.contains(normalizedCmd)){
+            log.error("命令 {} 不在有效命令列表中: {}", normalizedCmd, commands);
             return CompletableFuture.completedFuture(false);
         }
 
@@ -193,11 +207,11 @@ abstract class CommandAttribute<T> extends AttributeBase<T> {
         // 与原实现一致），失败不发布。收尾仍触发 onChangedCallback 一次（与旧 setValue 收尾
         // 行为一致：部分集成命令属性的下游联动挂回调，IO 在 sendCommandImpl、回调只做通知）；
         // accountedWrite 保留 commandFailed 记账口径
-        return accountedWrite(sendCommandImpl(cmd)
+        return accountedWrite(sendCommandImpl(normalizedCmd)
             .thenCompose(result -> {
             if(result){
                 // 写入成功，收尾（confirmPublishTail 直写不走 setValue——避免二次触发 onChangedCallback）
-                return confirmPublishTail(cmd,
+                return confirmPublishTail(normalizedCmd,
                     () -> "Device " + getDevice().getId() + " - Send Command Successed: " + getValue() +
                         " (" + getCurrentCommandI18nName() + ")",
                     true);

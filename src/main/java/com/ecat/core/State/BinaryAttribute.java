@@ -230,11 +230,12 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
     }
 
     /**
-     * 异步TurnOn方法，给用户侧功能使用
-     * 
+     * 异步TurnOn方法，给用户侧功能使用（final 入口，与 selectOption 对齐——22 号 D-22-3：
+     * 收尾/记账/门禁由本入口持有，子类只覆写 {@link #asyncTurnOnImpl()}）
+     *
      * @return
      */
-    public CompletableFuture<Boolean> asyncTurnOn(){
+    public final CompletableFuture<Boolean> asyncTurnOn(){
         // 用户侧写入口与 setValue/setDisplayValue 同门：不可变更属性直接拒绝（不发 IO、值不发布）
         if (!valueChangeable) {
             return CompletableFuture.completedFuture(false);
@@ -257,11 +258,12 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
     }
 
     /**
-     * 异步TurnOff方法，给用户侧功能使用
+     * 异步TurnOff方法，给用户侧功能使用（final 入口，与 selectOption 对齐——22 号 D-22-3：
+     * 收尾/记账/门禁由本入口持有，子类只覆写 {@link #asyncTurnOffImpl()}）
      *
      * @return
      */
-    public CompletableFuture<Boolean> asyncTurnOff(){
+    public final CompletableFuture<Boolean> asyncTurnOff(){
         // 用户侧写入口与 asyncTurnOn 同门：不可变更属性直接拒绝（不发 IO、值不发布）
         if (!valueChangeable) {
             return CompletableFuture.completedFuture(false);

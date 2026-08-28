@@ -149,18 +149,9 @@ public class TimeAttribute extends AttributeBase<Instant> {
         }
     }
 
-    /**
-     * 使用已转换的 Instant 值设置属性值。
-     *
-     * @param value 已解析的 Instant 值
-     * @param fromUnit 来源单位（时间属性忽略）
-     * @return CompletableFuture，true表示设置成功
-     */
-    @Override
-    protected CompletableFuture<Boolean> setDisplayValueImp(Instant value, UnitInfo fromUnit) {
-        updateValue(value);
-        return CompletableFuture.completedFuture(true);
-    }
+    // setDisplayValueImp 不再覆写：走基类默认（setValue(value, fromUnit) 唯一写入口），
+    // IO 恒真收尾含 updateValue+publicState——修复此前只 updateValue 不 publicState、
+    // 用户设置滞留在途 midState 等下一轮询的可见性缺陷（22 号 D-22-7 ②）。
 
     @Override
     protected Instant convertFromUnitImp(Instant value, UnitInfo fromUnit) {

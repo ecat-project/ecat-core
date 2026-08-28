@@ -79,10 +79,11 @@ public class AQCombineAttributeTest {
                 "tvoc", mockAttrClass, mockNativeUnit, mockDisplayUnit, 2, true, Collections.emptyList());
     }
 
-    @Test(expected = RuntimeException.class)
-    public void testSetValueThrows() {
-        // 测试 setValue 抛出异常
-        combineAttr.setValue(1.0);
+    @Test
+    public void testSetValueRejected() throws Exception {
+        // 组合属性构造硬编码 valueChangeable=false：final setValue 入口的值变更门禁直接
+        // 拒绝（false），不抛（22 号 setValue final 化删除死防御覆写后的真实契约）
+        assertFalse(combineAttr.setValue(1.0).get(5, java.util.concurrent.TimeUnit.SECONDS));
     }
 
     @Test(expected = RuntimeException.class)

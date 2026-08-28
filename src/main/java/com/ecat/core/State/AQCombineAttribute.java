@@ -118,11 +118,6 @@ public class AQCombineAttribute extends AQAttribute {
     }
 
     @Override
-	protected CompletableFuture<Boolean> setValue(Double value) {
-		throw new RuntimeException(I18nHelper.t("error.combine_attribute_value_not_changeable"));
-	}
-
-    @Override
     public boolean updateValue(Double value) {
         throw new RuntimeException(I18nHelper.t("error.combine_attribute_value_not_changeable"));
     }
