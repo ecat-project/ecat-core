@@ -176,24 +176,50 @@ public abstract class IntegrationBase implements IntegrationLifecycle, RemovalHo
         }
     }
 
+    /**
+     * 集成释放 final 模板入口（bug-record-20260828-171500 根治）：子类清理走
+     * {@link #onReleaseImpl()} 钩子，基类收尾（日志上下文/包名映射/LogManager 注销）与
+     * {@link #sweepRemovalActions()} 在 finally 兜底——<b>钩子漏写/崩溃都不可能跳过框架收尾</b>，
+     * 「覆写漏 super」这类结构性缺口在签名层面消灭（对齐
+     * {@link com.ecat.core.Device.DeviceBase#cancelManagedTasks()} final 先例）。
+     * 执行顺序：钩子（子类自有清理）→ 基类收尾 → 集成级移除动作 sweep。
+     *
+     * <p>final——调用方（IntegrationManager / ShutdownOrchestrator）入口名不变零改动；
+     * {@link IntegrationLifecycle} 接口方法由本 final 实现满足，子类只能覆写钩子。
+     * 钩子抛异常时异常照原语义上抛不吞（「崩溃可见」），但收尾与 sweep 必达（finally）。</p>
+     */
     @Override
-    public void onRelease() {
-        // 清除日志上下文
-        Log.clearIntegrationContext();
+    public final void onRelease() {
+        try {
+            onReleaseImpl();
+        } finally {
+            // 清除日志上下文
+            Log.clearIntegrationContext();
 
-        // 注销包名前缀映射
-        String packagePrefix = this.getClass().getPackage().getName();
-        ClassLoaderCoordinateFilter.unregisterPackagePrefix(packagePrefix);
+            // 注销包名前缀映射
+            String packagePrefix = this.getClass().getPackage().getName();
+            ClassLoaderCoordinateFilter.unregisterPackagePrefix(packagePrefix);
 
-        // 从日志管理器中注销集成
-        if (this.loadOption != null && this.loadOption.getIntegrationInfo() != null) {
-            String coordinate = this.loadOption.getIntegrationInfo().getCoordinate();
-            LogManager.getInstance().unregisterIntegration(coordinate);
+            // 从日志管理器中注销集成
+            if (this.loadOption != null && this.loadOption.getIntegrationInfo() != null) {
+                String coordinate = this.loadOption.getIntegrationInfo().getCoordinate();
+                LogManager.getInstance().unregisterIntegration(coordinate);
+            }
+
+            // 集成级移除动作兜底 sweep（尾部：既有清理先行，随后拆卸自有资源——
+            // 日志上下文/包名映射等注册面先撤，再拆挂在本集成上的池/句柄）
+            sweepRemovalActions();
         }
+    }
 
-        // 集成级移除动作兜底 sweep（尾部：既有清理先行，随后拆卸自有资源——
-        // 日志上下文/包名映射等注册面先撤，再拆挂在本集成上的池/句柄）
-        sweepRemovalActions();
+    /**
+     * 集成释放钩子（无设备管理层）：子类自有清理覆写此方法——<b>不调任何 super、不调
+     * {@code onRelease()}（final 入口会重进钩子造成无限递归）</b>，基类收尾由模板保证。
+     * 设备管理集成（{@link IntegrationDeviceBase} 子类）覆写的是其设备层钩子
+     * {@code onDeviceReleaseImpl()}。
+     */
+    protected void onReleaseImpl() {
+        // 默认无自有清理
     }
 
     // ==================== ConfigEntry 相关方法 ====================

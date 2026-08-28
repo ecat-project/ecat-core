@@ -115,7 +115,7 @@ public class IntegrationRegistryTest {
         }
 
         @Override
-        public void onRelease() {
+        protected void onReleaseImpl() {
         }
 
         @Override

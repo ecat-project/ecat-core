@@ -778,7 +778,7 @@ public class ConfigFlowServiceTest {
         public void onPause() {}
 
         @Override
-        public void onRelease() {}
+        protected void onReleaseImpl() {}
 
         @Override
         public ConfigEntry createEntry(ConfigEntry entry) {

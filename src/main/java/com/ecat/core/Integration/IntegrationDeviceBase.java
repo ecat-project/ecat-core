@@ -256,15 +256,34 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         }
     }
 
+    /**
+     * 设备管理层释放模板（final，覆写 {@link com.ecat.core.Integration.IntegrationBase#onReleaseImpl()}）：
+     * 子类自有清理走 {@link #onDeviceReleaseImpl()} 钩子，设备级收尾（幂等补
+     * {@link DeviceBase#cancelManagedTasks()} + {@link DeviceBase#release()} + 清映射）在
+     * finally 兜底——钩子漏写/崩溃都不可能跳过设备拆卸。执行顺序：子类钩子 → 设备级收尾 →
+     * （返回基类模板）基类收尾 + 集成级移除动作 sweep。
+     */
     @Override
-    public void onRelease() {
+    protected final void onReleaseImpl() {
         log.info("{} released", getName());
-        for (DeviceBase device : getAllDevices()) {
-            device.cancelManagedTasks();     // 幂等补一次移除动作收尾（防 onPause 未走过的直停路径）
-            device.release();
+        try {
+            onDeviceReleaseImpl();
+        } finally {
+            for (DeviceBase device : getAllDevices()) {
+                device.cancelManagedTasks();     // 幂等补一次移除动作收尾（防 onPause 未走过的直停路径）
+                device.release();
+            }
+            devices.clear();
         }
-        devices.clear();
-        super.onRelease();
+    }
+
+    /**
+     * 设备管理集成的释放钩子：子类自有清理覆写此方法（本层 {@code onReleaseImpl} 已 final，
+     * 覆写它编译即错——设备管理子类统一落位到本钩子）。<b>不调任何 super、不调
+     * {@code onRelease()}（final 入口会重进钩子造成无限递归）</b>，设备收尾与基类收尾由模板保证。
+     */
+    protected void onDeviceReleaseImpl() {
+        // 默认无自有清理
     }
 
     // ==================== 抽象方法 ====================

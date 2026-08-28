@@ -105,7 +105,7 @@ public class CoreShutdownTest {
         }
 
         @Override
-        public void onRelease() {
+        protected void onReleaseImpl() {
             journal.add("service-release");
         }
     }
