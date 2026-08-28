@@ -395,4 +395,28 @@ public class NumberFormatterTest {
             pool.shutdownNow();
         }
     }
+
+    // ==================== 非有限数（NaN / Infinity / null）防护 ====================
+    // BigDecimal(String) 无法解析这些值，历史行为是抛 message 为 null 的 NumberFormatException；
+    // 现统一在入口拦截：formatValue 返回空串、roundToDouble 返回 NaN。
+
+    @Test
+    public void testFormatValueNaNReturnsEmpty() {
+        assertEquals("", NumberFormatter.formatValue(Double.NaN, 2));
+        assertEquals("", NumberFormatter.formatValue(Float.NaN, 2));
+        assertEquals("", NumberFormatter.formatValue(null, 2));
+    }
+
+    @Test
+    public void testFormatValueInfinityReturnsEmpty() {
+        assertEquals("", NumberFormatter.formatValue(Double.POSITIVE_INFINITY, 2));
+        assertEquals("", NumberFormatter.formatValue(Double.NEGATIVE_INFINITY, 0));
+    }
+
+    @Test
+    public void testRoundToDoubleNaNOrInfinityReturnsNaN() {
+        assertTrue(Double.isNaN(NumberFormatter.roundToDouble(Double.NaN, 2)));
+        assertTrue(Double.isNaN(NumberFormatter.roundToDouble(Double.POSITIVE_INFINITY, 2)));
+        assertTrue(Double.isNaN(NumberFormatter.roundToDouble(null, 2)));
+    }
 }
