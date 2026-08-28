@@ -109,14 +109,23 @@ public class TimeAttribute extends AttributeBase<Instant> {
         if (!valueChangeable) {
             return CompletableFuture.completedFuture(false);
         }
+        // 与 AttributeBase.setDisplayValue 同语义：仅包装解析（用户输入）失败；impl 的同步
+        // 抛出是 IO 失败形态，原样以异常 future 透传（不误标为类型转换失败）。
+        Instant instant;
         try {
-            Instant instant = parseTimeString(newDisplayValue);
-            return setDisplayValueImp(instant, fromUnit);
+            instant = parseTimeString(newDisplayValue);
         } catch (Exception e) {
             CompletableFuture<Boolean> failedFuture = new CompletableFuture<>();
             failedFuture.completeExceptionally(
                 new IllegalArgumentException("setDisplayValue类型转换失败: " + e.getMessage(), e)
             );
+            return failedFuture;
+        }
+        try {
+            return setDisplayValueImp(instant, fromUnit);
+        } catch (Exception e) {
+            CompletableFuture<Boolean> failedFuture = new CompletableFuture<>();
+            failedFuture.completeExceptionally(e);
             return failedFuture;
         }
     }

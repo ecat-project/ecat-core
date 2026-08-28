@@ -323,4 +323,48 @@ public class StateManagerTest {
         assertNull(noOp.loadState(device, "temp"));
         noOp.shutdown();
     }
+
+    // ========== 生产构造（自有 IO 提交计时器） ==========
+
+    /**
+     * 生产构造自持 ecat-state-commit 单线程（每秒 MapDB commit 是文件 IO，禁入业务池/
+     * 不占引擎车道，见 StateManager 构造注释）；shutdown 先停该计时器再关 DB。
+     * 确定性事件等待：轮询线程表到「线程出现/消失」为止，不 sleep 固定时长。
+     */
+    @Test
+    public void testProductionConstructor_selfCommitThreadLifecycle() {
+        StateManager sm = new StateManager(TEST_DIR);
+        try {
+            assertTrue("生产构造应启动具名 ecat-state-commit 计时线程",
+                awaitThreadState("ecat-state-commit-", true));
+
+            sm.shutdown();
+            sm = null; // 防止 @After 重复 shutdown
+            assertTrue("shutdown 应停自有计时线程（不再发起新一轮 commitAll）",
+                awaitThreadState("ecat-state-commit-", false));
+        } finally {
+            if (sm != null) {
+                sm.shutdown();
+            }
+        }
+    }
+
+    /** 轮询线程表直到出现（expected=true）/消失（expected=false），5s 保险丝。 */
+    private static boolean awaitThreadState(String namePrefix, boolean expected) {
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (System.currentTimeMillis() < deadline) {
+            boolean found = false;
+            for (Thread t : Thread.getAllStackTraces().keySet()) {
+                if (t.isAlive() && t.getName().startsWith(namePrefix)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found == expected) {
+                return true;
+            }
+            Thread.yield();
+        }
+        return false;
+    }
 }

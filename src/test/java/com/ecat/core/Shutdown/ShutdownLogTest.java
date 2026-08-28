@@ -30,8 +30,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.ecat.core.Task.engine.MutableClock;
-import com.ecat.core.Task.engine.SchedulerClock;
+import com.ecat.core.Utils.SchedulerClock;
 
 /**
  * 停机期 stdout 通道测试（C2 修复：停机日志可见性）：伪造 System.out（{@link ShutdownLog#setOut}

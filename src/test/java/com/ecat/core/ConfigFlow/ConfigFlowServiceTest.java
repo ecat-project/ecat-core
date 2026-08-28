@@ -89,9 +89,10 @@ public class ConfigFlowServiceTest {
         when(mockCore.getIntegrationManager()).thenReturn(mockIntegrationManager);
         when(mockCore.getFlowRegistry()).thenReturn(mockFlowRegistry);
 
-        // TaskManager 调度链（P3 周期清理：构造器 scheduleAtFixedRate；mock scheduler 不启真实线程、不泄漏）
+        // TaskManager 调度链（P3 周期清理：构造器 scheduleAtFixedRate 走业务计时池；mock scheduler
+        // 不启真实线程、不泄漏）
         when(mockCore.getTaskManager()).thenReturn(mockTaskManager);
-        when(mockTaskManager.getMdcScheduledExecutorService()).thenReturn(mockScheduler);
+        when(mockTaskManager.getBizScheduler()).thenReturn(mockScheduler);
 
         // ConfigFlowRegistry — 默认 doNothing for mutation methods
         doNothing().when(mockFlowRegistry).registerActiveFlow(anyString(), any(AbstractConfigFlow.class));

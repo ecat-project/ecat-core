@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 
-package com.ecat.core.Task.engine;
+package com.ecat.core.Shutdown;
+
+import com.ecat.core.Utils.SchedulerClock;
 
 /**
- * 测试用可变时钟：手动推进时间驱动表轮/熔断/看门狗，零真实等待（测试纪律：禁 sleep 同步）。
+ * 测试用可变时钟（原 Task.engine 包随 W7 引擎退役迁入——停机编排测试的时间轴注入）：
+ * 手动推进时间驱动预算/超时判定，零真实等待（测试纪律：禁 sleep 同步）。
  *
  * @author coffee
  */

@@ -235,20 +235,25 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
      * @return
      */
     public CompletableFuture<Boolean> asyncTurnOn(){
-        return asyncTurnOnImpl().thenCompose(result -> {
+        // 用户侧写入口与 setValue/setDisplayValue 同门：不可变更属性直接拒绝（不发 IO、值不发布）
+        if (!valueChangeable) {
+            return CompletableFuture.completedFuture(false);
+        }
+        // 朴素 CF 组合（19 号 v2 S3 写闸塌缩）：IO（asyncTurnOnImpl）直接执行——互斥/超时由
+        // 载荷自身的 SDK 事务承担；成功后收尾走 confirmPublishTail（确认后更新+发布+回调一次），
+        // 失败不发布；accountedWrite 保留 commandFailed 记账口径
+        return accountedWrite(asyncTurnOnImpl()
+            .thenCompose(result -> {
             if (result) {
-                return setValue(true).thenApply(success -> {
-                    if (success) {
-                        log.info("Device " + getDevice().getId() + " - Turn On Successed: " + getOnDisplayText());
-                    }
-                    return success;
-                });
+                return confirmPublishTail(true,
+                    () -> "Device " + getDevice().getId() + " - Turn On Successed: " + getOnDisplayText(),
+                    true);
             }
             return CompletableFuture.completedFuture(false);
         }).exceptionally(e -> {
             log.error("Device " + getDevice().getId() + " - Turn On Failed: " + e.getMessage());
             return false;
-        });
+        }));
     }
 
     /**
@@ -257,20 +262,23 @@ public class BinaryAttribute extends AttributeBase<Boolean> {
      * @return
      */
     public CompletableFuture<Boolean> asyncTurnOff(){
-        return asyncTurnOffImpl().thenCompose(result -> {
+        // 用户侧写入口与 asyncTurnOn 同门：不可变更属性直接拒绝（不发 IO、值不发布）
+        if (!valueChangeable) {
+            return CompletableFuture.completedFuture(false);
+        }
+        // 同 asyncTurnOn：朴素 CF 组合 + confirmPublishTail 收尾 + accountedWrite 记账
+        return accountedWrite(asyncTurnOffImpl()
+            .thenCompose(result -> {
             if (result) {
-                return setValue(false).thenApply(success -> {
-                    if (success) {
-                        log.info("Device " + getDevice().getId() + " - Turn Off Successed: " + getOffDisplayText());
-                    }
-                    return success;
-                });
+                return confirmPublishTail(false,
+                    () -> "Device " + getDevice().getId() + " - Turn Off Successed: " + getOffDisplayText(),
+                    true);
             }
             return CompletableFuture.completedFuture(false);
         }).exceptionally(e -> {
             log.error("Device " + getDevice().getId() + " - Turn Off Failed: " + e.getMessage());
             return false;
-        });
+        }));
     }
 
     /**

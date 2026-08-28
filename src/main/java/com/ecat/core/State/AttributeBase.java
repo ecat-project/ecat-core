@@ -20,8 +20,11 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -389,15 +392,24 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
             }
         }
 
-        // 验证通过，执行原有逻辑
+        // 验证通过：先类型转换（失败=用户输入问题，包装为明确的类型转换错误），再把转换值
+        // 交给子类 impl。impl 的同步抛出是 IO 失败的一种形态——原样以异常 future 透传
+        // （不误标为类型转换失败；写入口族契约=不抛穿 fire-and-forget 调用线程）。
+        T convertedValue;
         try {
-            T convertedValue = convertStringToType(newDisplayValue);
-            return setDisplayValueImp(convertedValue, fromUnit);
+            convertedValue = convertStringToType(newDisplayValue);
         } catch (Exception e) {
             CompletableFuture<Boolean> failedFuture = new CompletableFuture<>();
             failedFuture.completeExceptionally(
                 new IllegalArgumentException("setDisplayValue类型转换失败: " + e.getMessage(), e)
             );
+            return failedFuture;
+        }
+        try {
+            return setDisplayValueImp(convertedValue, fromUnit);
+        } catch (Exception e) {
+            CompletableFuture<Boolean> failedFuture = new CompletableFuture<>();
+            failedFuture.completeExceptionally(e);
             return failedFuture;
         }
     }
@@ -720,7 +732,13 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
             .displayValue(getDisplayValue())
             .lastUpdated(updateTime)
             .lastChanged(lastChanged)
-            .context(eventContext)
+            // context 兜底：重启恢复（restore→buildState）时 eventContext 尚未建立（随首个事件才有），
+            // 而 AttrState 契约要求 context 非空——缺兜底会让所有 persistable 属性的重启恢复
+            // 抛 IAE 静默失败（异常被错误限频去重掩盖，表象=持久化值重启全丢）。
+            // 恢复属系统生命周期场景（无具体 actor），用 SYSTEM 源兜底；与 publicState 的
+            // DEVICE_POLL 兜底同思想（那边是事件驱动路径的缺省源）。
+            .context(eventContext != null ? eventContext
+                    : EventContext.root(EventContext.Source.SYSTEM, null))
             .build();
     }
 
@@ -739,26 +757,130 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     /**
      * 子类可按需override此方法实现具体的用户侧业务的属性设置
      * 使用原始单位设置原始数据，会触发参数修改订阅.
+     *
+     * <p><b>确认后更新语义（写闸塌缩后保留，19 号 v2 S3）</b>：IO 载荷（onChangedCallback）
+     * 为朴素 CF 组合——<b>成功后</b>才 updateValue+publicState；失败（false/异常）不发布、
+     * 状态不残留。IO 与设备轮询的互斥/超时由载荷自身的 SDK 事务承担（源锁串行+事务硬超时），
+     * 不再有执行闸的预算守卫与键路由。
+     *
      * @param newValue
      * @return
-     *        true: 设置成功
-     *       false: 设置失败
+     *        true: 设置成功（IO 已确认成功且值已发布）
+     *       false: 设置失败（IO 失败/被拒，值未发布）
      */
     protected CompletableFuture<Boolean> setValue(T newValue){
         if(!valueChangeable){
             return CompletableFuture.completedFuture(false);
         }
-        if(updateValue(newValue)){
-            publicState();  // 值变更成功后自动发布 Bus 事件，确保下游绑定属性感知变化
-            // 触发事件订阅
-            if(onChangedCallback != null){
-                return onChangedCallback.apply(new AttrChangedCallbackParams<T>(this, newValue));
-            }
-            return CompletableFuture.completedFuture(true);
-        }
-        else{
+        CompletableFuture<Boolean> io = onChangedCallback != null
+            ? onChangedCallback.apply(new AttrChangedCallbackParams<T>(this, newValue))
+            : CompletableFuture.completedFuture(Boolean.TRUE); // 无回调=本地属性，IO 恒成功
+        return accountedWrite(io.thenApply(confirmed -> confirmUpdateTail(newValue, confirmed)));
+    }
+
+    /**
+     * 自带 IO 载荷的确认后更新（IO 写模板，与 setValue 并列的唯二主入口，19 号 v2 S3 写闸
+     * 塌缩后形态）：集成自覆写 {@code setValue(T)} 且 IO 不经 onChangedCallback 的属性族
+     * （modbus 数值族、thermofisher CLink/AK 族等）用本方法——ioBody = 真正的设备写
+     * （SDK 事务体，如 executeWithLambda 包裹的发帧 join），<b>成功后</b>才本地收尾
+     * updateValue+publicState；失败/false/异常不发布、值不残留。
+     *
+     * <p>ioBody 在调用线程上同步执行：互斥与超时全部由事务体自身承担——SDK 源锁
+     * （executeWithLambda/executePolling 同源 acquire/release）保证与轮询串行，事务级
+     * 硬超时保证挂死 IO 有界（原闸请求级预算守卫退役，预算=SDK 事务超时已兜）。
+     *
+     * <p>与 {@code setValue(T)} 的关系：后者 = 本方法 + 「onChangedCallback 或恒真」的默认
+     * 载荷；覆写 setValue 的族不应在 IO 成功后再调 super.setValue（会二次触发回调/发布）
+     * ——统一走本方法收尾。
+     *
+     * @param newValue 待写入并（确认成功后）发布的值
+     * @param ioBody   IO 载荷：真正的设备写（SDK 事务体，可抛异常=失败），在调用线程上同步执行
+     * @return true: IO 确认成功且值已发布；false/异常: IO 失败，值未发布
+     */
+    protected CompletableFuture<Boolean> setValueWithIoBody(T newValue, Callable<Boolean> ioBody){
+        if(!valueChangeable){
             return CompletableFuture.completedFuture(false);
         }
+        CompletableFuture<Boolean> io = new CompletableFuture<>();
+        try {
+            io.complete(ioBody.call());
+        } catch (Exception e) {
+            io.completeExceptionally(e);
+        }
+        return accountedWrite(io.thenApply(confirmed -> confirmUpdateTail(newValue, confirmed)));
+    }
+
+    /** 确认后收尾（两主入口共用）：IO 确认成功才本地写值 + 发布。 */
+    private boolean confirmUpdateTail(T newValue, boolean confirmed) {
+        if (confirmed) {
+            // IO 确认成功后本地写值 + 发布
+            updateValue(newValue);
+            publicState();  // 值变更成功后自动发布 Bus 事件，确保下游绑定属性感知变化
+        }
+        return confirmed;
+    }
+
+    /**
+     * 属性写四处成功收尾的共用实现（BinaryAttribute.asyncTurnOn/asyncTurnOff、
+     * CommandAttribute.sendCommand、SelectAttribute.selectOption）：IO 确认成功后
+     * 本地写值 + 按需发布 + 成功日志 + onChangedCallback 恰一次。四处手写收尾仅
+     * log 文案与是否发布两处差异，参数化收进本方法；调用方各自保留朴素组合的
+     * {@code *Impl()} 发起与失败 exceptionally 分支（19 号 v2 S3 写闸塌缩形态）。
+     *
+     * @param newValue   确认成功后写入的新值（经 this.updateValue，子类覆写照常生效）
+     * @param successLog 成功日志——延迟求值：在 updateValue 之后调用，供 Command/Select
+     *                   日志里引用 getValue()（= 刚写入值）的调用方与原实现的求值时序
+     *                   严格一致
+     * @param publishState true=publicState() 发布；false=IO 成功后仍不发布
+     *                     （SelectAttribute.selectOption 的 publicState 布尔参语义）
+     * @return onChangedCallback 结果 future；无回调时恒 true
+     */
+    protected CompletableFuture<Boolean> confirmPublishTail(T newValue, Supplier<String> successLog,
+                                                            boolean publishState) {
+        updateValue(newValue);
+        if (publishState) {
+            publicState();
+        }
+        log.info(successLog.get());
+        if (onChangedCallback != null) {
+            return onChangedCallback.apply(new AttrChangedCallbackParams<T>(this, newValue));
+        }
+        return CompletableFuture.completedFuture(true);
+    }
+
+    /**
+     * 写失败记账 counter（进程级自持，AttributeBase 类加载即生效；与 19 号 v2 S3 起
+     * 的 commandFailed 口径同源，观测面重组 W6 自 ExecutionMetrics 迁入——不再依赖
+     * core/执行 API 可达性，裸属性形态同样计数）。指标注册柜台退役（21 号）后
+     * 咽喉自持：一切集成的属性写必经此处，不经注册表即无注册/注销义务。
+     */
+    private static final AtomicLong COMMAND_FAILED = new AtomicLong();
+
+    /**
+     * 写失败累计读数（窄读面，供 {@code SystemHealthService} execution 节与测试消费）。
+     * 属性写失败=排障硬信号，是旧注册柜台 9 键中唯一有真实判读的指标（21 号 D-21-1），
+     * 唯一幸存——咽喉自持不经注册表。
+     */
+    public static long commandFailedCount() {
+        return COMMAND_FAILED.get();
+    }
+
+    /**
+     * 写失败记账（原写命令闸 commandFailed 口径，闸塌缩后收口于此——保留指标，19 号 v2 S3）：
+     * 结果为 false/异常的属性写计一次 commandFailed 并 WARN 日志（fire-and-forget 调用方
+     * 忽略 future 时失败仍有痕）。计数走本类静态句柄——无 device/无 core 的裸属性形态
+     * （单测）与生产形态同口径（进程级可达，旧「裸属性跳过计数」的可达性限制不复存在）。
+     */
+    protected CompletableFuture<Boolean> accountedWrite(CompletableFuture<Boolean> write) {
+        write.whenComplete((ok, t) -> {
+            if (t != null || !Boolean.TRUE.equals(ok)) {
+                COMMAND_FAILED.incrementAndGet();
+                log.warn("写命令失败 device={} attr={} reason={}",
+                    device != null ? device.getId() : null, attributeID,
+                    t != null ? t : "IO 载荷返回 false");
+            }
+        });
+        return write;
     }
 
     /**

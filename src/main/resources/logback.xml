@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  五通道日志预算配置（目标 ≤50MB/日，全部日志目录 totalSizeCap ≤1GB 兜底）：
-    1. 生命周期 lifecycle.log  INFO  marker=LIFECYCLE 路由（发射方属后续执行模型阶段）180 天 zip，cap 100MB
-    2. 通讯健康 comm-health.log INFO/WARN marker=COMM 路由（发射方属后续执行模型阶段）90 天，cap 150MB
-    3. 错误     error.log      WARN+ 经 ErrorRateLimitFilter 限频去重，90 天，cap 100MB
-    4. 应用     app.log        INFO+ 常规主通道（承接原 ecat-all.log 全部常规输出），30 天，cap 300MB
-    5. 诊断 DEBUG：默认不落盘；后续阶段经 LogManager 按集成临时开窗口（独立诊断文件 ≤100MB 自动回收），
-       本配置只留结构缝（LogMarkers 常量 + 本注释），不预置 appender。
-  四通道 cap 合计 650MB，为 1GB 兜底上限留出余量。
+  三通道日志预算配置（目标 ≤50MB/日，全部日志目录 totalSizeCap ≤1GB 兜底）：
+    1. 错误 error.log  WARN+ 经 ErrorRateLimitFilter 限频去重，90 天，cap 100MB
+    2. 应用 app.log    INFO+ 常规主通道（承接原 ecat-all.log 全部常规输出），30 天，cap 300MB
+    3. 诊断 DEBUG：默认不落盘；经 LogManager 按集成临时开窗口（独立诊断文件 ≤100MB 自动回收），
+       本配置只留结构缝（本注释），不预置 appender。
+  两通道 cap 合计 400MB，为 1GB 兜底上限留出余量。
+  历史注记：原生命周期（lifecycle.log / marker=LIFECYCLE）与通讯健康（comm-health.log / marker=COMM）
+  两通道随执行引擎退役（传输自持执行终态 19 号 v2 的 W7 整删，2026-08-28）一并删除——
+  断连可见性由各传输 SDK 的断连状态转移行承载。
   root 与 com.ecat 默认 INFO：实测 DEBUG 占日志体积 ~90%（~40GB/日），级别下沉是止血主力。
   临时开 DEBUG 排障：java -Decat.log.level=debug -jar ecat-core.jar（DEBUG 进 app.log，受 cap 兜底；
   用完即关）。测试/开发环境也可放 logback-test.xml 覆盖（logback 查找顺序 test 优先）。
@@ -26,8 +27,6 @@
     <!-- 日志输出格式 -->
     <property name="log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%callerEx] - %msg%n" />
     <property name="log.pattern.coordinate" value="%d{HH:mm:ss.SSS} [%traceId] [%coordinate] [%thread] %-5level %logger{36} - %msg%n" />
-    <!-- 生命周期/通讯健康通道：一行一事（状态转移），带完整日期与 marker（通道标识），grep 设备即得全史 -->
-    <property name="log.pattern.channel" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%marker] [%coordinate] [%thread] %-5level %logger{36} - %msg%n" />
 
     <!-- 日志存放目录（相对 core 启动目录）；可经 -DLOG_DIR=... 覆盖（配置装载测试注入临时目录复用本配置） -->
     <property name="log.path" value="${LOG_DIR:-logs}" />
@@ -39,61 +38,7 @@
         </encoder>
     </appender>
 
-    <!-- ==================== 通道 1：生命周期 lifecycle.log ==================== -->
-    <appender name="file_lifecycle" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${log.path}/lifecycle.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <fileNamePattern>${log.path}/lifecycle.%d{yyyy-MM-dd}.%i.log.zip</fileNamePattern>
-            <maxFileSize>10MB</maxFileSize>
-            <maxHistory>180</maxHistory>
-            <totalSizeCap>100MB</totalSizeCap>
-        </rollingPolicy>
-        <encoder>
-            <pattern>${log.pattern.channel}</pattern>
-        </encoder>
-    </appender>
-    <appender name="async_lifecycle" class="ch.qos.logback.classic.AsyncAppender">
-        <queueSize>256</queueSize>
-        <!-- queueSize*0.2：队列将满时先丢 INFO 级（logback 保 WARN+），转移路径日志不在丢弃优先级 -->
-        <discardingThreshold>51</discardingThreshold>
-        <neverBlock>true</neverBlock>
-        <includeCallerData>false</includeCallerData>
-        <filter class="com.ecat.core.Log.MarkerRoutingFilter">
-            <marker>LIFECYCLE</marker>
-            <onMatch>ACCEPT</onMatch>
-            <onMismatch>DENY</onMismatch>
-        </filter>
-        <appender-ref ref="file_lifecycle"/>
-    </appender>
-
-    <!-- ==================== 通道 2：通讯健康 comm-health.log ==================== -->
-    <!-- 本期预留：appender+marker 路由先架好；发射方（连接状态转移、每设备周期摘要）属后续执行模型阶段 -->
-    <appender name="file_comm" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${log.path}/comm-health.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <fileNamePattern>${log.path}/comm-health.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
-            <maxFileSize>10MB</maxFileSize>
-            <maxHistory>90</maxHistory>
-            <totalSizeCap>150MB</totalSizeCap>
-        </rollingPolicy>
-        <encoder>
-            <pattern>${log.pattern.channel}</pattern>
-        </encoder>
-    </appender>
-    <appender name="async_comm" class="ch.qos.logback.classic.AsyncAppender">
-        <queueSize>256</queueSize>
-        <discardingThreshold>51</discardingThreshold>
-        <neverBlock>true</neverBlock>
-        <includeCallerData>false</includeCallerData>
-        <filter class="com.ecat.core.Log.MarkerRoutingFilter">
-            <marker>COMM</marker>
-            <onMatch>ACCEPT</onMatch>
-            <onMismatch>DENY</onMismatch>
-        </filter>
-        <appender-ref ref="file_comm"/>
-    </appender>
-
-    <!-- ==================== 通道 3：错误 error.log（WARN+，限频后） ==================== -->
+    <!-- ==================== 通道 1：错误 error.log（WARN+，限频后） ==================== -->
     <appender name="file_error" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${log.path}/error.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
@@ -111,24 +56,13 @@
         <discardingThreshold>51</discardingThreshold>
         <neverBlock>true</neverBlock>
         <includeCallerData>false</includeCallerData>
-        <!-- 已划入生命周期/通讯健康通道的事件不再双写进错误通道 -->
-        <filter class="com.ecat.core.Log.MarkerRoutingFilter">
-            <marker>LIFECYCLE</marker>
-            <onMatch>DENY</onMatch>
-            <onMismatch>NEUTRAL</onMismatch>
-        </filter>
-        <filter class="com.ecat.core.Log.MarkerRoutingFilter">
-            <marker>COMM</marker>
-            <onMatch>DENY</onMatch>
-            <onMismatch>NEUTRAL</onMismatch>
-        </filter>
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
             <level>WARN</level>
         </filter>
         <appender-ref ref="file_error"/>
     </appender>
 
-    <!-- ==================== 通道 4：应用 app.log（INFO+ 主通道） ==================== -->
+    <!-- ==================== 通道 2：应用 app.log（INFO+ 主通道） ==================== -->
     <appender name="file_app" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${log.path}/app.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
@@ -147,17 +81,6 @@
         <discardingThreshold>51</discardingThreshold>
         <neverBlock>true</neverBlock>
         <includeCallerData>false</includeCallerData>
-        <!-- 已划入专属通道的事件不双写进应用通道 -->
-        <filter class="com.ecat.core.Log.MarkerRoutingFilter">
-            <marker>LIFECYCLE</marker>
-            <onMatch>DENY</onMatch>
-            <onMismatch>NEUTRAL</onMismatch>
-        </filter>
-        <filter class="com.ecat.core.Log.MarkerRoutingFilter">
-            <marker>COMM</marker>
-            <onMatch>DENY</onMatch>
-            <onMismatch>NEUTRAL</onMismatch>
-        </filter>
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
             <level>INFO</level>
         </filter>
@@ -171,8 +94,6 @@
     <!-- ecat 核心与全部动态集成；默认 info（实测 DEBUG ~40GB/日），临时排障 -Decat.log.level=debug -->
     <logger name="com.ecat" level="${ecat.log.level:-info}" additivity="false">
         <appender-ref ref="console" />
-        <appender-ref ref="async_lifecycle" />
-        <appender-ref ref="async_comm" />
         <appender-ref ref="async_error" />
         <appender-ref ref="async_app" />
         <appender-ref ref="broadcast" />

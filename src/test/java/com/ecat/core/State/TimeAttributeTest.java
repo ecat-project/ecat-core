@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.Assert.*;
 
@@ -140,6 +141,32 @@ public class TimeAttributeTest {
         // valueChangeable is false by default
         Boolean result = attr.setDisplayValue("2026-04-05T10:30:00Z").join();
         assertFalse(result);
+    }
+
+    /**
+     * impl 同步抛 → 异常 future 原样透传（不误标为类型转换失败）：TimeAttribute 的
+     * setDisplayValue 与 AttributeBase 同型双 try——解析（用户输入）失败才包装
+     * 「类型转换失败」，impl 同步抛是 IO 失败形态，异常原样透传。
+     */
+    @Test
+    public void testSetDisplayValueImplSyncThrowPassesThrough() {
+        TimeAttribute changeableAttr = new TimeAttribute("test", AttributeClass.TIME,
+                null, null, 0, false, true) {
+            @Override
+            protected CompletableFuture<Boolean> setDisplayValueImp(Instant value, UnitInfo fromUnit) {
+                throw new RuntimeException("impl boom");
+            }
+        };
+
+        try {
+            changeableAttr.setDisplayValue("2026-04-05T10:30:00Z").join();
+            fail("impl 同步抛应以异常 future 完成");
+        } catch (Exception e) {
+            // 异常原样透传：不是「setDisplayValue类型转换失败」包装
+            assertTrue(e.getCause() instanceof RuntimeException);
+            assertEquals("impl boom", e.getCause().getMessage());
+        }
+        assertNull("impl 抛出后值不得残留", changeableAttr.getValue());
     }
 
     // ========== 往返测试 ==========

@@ -68,18 +68,19 @@ integrations:
 - media 集成带 JavaCPP/FFmpeg native，32 位/小内存机一律不装。
 - 集成的新增/升级走 core 的集成安装流程（UI/API），比手编 yml 可靠；yml 手改适用于裁剪。
 
-## 5 · 日志目录结构（五通道 + 兜底）
+## 5 · 日志目录结构（三通道 + 兜底）
 
-`LOG_DIR`（默认 `<部署根>/logs`）下，logback 五通道预算（合计 cap 650MB，1GB 兜底）：
+`LOG_DIR`（默认 `<部署根>/logs`）下，logback 三通道预算（合计 cap 400MB，1GB 兜底）：
 
 | 文件 | 内容 | 保留 / cap |
 |---|---|---|
-| `lifecycle.log` | 生命周期通道（marker=LIFECYCLE，一行一事，grep 设备即得全史） | 180 天 zip / 100MB |
-| `comm-health.log` | 通讯健康通道（marker=COMM，连接状态转移） | 90 天 / 150MB |
 | `error.log` | 错误通道（WARN+，同签名 3s 窗口限频去重） | 90 天 / 100MB |
 | `app.log` | 应用主通道（INFO+ 常规输出） | 30 天 / 300MB |
 | *（诊断 DEBUG）* | 默认不落盘；临时排障 `-Decat.log.level=debug` 进 app.log，用完即关 | — |
-| `core-api.log` | **启动脚本重定向的 stdout/stderr**：承接 logback 初始化前的启动输出、System.out 与 OOM 栈（五通道看不到的兜底；追加模式，无自动轮转，必要时人工清） | — |
+| `core-api.log` | **启动脚本重定向的 stdout/stderr**：承接 logback 初始化前的启动输出、System.out 与 OOM 栈（其余通道看不到的兜底；追加模式，无自动轮转，必要时人工清） | — |
+
+> 历史注记：原 `lifecycle.log` / `comm-health.log` 两通道随执行引擎退役（2026-08-28）删除，
+> 断连可见性由各传输 SDK 的断连状态转移行承载；部署机上的旧文件可人工清理。
 
 ## 6 · 32 位注意（Win2003 目标，详见 `win2003/README.md`）
 

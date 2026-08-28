@@ -16,8 +16,11 @@
 
 package com.ecat.core.State;
 
+import com.ecat.core.Device.DeviceBase;
 import org.junit.Test;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 
@@ -201,5 +204,31 @@ public class AttributeBasePersistenceTest {
 
         assertEquals(Double.valueOf(10.0), attr.getValue());
         assertNull(attr.getUpdateTime()); // 0 means no updateTime
+    }
+
+    /**
+     * bugs/20260824-001500 回归：重启恢复场景——属性已注册设备（id 非空）但从未发生过事件
+     * （eventContext==null），restore 必须能重建 lastState（AttrState 构造的 context 必填
+     * 由恢复源兜底），否则每次重启所有 persistable 属性状态静默丢失（异常被错误限频去重掩盖）。
+     */
+    @Test
+    public void testRestore_noEventContext_rebuildsLastState() {
+        DeviceBase device = mock(DeviceBase.class);
+        when(device.getId()).thenReturn("dev-restore-1");
+
+        TextAttribute attr = new TextAttribute("cylinder_id", AttributeClass.TEXT, null, null, true);
+        attr.setDevice(device);
+
+        PersistedState state = new PersistedState();
+        state.version = 2;
+        state.value = "GBW-E-0825";
+        state.statusCode = 1;
+        state.updateTimeEpochMs = 1787620333669L;
+
+        attr.restore(state);
+
+        AttrState<?> restored = attr.getState();
+        assertNotNull("重启恢复后 state 必须可读（否则持久化闭环断裂）", restored);
+        assertEquals("GBW-E-0825", restored.getValue());
     }
 }

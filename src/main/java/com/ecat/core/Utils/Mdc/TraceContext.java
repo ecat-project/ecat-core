@@ -299,8 +299,8 @@ public final class TraceContext {
      * 每次执行是独立的业务操作（一次轮询、一次清扫），应有独立 Trace ID 追踪单次链路；
      * 而 coordinate 等长命上下文保持提交时的值。
      *
-     * <p>调度引擎（SchedulerEngine）与 MdcScheduledExecutorService 共用此实现，
-     * 保证两种执行器下周期任务的 MDC 语义一致。
+     * <p>各周期执行域（MdcScheduledExecutorService、传输 SDK 周期链）共用此实现，
+     * 保证不同执行器下周期任务的 MDC 语义一致（集中调度引擎已随 W7 退役）。
      *
      * @param task 原始任务
      * @param context 提交时捕获的 MDC 上下文（不含当次执行的 traceId）

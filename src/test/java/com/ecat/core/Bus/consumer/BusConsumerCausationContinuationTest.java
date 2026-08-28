@@ -63,16 +63,22 @@ public class BusConsumerCausationContinuationTest {
     @Test
     public void consumerThreadSeesPublishersTraceId() throws Exception {
         CountDownLatch consumed = new CountDownLatch(1);
-        ProbeConsumer consumer = new ProbeConsumer(consumed);
+        // 哨兵轮 latch：evt-2 的 consume 完成蕴含 evt-1 的 noteProcessed 已跑（worker 串行：
+        // consume(evt-1) → noteProcessed(evt-1) → consume(evt-2)），使 processed 计数断言
+        // 确定性成立——countDown 在 consume 内、计数在 consume 返回后，单轮 latch 与计数
+        // 断言间存在固有竞态（bug-record-20260828-004500，负载下可复现）
+        CountDownLatch sentinelConsumed = new CountDownLatch(1);
+        ProbeConsumer consumer = new ProbeConsumer(consumed, sentinelConsumed);
         MDC.clear();
         Thread publisher = new Thread(() -> {
             TraceContext.setTraceId(TraceContext.generateTraceId());
             consumer.onEvent("evt-1");
+            consumer.onEvent("evt-2");
         }, "publish-thread");
         publisher.start();
         publisher.join(5_000L);
 
-        assertTrue("consume 应完成（latch 同步，不 sleep）", consumed.await(5, TimeUnit.SECONDS));
+        assertTrue("哨兵轮 consume 应完成（latch 同步，不 sleep）", sentinelConsumed.await(5, TimeUnit.SECONDS));
         assertThat("消费线程 MDC traceId 应为发布线程的 26 字符 ULID",
                 consumer.lastSeenTraceId == null ? 0 : consumer.lastSeenTraceId.length(), is(26));
         assertThat("处理计数须计入", consumer.getProcessedCount() >= 1, is(true));

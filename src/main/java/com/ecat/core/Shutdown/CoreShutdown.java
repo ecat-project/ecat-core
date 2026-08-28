@@ -28,7 +28,7 @@ import com.ecat.core.Integration.IntegrationDeviceBase;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
-import com.ecat.core.Task.engine.SchedulerClock;
+import com.ecat.core.Utils.SchedulerClock;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
 
@@ -38,9 +38,10 @@ import com.ecat.core.Utils.LogFactory;
  *
  * <p><b>阶段顺序及依据</b>（数据流：设备轮询 → 总线发布 → 消费者攒批 → 落库/状态 DB）：
  * <ol>
- * <li><b>scheduler-quiesce 停「新工作」</b>：调度引擎优雅 shutdown——周期任务到期即取消不再
- *     重排、已排队一次性任务跑完（SchedulerEngine.shutdown 的 SHUTDOWN 语义），有界等待在跑
- *     任务结束。先停新工作让事件流有不动点，后续 drain 才可能穷尽。</li>
+ * <li><b>scheduler-quiesce 停「新工作」</b>：业务计时器（bizScheduler）优雅 shutdown——
+ *     周期任务到期即取消不再重排、已排队一次性任务跑完（W7 引擎退役后本阶段不再有引擎
+ *     停机动作），有界等待 biz 池在跑任务结束。先停新工作让事件流有不动点，后续 drain
+ *     才可能穷尽。</li>
  * <li><b>device-wind-down 设备收尾（源先停）</b>：设备型集成（{@link IntegrationDeviceBase}）
  *     onPause——停轮询/关连接，并 commit+close 本集成设备的状态 DB（IntegrationDeviceBase.onPause
  *     契约）。设备收尾自身会发布终态事件（最后一批属性/状态变更），故必须排在 drain 之前、
@@ -55,8 +56,8 @@ import com.ecat.core.Utils.LogFactory;
  *     未 close 的 DB 恰会丢要保的尾批，宁可超预算也跑完（超时仅 WARN 记录）。</li>
  * <li><b>release-integrations</b>：全部集成 onRelease——清日志上下文/类加载器映射等。放最后
  *     因为①~④的日志与集成定位依赖这些映射。</li>
- * <li><b>pools-shutdown</b>：TaskManager.shutdownAll——引擎 shutdownNow（若①未终止则强制）+
- *     托管 executor 池收尾，之后 hook 返回、JVM 退出。</li>
+ * <li><b>pools-shutdown</b>：TaskManager.shutdownAll——业务计时器 shutdownNow（若①未终止
+ *     则强制）+ 托管 executor 池收尾，之后 hook 返回、JVM 退出。</li>
  * </ol>
  *
  * <p>预算为卡死上限而非预期耗时：正常停机各阶段毫秒级完成；只有集成收尾挂死时才吃满预算。
@@ -87,15 +88,12 @@ public final class CoreShutdown {
     public static final long TOTAL_BUDGET_MS = 100_000L;
 
     /**
-     * = 在跑任务硬超时（默认 30s，ecat.scheduler.hard-timeout-millis）+ 5s 车道排空余量。
-     * quiesce 语义是「停触发 + 等在跑跑完」：等待预算低于在跑任务硬超时时，一次长事务在跑
-     * 即必然超时——终验（2026-08-16，20.8s 停机）实证旧 10s 预算下串口事务（5s 硬超时）在跑
-     * + 车道排空未完即 timeout(10001ms)，引擎仍在跑并连锁到 device-wind-down：对同一串口的
-     * onPause 撞上在跑事务吃满 5s 单集成份额（该阶段 timeout(8377ms) = 5000ms 份额 +
-     * ~3.4s 健康收尾）。预算 ≥ 硬超时后，在跑任务至多被看门狗中断于 30s、车道随后排空，
-     * 等待有真完成的机会。部署上调大 hard-timeout-millis 时须同步复核本值。
-     * 超长延迟一次性任务（如熔断 300s 冷却重试）仍明确不等——由 pools-shutdown 的
-     * shutdownNow 取消，重试类任务停机丢弃无害。
+     * quiesce 等待预算（35s 沿用历史值，总额不变约束——停机脚本 SIGKILL 宽限窗按
+     * 总预算+~10s 配置，动本值须同步复核部署侧）。W7 引擎退役后等待对象只剩 biz 池
+     * （毫秒级纯计算 tick，正常毫秒级终止）；值的历史依据是引擎在跑任务硬超时
+     * （默认 30s，ecat.scheduler.hard-timeout-millis）+ 5s 排空余量——该硬超时语义随
+     * 引擎消亡，KSE 在飞 drain（出站推送秒级 IO）无 await 面、由 pools-shutdown 兜底，
+     * 本预算现仅为 biz 池终止的有界等待上限，正常停机远用不满。
      */
     static final long SCHEDULER_QUIESCE_MS = 35_000L;
 
@@ -125,8 +123,8 @@ public final class CoreShutdown {
     static final long RELEASE_INTEGRATIONS_MS = 5_000L;
 
     /**
-     * shutdownNow 内 timerThread.join(2000ms) 是最大单项；引擎线程全 daemon，
-     * 超预算乃至被 SKIPPED 也不阻塞 JVM 退出（5s 而非旧 10s 同为让额 quiesce）。
+     * shutdownNow 内 biz 池/KSE 停机毫秒级；线程全 daemon，超预算乃至被 SKIPPED
+     * 也不阻塞 JVM 退出（5s 而非旧 10s 为让额数据关键阶段）。
      */
     static final long POOLS_SHUTDOWN_MS = 5_000L;
 
@@ -250,7 +248,7 @@ public final class CoreShutdown {
     // 阶段实现
     // =====================================================================
 
-    /** ①调度引擎优雅停：周期任务不再重排、排队一次性任务跑完，有界等待引擎 TERMINATED。 */
+    /** ①调度停新工作：biz 池优雅停（周期不再重排、排队一次性任务跑完）+ KSE 停新提交，有界等待 biz 池 TERMINATED。 */
     private final class SchedulerQuiesceStage implements ShutdownStage {
         @Override
         public String name() {
@@ -264,16 +262,17 @@ public final class CoreShutdown {
 
         @Override
         public boolean execute(long deadlineNanos, SchedulerClock clock) {
-            // shutdown()（非 shutdownNow）= SHUTDOWN 语义：fireTask 对周期任务到期即 cancel、
-            // 已入车道队列的一次性任务继续执行、worker 排空后自退——不中断在跑任务
-            taskManager.getSchedulerEngine().shutdown();
+            // 业务计时器停新工作（S2：集成层业务池）：业务 tick 也可能是
+            // 总线事件源，不在①停掉会破坏「事件流不动点」前提、失效后续 drain 语义；
+            // 优雅 shutdown（排队一次性任务跑完），pools-shutdown 阶段 shutdownNow 兜底。
+            taskManager.getBizScheduler().shutdown();
             try {
                 long waitNanos = deadlineNanos - clock.nanoTime();
                 boolean terminated = waitNanos > 0L
-                        && taskManager.getSchedulerEngine().awaitTermination(waitNanos, TimeUnit.NANOSECONDS);
+                        && taskManager.getBizScheduler().awaitTermination(waitNanos, TimeUnit.NANOSECONDS);
                 if (!terminated) {
-                    ShutdownLog.warn(log, "SCHEDULER_QUIESCE_UNFINISHED（引擎未在预算内终止：周期任务已停止重排，"
-                            + "残留一次性任务由守护 worker 执行、随 JVM 退出；后续 pools-shutdown 会 shutdownNow 兜底）");
+                    ShutdownLog.warn(log, "SCHEDULER_QUIESCE_UNFINISHED（biz 池未在预算内终止：周期任务已停止重排，"
+                            + "残留一次性任务由守护线程执行、随 JVM 退出；后续 pools-shutdown 会 shutdownNow 兜底）");
                 }
                 return terminated;
             } catch (InterruptedException e) {
@@ -306,7 +305,7 @@ public final class CoreShutdown {
         }
     }
 
-    /** ⑥线程池收尾：引擎 shutdownNow（若①未终止则强制）+ 托管 executor 池。 */
+    /** ⑥线程池收尾：业务计时器 shutdownNow（若①未终止则强制）+ 托管 executor 池。 */
     private final class PoolsShutdownStage implements ShutdownStage {
         @Override
         public String name() {

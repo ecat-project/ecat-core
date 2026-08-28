@@ -20,7 +20,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import lombok.Getter;
@@ -51,7 +52,7 @@ import com.ecat.core.Utils.Log;
  * @author coffee
  */
 
-public abstract class DeviceBase implements DeviceControl {
+public abstract class DeviceBase implements DeviceControl, RemovalHost {
     @Getter
     protected EcatCore core;
     protected Map<String, Object> config;
@@ -435,11 +436,62 @@ public abstract class DeviceBase implements DeviceControl {
     }
 
     /**
-     * 获取设备的定时任务执行器
-     * 
+     * 移除动作 deque（RemovalHost 注册面，18 号设计 §3.3）：SDK 轮询句柄等销毁动作经
+     * {@link #onRemove(Runnable)} 注册，{@link #cancelManagedTasks()} 时 <b>LIFO</b> 执行
+     * （后注册的资源先拆卸——依赖反向于创建顺序，与 HA async_on_remove 同构）。
+     * 并发安全：注册（start/业务线程）与 sweep（生命周期线程）并发首达安全。
      */
-    public ScheduledExecutorService getScheduledExecutor() {
-        return this.core.getTaskManager().getExecutorService();
+    private final ConcurrentLinkedDeque<Runnable> removalActions = new ConcurrentLinkedDeque<>();
+
+    /** 移除动作是否已随 cancelManagedTasks 关闭（关闭后注册=病态调用 reject，严格模式不静默收下）。 */
+    private volatile boolean removalSwept;
+
+    /**
+     * 移除动作注册（RemovalHost 宿主实现，18 号设计 §3.3）：注册到移除动作 deque，
+     * {@link #cancelManagedTasks()} 时 LIFO 统一执行。
+     *
+     * <p>保持 public——SDK 轮询之外的资源（TcpFrameHandler 注册、总线订阅）后续按需手动绑；
+     * SDK 四域经 {@code on(RemovalHost, source)} 工厂自动绑。</p>
+     *
+     * <p><b>非阻塞契约</b>：动作必须提交即返（{@code handle.cancel()} 纯标记天然合规；
+     * 耗时释放须动作内部经引擎提交后即返），详见 {@link RemovalHost}。</p>
+     *
+     * @throws RejectedExecutionException 设备已停止后注册属病态调用（严格模式，
+     *         防「stop 后才注册」的静默泄漏）
+     * @throws IllegalArgumentException action 为 null
+     */
+    @Override
+    public void onRemove(Runnable action) {
+        if (action == null) {
+            throw new IllegalArgumentException("onRemove(null) 不允许——无动作可注册");
+        }
+        if (removalSwept) {
+            throw new RejectedExecutionException(
+                "设备已停止，拒绝注册移除动作——设备生命周期缺陷，请检查 stop 后误注册的调用方");
+        }
+        removalActions.addLast(action);
+    }
+
+    /**
+     * 移除动作统一执行（RemovalHost，18 号设计 §3.3）：LIFO 执行全部移除动作
+     * （{@link #onRemove(Runnable)} 注册面；逐条 catch 记 warn 继续——清理不容半途而废）。
+     * final——禁止集成 override 抢跑或吞掉框架的兜底收尾。
+     *
+     * <p>幂等（重复调用空转）；单条动作失败不中断 sweep；O(n) 不阻塞等任务结束
+     * （移除动作自身的非阻塞契约见 {@link RemovalHost}——{@code handle.cancel()} 纯标记天然合规）。
+     * 由 IntegrationDeviceBase 的 stop/release chokepoint 在 {@code device.stop()} 之后调用
+     * （先给集成优雅收尾窗口，sweep 兜住 SDK 轮询句柄等漏网资源；stop() 抛异常也经 try-finally 必达）。</p>
+     */
+    public final void cancelManagedTasks() {
+        removalSwept = true;
+        Runnable action;
+        while ((action = removalActions.pollLast()) != null) {
+            try {
+                action.run();
+            } catch (Throwable e) {
+                log.warn("移除动作执行失败（已跳过，继续执行其余动作）", e);
+            }
+        }
     }
 
     /**

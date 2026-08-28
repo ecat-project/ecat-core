@@ -96,14 +96,14 @@ public class CausalChainThreeHopTest {
         AtomicReference<String> pollTraceId = new AtomicReference<>();
         AtomicReference<BusEvent<?>> publishedEvent = new AtomicReference<>();
 
-        // 订阅：同步扇出保证 lambda 与 onEvent 运行在发布线程（= 执行 poll 的引擎 worker 线程）
+        // 订阅：同步扇出保证 lambda 与 onEvent 运行在发布线程（= 执行 poll 的调度池 worker 线程）
         registry.subscribe(TOPIC, event -> {
             publishedEvent.set(event);
             consumer.onEvent(event.getPayload());
         });
 
         // poll 任务（周期执行的第一轮即完整链路；周期语义贴近真实轮询）
-        taskManager.getMdcScheduledExecutorService().scheduleWithFixedDelay(() -> {
+        taskManager.getBizScheduler().scheduleWithFixedDelay(() -> {
             pollTraceId.set(TraceContext.getTraceId());
             registry.publish(BusEvent.of(TOPIC, new PollPayload(),
                     EventContext.root(EventContext.Source.DEVICE_POLL, null)));
@@ -111,7 +111,7 @@ public class CausalChainThreeHopTest {
 
         assertTrue("消费者应收到事件（latch 同步）", consumer.consumed.await(10, TimeUnit.SECONDS));
 
-        assertThat("第一跳：poll 线程应有引擎生成的 ULID", pollTraceId.get(), notNullValue());
+        assertThat("第一跳：poll 线程应有调度池生成的 ULID", pollTraceId.get(), notNullValue());
         assertThat("第一跳 traceId 是 26 字符 ULID", pollTraceId.get().length(), is(26));
         assertThat("第二跳：事件信封 causationId 须等于 poll 线程 traceId",
                 publishedEvent.get().getCausationId(), is(pollTraceId.get()));

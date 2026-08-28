@@ -17,6 +17,8 @@
 package com.ecat.core.Integration;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 
 import com.ecat.core.ConfigEntry.ConfigEntry;
@@ -24,6 +26,7 @@ import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.ConfigFlow.AbstractConfigFlow;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Device.DeviceRegistry;
+import com.ecat.core.Device.RemovalHost;
 import com.ecat.core.I18n.I18nHelper;
 import com.ecat.core.I18n.I18nProxy;
 import com.ecat.core.Log.ClassLoaderCoordinateFilter;
@@ -41,7 +44,7 @@ import com.ecat.core.Utils.Log;
  *
  * @author coffee
  */
-public abstract class IntegrationBase implements IntegrationLifecycle {
+public abstract class IntegrationBase implements IntegrationLifecycle, RemovalHost {
 
     protected Log log;
 
@@ -91,8 +94,20 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
     }
 
     // integration schedule task executor
-    public ScheduledExecutorService getScheduledExecutor() {
-        return this.core.getTaskManager().getExecutorService();
+    /**
+     * 集成层业务计时器（S2 摆脱引擎）：返回 core 级共享业务池（ecat-biz-sched，普通具名
+     * 守护线程 + MDC/TraceContext 包装），不再借道调度引擎——业务 tick（纯计算节律）与
+     * IO 轮询（引擎车道/硬超时/熔断）故障域隔离，互不拖累。
+     *
+     * <p><b>IO 禁入（硬边界，名字自带警示）</b>：仅放纯计算业务计时（时钟显示、随机源、
+     * 指标采集等毫秒级任务）；会阻塞的 IO 轮询禁走此池——2 线程小池，一个阻塞任务会
+     * <b>静默饿死全部业务计时</b>（无超时、无熔断、无报错），设备 IO 轮询走所属传输域
+     * SDK（SerialPolling/ModbusPolling 等，19 号 v2「设备零调度」）。生命周期随 core 停机。
+     * 方法名 Biz（业务）对 IO 说不——旧名 getScheduledExecutor 无语义提示、阻塞任务编译
+     * 照过，E4-6 改名强制触碰点。
+     */
+    public ScheduledExecutorService getBizScheduler() {
+        return this.core.getTaskManager().getBizScheduler();
     }
 
     /**
@@ -103,6 +118,62 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
     public String getCoordinate() {
         return (loadOption != null && loadOption.getIntegrationInfo() != null)
                 ? loadOption.getIntegrationInfo().getCoordinate() : null;
+    }
+
+    /**
+     * 集成级移除动作 deque（RemovalHost 注册面，镜像 DeviceBase.removalActions）：
+     * 集成自有资源（HostedExecutors 池、jmdns 句柄等）经 {@link #onRemove(Runnable)}
+     * 注册，{@link #onRelease()} 时 <b>LIFO</b> 执行（后注册的资源先拆卸——依赖反向于
+     * 创建顺序）。与设备级各自挂各自，无嵌套传递：设备级执行器挂设备、集成级挂集成，
+     * 天然分层。
+     */
+    private final ConcurrentLinkedDeque<Runnable> removalActions = new ConcurrentLinkedDeque<>();
+
+    /** 集成级移除动作是否已随 onRelease 关闭（关闭后注册=病态调用 reject，严格模式不静默收下）。 */
+    private volatile boolean removalSwept;
+
+    /**
+     * 集成级移除动作注册（RemovalHost 宿主实现）：注册到移除动作 deque，
+     * {@link #onRelease()} 时 LIFO 统一执行。
+     *
+     * <p><b>非阻塞契约</b>：动作必须提交即返（{@code shutdownNow()} 纯标记天然合规），
+     * 详见 {@link RemovalHost}。</p>
+     *
+     * @throws RejectedExecutionException 集成已 release 后注册属病态调用（严格模式，
+     *         防「release 后才注册」的静默泄漏）
+     * @throws IllegalArgumentException action 为 null
+     */
+    @Override
+    public void onRemove(Runnable action) {
+        if (action == null) {
+            throw new IllegalArgumentException("onRemove(null) 不允许——无动作可注册");
+        }
+        if (removalSwept) {
+            throw new RejectedExecutionException(
+                "集成已 release，拒绝注册移除动作——集成生命周期缺陷，请检查 onRelease 后误注册的调用方");
+        }
+        removalActions.addLast(action);
+    }
+
+    /**
+     * 集成级移除动作统一执行（RemovalHost，LIFO；逐条 catch 记 warn 继续——清理不容
+     * 半途而废）。幂等（重复调用空转）。
+     *
+     * <p><b>扫除面收口</b>：sweep 只在本方法体尾部内部执行，不暴露任何
+     * public 收尾方法——注册面开放（onRemove / HostedExecutors.bounded），扫除面永远
+     * 框架调用，使用者零接触。与 {@link com.ecat.core.Device.DeviceBase#cancelManagedTasks()}
+     * 的设备级 sweep 构成两层：设备级先扫（各自生命周期 chokepoint），集成级在此兜底。</p>
+     */
+    private void sweepRemovalActions() {
+        removalSwept = true;
+        Runnable action;
+        while ((action = removalActions.pollLast()) != null) {
+            try {
+                action.run();
+            } catch (Throwable e) {
+                log.warn("集成级移除动作执行失败（已跳过，继续执行其余动作）", e);
+            }
+        }
     }
 
     @Override
@@ -119,6 +190,10 @@ public abstract class IntegrationBase implements IntegrationLifecycle {
             String coordinate = this.loadOption.getIntegrationInfo().getCoordinate();
             LogManager.getInstance().unregisterIntegration(coordinate);
         }
+
+        // 集成级移除动作兜底 sweep（尾部：既有清理先行，随后拆卸自有资源——
+        // 日志上下文/包名映射等注册面先撤，再拆挂在本集成上的池/句柄）
+        sweepRemovalActions();
     }
 
     // ==================== ConfigEntry 相关方法 ====================

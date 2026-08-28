@@ -86,7 +86,7 @@ public class EcatCore {
     private ConfigFlowRegistry configFlowRegistry;
 
     /**
-     * 平台自观测（B2 system_health）：调度/总线/线程三层内存指标快照，
+     * 平台自观测（B2 system_health）：执行指标/总线/线程三层内存指标快照，
      * core-api 的 /core-api/system/health 端点从这里读
      */
     @Getter
@@ -169,9 +169,10 @@ public class EcatCore {
         integrationRegistry = new IntegrationRegistry();
         busRegistry = new BusRegistry();
         taskManager = new TaskManager();
-        systemHealth = new SystemHealthService(taskManager, busRegistry);
-        stateManager = new StateManager(".ecat-data/core/states/",
-            taskManager.getMdcScheduledExecutorService());
+        systemHealth = new SystemHealthService(busRegistry);
+        // StateManager 生产构造：自持 ecat-state-commit 单线程做每秒持久化 commit（IO 型，
+        // 见 StateManager 构造注释），不再借道调度引擎
+        stateManager = new StateManager(".ecat-data/core/states/");
         configFlowRegistry = new ConfigFlowRegistry();
         configEntryRegistry = new ConfigEntryRegistry(this, new YmlConfigEntryPersistence());
         // flow 推进/管理能力下沉到 core（原在 ecat-core-api）：依赖 integrationRegistry + 两个 registry，均在上方已就绪

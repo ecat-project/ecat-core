@@ -36,14 +36,13 @@ import com.ecat.core.Integration.IntegrationDeviceBase;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
-import com.ecat.core.Task.engine.SchedulerConfig;
-import com.ecat.core.Task.engine.SchedulerEngine;
 
 /**
  * core 停机序列端到端语义测试（真实 TaskManager/StateManager/IntegrationRegistry + 假集成）：
  * ①设备 onPause（源）先于服务 onPause（drain）——设备终态事件被消费者存活期间吸收并在 drain 落库
- * （零丢尾顺序依据的行为级锁定）；②调度引擎优雅收敛（在跑一次性任务跑完、引擎 TERMINATED）；
- * ③onRelease/线程池收尾执行；④init 未完成（部件为 null）时安全降级。
+ * （零丢尾顺序依据的行为级锁定）；②业务计时器优雅收敛（在跑一次性任务跑完、池 TERMINATED；
+ * W7 引擎退役后 quiesce 的等待对象）；③onRelease/线程池收尾执行；④init 未完成（部件为
+ * null）时安全降级。
  */
 public class CoreShutdownTest {
 
@@ -121,12 +120,12 @@ public class CoreShutdownTest {
         // 停机前已有的尾批（低流量场景：不足以触发批量/定时 flush）
         consumer.onEvent("tail-before-shutdown");
 
-        // 引擎上挂真实任务：验证 scheduler-quiesce 优雅收敛（在跑任务不被中断地跑完、周期停排）
+        // biz 池上挂真实任务：验证 scheduler-quiesce 优雅收敛（在跑任务不被中断地跑完、周期停排）
         CountDownLatch inFlightRan = new CountDownLatch(1);
-        taskManager.getMdcScheduledExecutorService()
+        taskManager.getBizScheduler()
                 .scheduleWithFixedDelay(() -> { }, 10L, 10L, TimeUnit.MILLISECONDS);
-        // execute()=零延迟直通车道：任务进入在跑状态后再停机——quiesce 必须等它跑完
-        taskManager.getMdcScheduledExecutorService().execute(() -> {
+        // execute()=零延迟直通：任务进入在跑状态后再停机——quiesce 必须等它跑完
+        taskManager.getBizScheduler().execute(() -> {
             sleepQuietly(150L); // 模拟在跑 IO（被测对象本身，非测试同步）
             inFlightRan.countDown();
         });
@@ -145,9 +144,9 @@ public class CoreShutdownTest {
         assertThat(consumer.flushed, is(Arrays.asList(
                 "tail-before-shutdown", "terminal-1", "terminal-2")));
 
-        // ③调度引擎优雅收敛 + 线程池收尾：在跑任务（150ms）在 quiesce 预算内跑完、未被中断
-        assertThat("SHUTDOWN 应优雅收敛引擎（在跑任务跑完、周期停排）",
-                taskManager.getSchedulerEngine().isTerminated(), is(true));
+        // ③业务计时器优雅收敛 + 线程池收尾：在跑任务（150ms）在 quiesce 预算内跑完、未被中断
+        assertThat("SHUTDOWN 应优雅收敛 biz 池（在跑任务跑完、周期停排）",
+                taskManager.getBizScheduler().isTerminated(), is(true));
         assertThat("停机序列应全部完成: " + report.getStages(), report.allCompleted(), is(true));
         assertThat("scheduler-quiesce 阶段应 COMPLETED",
                 report.find("scheduler-quiesce").getOutcome(),
@@ -208,27 +207,26 @@ public class CoreShutdownTest {
                 journal.subList(0, 3), is(Arrays.asList("pause:device-x", "pause:device-y", "pause:service-b")));
     }
 
-    /** 引擎真实优雅停机语义（对 scheduler-quiesce 阶段的直接验证）：在跑任务不被中断地跑完、周期停排。
+    /** biz 池真实优雅停机语义（对 scheduler-quiesce 阶段的直接验证）：在跑任务不被中断地跑完、周期停排。
      *
-     * <p>注：引擎 SHUTDOWN 语义对「尚在表轮未到期的一次性任务」是到期即弃（fireTask 早退，
-     * 见 bug-record-20260817-*），故此处只锁 C2 需要的契约——在跑（已入车道）任务跑完不被中断；
-     * 表轮残留一次性任务的处置归 B1 引擎决策。 */
+     * <p>注：W7 引擎退役后 quiesce 的等待对象是业务计时器（原引擎 SHUTDOWN 语义随引擎消亡）；
+     * 此处锁 C2 需要的契约——在跑任务跑完不被中断，一次性排队任务由 JDK shutdown 语义跑完。 */
     @Test
     public void schedulerQuiesceLetsInflightTaskFinishWithoutInterrupt() {
         TaskManager taskManager = new TaskManager();
         try {
-            SchedulerEngine engine = taskManager.getSchedulerEngine();
+            java.util.concurrent.ScheduledExecutorService biz = taskManager.getBizScheduler();
             CountDownLatch inFlightRan = new CountDownLatch(1);
-            engine.execute(() -> {
+            biz.execute(() -> {
                 sleepQuietly(150L); // 模拟在跑 IO（被测对象本身，非测试同步）
                 inFlightRan.countDown();
             });
-            engine.scheduleWithFixedDelay(() -> { }, 10L, 10L, TimeUnit.MILLISECONDS);
+            biz.scheduleWithFixedDelay(() -> { }, 10L, 10L, TimeUnit.MILLISECONDS);
 
             CoreShutdown.forRegistries(taskManager, null, null).run();
 
             assertThat("在跑任务应跑完而非被中断", inFlightRan.getCount(), is(0L));
-            assertThat(engine.isTerminated(), is(true));
+            assertThat(biz.isTerminated(), is(true));
         } finally {
             taskManager.shutdownAll();
         }
@@ -237,8 +235,8 @@ public class CoreShutdownTest {
     /** 预算组不变量（2026-08-16 终验 20.8s 停机的实测驱动，依据见各常量注释）：
      *  ①阶段预算之和 == 总预算——最坏情况（各阶段全部吃满卡死上限）每个阶段仍拿全额份额，
      *    数据关键阶段 bus-drain/state-flush 不会被前段耗尽总额而级联 SKIPPED；
-     *  ②quiesce 预算 ≥ 引擎在跑任务硬超时——「停触发+等在跑跑完」的等待必须覆盖在跑任务的
-     *    硬超时上限，否则一次长事务在跑即必然超时（终验 timeout(10001ms) 的根因）；
+     *  （②原「quiesce ≥ 引擎在跑任务硬超时」随 W7 引擎退役删——硬超时语义随引擎消亡，
+     *    quiesce 预算依据见 CoreShutdown.SCHEDULER_QUIESCE_MS 注释。）
      *  ③wind-down/bus-drain 预算容得下 2 个 stuck 份额 + 健康路径（单集成份额防饿死的配套）。 */
     @Test
     public void budgetCompositionCoversWorstCaseWithoutStageStarvation() {
@@ -247,9 +245,6 @@ public class CoreShutdownTest {
                 + CoreShutdown.RELEASE_INTEGRATIONS_MS + CoreShutdown.POOLS_SHUTDOWN_MS;
         assertEquals("阶段预算之和应等于总预算（最坏情况无级联 SKIPPED）",
                 CoreShutdown.TOTAL_BUDGET_MS, stageSum);
-        assertTrue("quiesce 预算应 ≥ 在跑任务硬超时（默认 30s，否则等在跑跑完必然落空）",
-                CoreShutdown.SCHEDULER_QUIESCE_MS
-                        >= SchedulerConfig.fromSystemProperties().getHardTimeoutMillis());
         assertTrue("device-wind-down 预算应容下 2 个 stuck 设备集成份额 + 健康收尾",
                 CoreShutdown.DEVICE_WIND_DOWN_MS >= 2 * CoreShutdown.PER_INTEGRATION_DEVICE_PAUSE_MS);
         assertTrue("bus-drain 预算应容下 2 个 stuck 服务消费者份额 + 健康排空",

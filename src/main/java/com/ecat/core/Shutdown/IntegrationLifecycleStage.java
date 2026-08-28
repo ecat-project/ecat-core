@@ -27,7 +27,7 @@ import java.util.function.Supplier;
 
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Task.NamedThreadFactory;
-import com.ecat.core.Task.engine.SchedulerClock;
+import com.ecat.core.Utils.SchedulerClock;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
 

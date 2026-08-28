@@ -100,9 +100,11 @@ public class ConfigFlowService {
         this.core = core;
         this.integrationRegistry = core.getIntegrationRegistry();
         // P3（defense-in-depth）：周期清扫过期 flow，与各入口的懒清理互补。
-        // 借 core 共享调度器（TaskManager.getMdcScheduledExecutorService，StateManager 等复用同一实例，
-        // 由 TaskManager.shutdownAll() 统一关闭——无新增线程池、无线程泄漏）。间隔 = FLOW_EXPIRATION_MS。
-        core.getTaskManager().getMdcScheduledExecutorService().scheduleAtFixedRate(
+        // 业务计时池（TaskManager.getBizScheduler）：cleanupExpiredFlows 是 flow 注册表的
+        // 内存清理（毫秒级、有界、纯 CPU），按 S2 边界归业务池，不再占调度引擎车道；
+        // 池随 core 生命周期（quiesce 停新工作 + shutdownAll 兜底），无线程泄漏。
+        // 间隔 = FLOW_EXPIRATION_MS。
+        core.getTaskManager().getBizScheduler().scheduleAtFixedRate(
                 this::cleanupExpiredFlows, FLOW_EXPIRATION_MS, FLOW_EXPIRATION_MS, TimeUnit.MILLISECONDS);
         log.info("ConfigFlowService 周期清理已启动，间隔 {}min（兜底，与入口懒清理互补）", FLOW_EXPIRATION_MS / 60000);
     }

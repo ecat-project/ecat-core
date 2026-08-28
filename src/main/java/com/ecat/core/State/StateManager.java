@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -31,6 +32,7 @@ import org.mapdb.HTreeMap;
 import org.mapdb.Serializer;
 
 import com.ecat.core.Device.DeviceBase;
+import com.ecat.core.Task.NamedThreadFactory;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.platform.PlatformInfo;
@@ -41,13 +43,15 @@ import com.ecat.core.Utils.platform.PlatformInfo;
  * 使用 MapDB 管理每个设备的属性状态持久化。
  * 每个设备一个 DB 文件，路径格式: {baseDir}/{groupId}/{integrationId}/{deviceId}.db
  *
- * 写入策略: 每次 updateValue 写入 MapDB WAL，定时 1 秒批量 commit。
+ * 写入策略: 每次 updateValue 写入 MapDB WAL，自有单线程计时器（ecat-state-commit）定时 1 秒批量 commit。
  * 恢复策略: setAttribute 时逐个恢复，包含单位校验和默认值兜底。
  */
 public class StateManager {
 
     private final String baseDir;
     private final Map<String, DB> dbCache = new ConcurrentHashMap<>();
+    /** 自有每秒 commit 计时器（仅生产构造创建；注入形态/无持久化为 null），shutdown 时先停。 */
+    private final ScheduledExecutorService selfCommitScheduler;
     private final Log log = LogFactory.getLogger(getClass());
 
     /**
@@ -55,18 +59,50 @@ public class StateManager {
      */
     public StateManager() {
         this.baseDir = null;
+        this.selfCommitScheduler = null;
     }
 
     /**
-     * 完整构造函数
+     * <b>生产入口</b>（EcatCore.init 使用）：baseDir 非空即启用持久化，并自持单线程 daemon
+     * （ecat-state-commit）每秒批量 commit。自持而非借 core 调度设施——MapDB commit 是
+     * 文件 IO（事务 WAL 刷盘，可阻塞在磁盘），按业务池边界 IO 禁入（2 线程小池会被
+     * 持久化刷盘饿死全部业务计时），也不占设备调度引擎车道（那是设备 IO 治理域）；
+     * core 持久化 tick 与两侧故障域物理隔离。
+     *
+     * <p>双构造形态收窄（E4-7）：生产一律走本构造（含 null baseDir 的无持久化形态见
+     * {@link #StateManager()}）；注入形态（scheduler 参数）已收窄为包私有——仅 core 测试
+     * 同包镜像使用，集成侧误用注入形态=持久化静默丢失（无自持 commit 计时器）。
+     *
      * @param baseDir 持久化根目录，如 ".ecat-data/core/states/"
-     * @param scheduler 定时任务执行器，用于批量 commit
      */
-    public StateManager(String baseDir, ScheduledExecutorService scheduler) {
+    public StateManager(String baseDir) {
+        this.baseDir = baseDir;
+        if (baseDir != null) {
+            new File(baseDir).mkdirs();
+            selfCommitScheduler = Executors.newSingleThreadScheduledExecutor(
+                new NamedThreadFactory("ecat-state-commit", true));
+            selfCommitScheduler.scheduleAtFixedRate(this::commitAll, 1, 1, TimeUnit.SECONDS);
+        } else {
+            selfCommitScheduler = null;
+        }
+    }
+
+    /**
+     * 注入形态（<b>仅测试可见</b>，包私有——E4-7 收窄）：scheduler 由调用方拥有并关停，
+     * 本类只挂周期任务——core 测试同包镜像以此确定性驱动 commit 时序（不依赖真实秒拍）。
+     * 生产代码一律用 {@link #StateManager(String)}（自持 commit 计时器；误用注入形态=
+     * 持久化静默丢失）。集成仓测试需要持久化时也走生产构造（自持 daemon 1s commit，
+     * 断言前手动 {@code commitAll()} 拍平）。
+     *
+     * @param baseDir  持久化根目录；null = 不启用持久化
+     * @param scheduler 定时任务执行器，用于批量 commit；null = 不挂周期任务
+     */
+    StateManager(String baseDir, ScheduledExecutorService scheduler) {
         this.baseDir = baseDir;
         if (baseDir != null) {
             new File(baseDir).mkdirs();
         }
+        this.selfCommitScheduler = null;
 
         if (scheduler != null) {
             scheduler.scheduleAtFixedRate(this::commitAll, 1, 1, TimeUnit.SECONDS);
@@ -241,9 +277,16 @@ public class StateManager {
     }
 
     /**
-     * 关闭所有 DB，最终 commit（shutdown 时调用）
+     * 关闭所有 DB，最终 commit（shutdown 时调用）。
+     * 先停自有 commit 计时器（graceful shutdown：停发起新一轮 commitAll，不中断在飞轮次），
+     * 再做最终 commit+close。在飞 commitAll 轮次与本方法 close 的残余竞态由双侧 per-op
+     * catch 兜住（commitAll 的逐 entry catch 与本方法的逐 entry catch）：MapDB 对已 close
+     * 的 DB 再 commit 会抛，仅记错误日志不外抛。
      */
     public void shutdown() {
+        if (selfCommitScheduler != null) {
+            selfCommitScheduler.shutdown();
+        }
         for (Map.Entry<String, DB> entry : dbCache.entrySet()) {
             try {
                 entry.getValue().commit();

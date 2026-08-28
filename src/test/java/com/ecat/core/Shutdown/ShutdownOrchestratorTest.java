@@ -29,8 +29,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.ecat.core.Task.engine.MutableClock;
-import com.ecat.core.Task.engine.SchedulerClock;
+import com.ecat.core.Utils.SchedulerClock;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;

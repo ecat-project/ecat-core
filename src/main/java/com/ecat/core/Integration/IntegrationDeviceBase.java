@@ -142,6 +142,25 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         device.start();
     }
 
+    /**
+     * 设备停止单一收口（RemovalHost 兜底收尾，18 号设计 §3.3）：{@code device.stop()}（集成
+     * 自管收尾，sailhero 型自 cancel / tianhong 型 no-op）之后必执行
+     * {@link DeviceBase#cancelManagedTasks()}（框架 LIFO 执行移除动作——SDK 轮询句柄等
+     * 注册资源的兜底拆卸）。try-finally——集成 stop() 抛异常也必执行移除动作（不留泄漏窗口），
+     * 异常本身照原语义上抛不吞（「崩溃可见」与「必收尾」兼得）。
+     *
+     * <p>protected final——本类生命周期 chokepoint 之外，集成仓 override 路径里自管
+     * stop 设备的地方也必须走同一收口（防旁路裸 {@code device.stop()} 把移除动作滞留到
+     * onRelease 兜底）；final 禁止子类改写「stop 后必 sweep」语义。</p>
+     */
+    protected final void stopWithManagedSweep(DeviceBase device) {
+        try {
+            device.stop();
+        } finally {
+            device.cancelManagedTasks();
+        }
+    }
+
     @Override
     public ConfigEntry reconfigureEntry(String entryId, ConfigEntry newEntry) {
         log.info("Reconfiguring entry: {}", entryId);
@@ -158,7 +177,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
 
         // ③ 先 stop 旧（资源排他安全；统一"先 stop 后 start"）——在 new 已备好之后，失败也不丢 old
         if (oldDevice != null) {
-            oldDevice.stop();
+            stopWithManagedSweep(oldDevice);   // stop + 移除动作收尾（try-finally 必执行）
             oldDevice.release();
             devices.remove(oldDevice.getId());
         }
@@ -188,7 +207,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         // （一个 deviceId 绑定一个物理设备，删除后再添加复用原 id，而非铸新 UUID）。
         // 与 disable 的区别：disable 保留 entryId（entry 仍在、仅禁用）；remove 置 entryId=null（entry 已删、仅留身份记忆）。
         for (DeviceBase device : deviceRegistry.findDevicesByEntryId(entryId)) {
-            device.stop();
+            stopWithManagedSweep(device);    // stop + 移除动作收尾（try-finally 必执行）
             device.release();
             devices.remove(device.getId());
             deviceRegistry.remove(device);   // 逻辑删：保 yml(deleted=true)+matchIndex，发 REMOVE
@@ -207,7 +226,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     @Override
     public void disableEntry(String entryId) {
         for (DeviceBase device : deviceRegistry.findDevicesByEntryId(entryId)) {
-            device.stop();
+            stopWithManagedSweep(device);    // stop + 移除动作收尾（try-finally 必执行）
             device.release();
             devices.remove(device.getId());
             deviceRegistry.disable(device);   // 软：保 yml+matchIndex，发 REMOVE
@@ -229,7 +248,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     public void onPause() {
         log.info("{} paused", getName());
         for (DeviceBase device : getAllDevices()) {
-            device.stop();
+            stopWithManagedSweep(device);    // stop + 移除动作收尾（pause 后句柄不得残留；enable 后 onStart 重 start 重注册）
         }
         // 关闭所有设备的持久化 DB（commit + close，保留文件）
         if (core != null && core.getStateManager() != null) {
@@ -241,6 +260,7 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
     public void onRelease() {
         log.info("{} released", getName());
         for (DeviceBase device : getAllDevices()) {
+            device.cancelManagedTasks();     // 幂等补一次移除动作收尾（防 onPause 未走过的直停路径）
             device.release();
         }
         devices.clear();

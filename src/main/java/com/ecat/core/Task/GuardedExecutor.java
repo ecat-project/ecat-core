@@ -55,6 +55,33 @@ import com.ecat.core.Utils.Mdc.TraceContext;
  * 否则抢占一个池槽（信号量，池大小=槽数），抢不到立即 REJECTED。worker 完成任务后优先
  * 接续本 gate 的下一个任务（槽位保持占用），异 gate 不插队。
  *
+ * <p><b>gate 键立法（29 号框架 §4 / 00 号契约 §2.2）</b>：gate 参数必须是
+ * <b>资源级键</b>——即「一条物理互斥资源的唯一名字」，形如 {@code {前缀}:{资源标识}}
+ * （前缀封闭注册表 {@code Task.execution.ResourceKey} 已随 W7 执行 API 退役；键形约定
+ * 由本立法与各域 ResourceKeys 工具类承载，如 tcp 域 {@code TcpResourceKeys.connectionKey}）。
+ * 判据一句话：键里必须能数出<b>具体哪一条</b>资源被串行化（哪条串口 / 哪条连接 / 哪个设备），
+ * 且同键操作必须真的互不并发安全、异键操作必须真的可并行——两条都满足才是合法 gate。
+ * 键形下限已上签名执法（E4-4）：提交期（doSubmit）与视图构造期（guardedExecutorFor）对
+ * 不含 ':' 分隔符的 gate 直接 {@link IllegalArgumentException}——裸串编译照过、运行不校验的
+ * 立法空档关闭，防全域键 E1 事故复发。
+ *
+ * <p><b>反例教材（事故级，禁止再犯）</b>：
+ * <ul>
+ *   <li><b>无资源标识的全域键</b>（事故 E1，2026-08-23）：{@code "serial-async"} 把 40 条
+ *       相互独立的物理串口总线绑成一条全局 FIFO——一条总线偶发超时，13 分钟内 87 台设备
+ *       轮询全部停摆。合法写法按口实例化：{@code "serial-io:" + portName}（serial-io 前缀，
+ *       SerialIoLanes 已迁移）。协议级/传输级常量（不含资源标识）一律非法。</li>
+ *   <li><b>全入口一键</b>：{@code "http-server:9000"} 把一个监听端口下的所有并发请求串行化
+ *       成单车道——吞吐坍缩为 1/N，且与 {@code serial-async} 同型（键粒度 ≠ 互斥资源粒度）。
+ *       HTTP 入站按业务资源分流（设备命令→device 键 / 纯计算→module 键），端口本身只有
+ *       listener 一个互斥点（M5 设计）。</li>
+ * </ul>
+ *
+ * <p><b>为什么 gate 是串行键而不是线程池名</b>：gate 的唯一语义是「谁和谁不能并发」。
+ * 同 gate FIFO 保证同一互斥资源上的操作顺序（总线帧不碰撞）；异 gate 并行保证独立资源
+ * 不互相拖累（一条总线慢不拖另一条）。把 gate 当池名/模块名用（同模块全任务一个 gate）
+ * 就退回了 E1。出站 HTTP 客户端的键定则见 00 号契约附则「域 8 出站键约定」。
+ *
  * <p>MDC/traceId 随提交捕获、在 worker 内恢复，等价 MdcExecutorService 语义（serial 的
  * guarded 视图依赖这一点）。
  *
@@ -118,9 +145,31 @@ public class GuardedExecutor {
     /**
      * 共享实例的 ExecutorService 视图：组件把原线程池替换为此视图即可零改造获得护栏
      * （label 取任务类名）。视图不持有池所有权——生命周期与批量方法不支持。
+     * gate 在视图构造期即做键形执法（{@link #requireResourceLevelGate}）——非法键形在此暴露，
+     * 不等到首次提交。
      */
     public static ExecutorService guardedExecutorFor(String gate, long timeoutMs) {
+        requireResourceLevelGate(gate);
         return new GuardedView(DEFAULT, gate, timeoutMs);
+    }
+
+    /**
+     * gate 键形执法（构造期上签名）：gate 必须是资源级键——形如 {@code {前缀}:{资源标识}}，
+     * 至少含一个 {@code ':'} 分隔符（如 {@code serial-io:/dev/ttyUSB0}、
+     * {@code tcp-connect:1.2.3.4:502}）。不含 ':' 的键（协议级/传输级常量，如
+     * {@code "serial-async"}）无法从键里数出「具体哪一条资源被串行化」，把相互独立的物理
+     * 资源绑成一条全局 FIFO——事故 E1（2026-08-23，87 台设备 13 分钟停摆）的根因形态，
+     * 提交期/视图构造期即抛 {@link IllegalArgumentException}。
+     *
+     * <p>这是键形的<b>下限</b>签名（含资源分隔符）；完整立法（键粒度=互斥资源粒度、
+     * 反例教材）见类 Javadoc「gate 键立法」。
+     */
+    static void requireResourceLevelGate(String gate) {
+        if (gate.indexOf(':') < 0) {
+            throw new IllegalArgumentException("gate 键必须是资源级键（形如 {前缀}:{资源标识}，"
+                + "至少含一个 ':' 分隔符）——不含 ':' 的键把独立资源绑成全局 FIFO（事故 E1 形态）。"
+                + " 当前 gate=\"" + gate + "\"；合法样例 serial-io:/dev/ttyUSB0");
+        }
     }
 
     /** 共享实例账目（一行可 grep 的统计）。 */
@@ -137,6 +186,7 @@ public class GuardedExecutor {
         if (gate == null || gate.isEmpty() || label == null || label.isEmpty()) {
             throw new IllegalArgumentException("gate/label 必须非空 (gate=" + gate + ", label=" + label + ")");
         }
+        requireResourceLevelGate(gate);
         if (timeoutMs <= 0) {
             throw new IllegalArgumentException("timeoutMs 必须为正, gate=" + gate + ", label=" + label);
         }

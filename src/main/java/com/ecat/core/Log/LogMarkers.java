@@ -20,22 +20,14 @@ import org.slf4j.Marker;
 import org.slf4j.MarkerFactory;
 
 /**
- * 日志通道 marker 常量（五通道结构缝）。
+ * 日志 marker 常量。
  *
- * <p>生命周期（lifecycle.log）与通讯健康（comm-health.log）两个通道按 marker 路由，
- * marker 名与 logback.xml 里 {@code MarkerRoutingFilter} 的 {@code <marker>} 配置共享此唯一来源，
- * 防止配置与发射方各写一份字符串漂移。
- *
- * <p>发射方（打这种日志的业务代码）属于后续「执行模型」阶段的任务：设备/集成启停、
- * 连接状态机转移、周期健康摘要等；本类先架好通道入口，不改动存量业务日志调用。
+ * <p>历史注记：本类曾预置 LIFECYCLE / COMM 两个通道 marker（lifecycle.log / comm-health.log
+ * 按 marker 路由，发射方规划属「后续执行模型阶段」）。该执行模型随传输自持执行终态
+ * （19 号 v2）的 W7 引擎整删一并退役——通道、marker 与路由过滤器于 2026-08-28 删除，
+ * 断连可见性由各传输 SDK 的断连状态转移行承载。现存的唯一 marker 服务于错误限频汇总行。
  */
 public final class LogMarkers {
-
-    /** 生命周期通道：集成/设备启停、enable/disable、配置变更、entry 增删（INFO，180 天） */
-    public static final Marker LIFECYCLE = MarkerFactory.getMarker("LIFECYCLE");
-
-    /** 通讯健康通道：连接状态转移 + 每设备周期摘要 + 熔断开合（INFO/WARN，90 天） */
-    public static final Marker COMM = MarkerFactory.getMarker("COMM");
 
     /** 错误限频汇总行专用 marker：{@link ErrorRateLimitFilter} 对它无条件放行（防递归、汇总自身不限频） */
     public static final Marker RATE_LIMIT_SUMMARY = MarkerFactory.getMarker("ECAT_RATE_LIMIT_SUMMARY");

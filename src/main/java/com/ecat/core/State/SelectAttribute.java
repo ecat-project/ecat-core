@@ -227,20 +227,25 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
             return CompletableFuture.completedFuture(false);
         }
 
-        return selectOptionImp(option).thenApply(result -> {
+        // 朴素 CF 组合（19 号 v2 S3 写闸塌缩）：IO（selectOptionImpl）直接执行——互斥/超时由
+        // 载荷自身的 SDK 事务承担；成功后收尾走 confirmPublishTail（确认后更新），失败不发布。
+        // publicState 布尔参语义保留：false 时 IO 成功后仍不发布（透传 confirmPublishTail 的
+        // publishState 参）。收尾仍触发 onChangedCallback 一次（StringSelectAttribute 契约：其
+        // selectOptionImp 为 no-op，回调才是真正的下游写，由本入口统一触发一次——与旧 setValue
+        // 收尾行为一致）；accountedWrite 保留 commandFailed 记账口径
+        return accountedWrite(selectOptionImp(option)
+            .thenCompose(result -> {
             if (result) {
-                setValue(option);
-                if(publicState){
-                    publicState();
-                }
-                log.info("Device " + getDevice().getId() + " - Select Option Successed: " + getValue() +
-                        " (" + getCurrentOptionI18nName() + ")");
+                return confirmPublishTail(option,
+                    () -> "Device " + getDevice().getId() + " - Select Option Successed: " + getValue() +
+                        " (" + getCurrentOptionI18nName() + ")",
+                    publicState);
             }
-            return result;
+            return CompletableFuture.completedFuture(false);
         }).exceptionally(e -> {
             log.error("Device " + getDevice().getId() + " - Select Option Failed: " + e.getMessage());
             return false;
-        });
+        }));
     }
 
     /**

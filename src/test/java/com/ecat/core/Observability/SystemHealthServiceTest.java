@@ -21,11 +21,16 @@ import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import org.junit.After;
 import org.junit.Before;
@@ -33,32 +38,36 @@ import org.junit.Test;
 import org.slf4j.MDC;
 
 import com.ecat.core.Bus.BusRegistry;
-import com.ecat.core.Task.TaskManager;
-import com.ecat.core.Utils.Mdc.MdcContext;
+import com.ecat.core.Device.DeviceBase;
+import com.ecat.core.EcatCore;
+import com.ecat.core.I18n.I18nKeyPath;
+import com.ecat.core.State.AttrChangedCallbackParams;
+import com.ecat.core.State.AttributeBase;
+import com.ecat.core.State.AttributeType;
+import com.ecat.core.State.UnitInfo;
+import com.ecat.core.Utils.DynamicConfig.ConfigDefinition;
 
 /**
- * system_health 快照服务测试（14 号架构 §5.4-2）：
- * 三节结构完整性、速率差分（注入时钟确定性驱动，零 sleep）、熔断状态表如实反映 OPEN 车道、
- * 组件缺失时节为 null（严格模式不编造）。
+ * system_health 快照服务测试（14 号架构 §5.4-2；21 号观测面形态）：
+ * 三节结构完整性（execution=写命令失败 counter / bus / threads）、速率差分（注入时钟
+ * 确定性驱动，零 sleep）、组件缺失时节为 null（严格模式不编造）。旧引擎 15 键 scheduler
+ * 视图按 D-19-5 接受随引擎消亡，SdkMetrics 注册柜台 8 个零读取 gauge 按 D-21-2 摘除
+ * （biz/serial/modbus 键不再断言；失败自增语义由 State 包两个消费测试覆盖）。
  */
 public class SystemHealthServiceTest {
 
-    private static final String BOOM_LANE = "test.lane.boom";
-
-    private TaskManager taskManager;
     private BusRegistry registry;
     private SystemHealthService service;
 
     @Before
     public void setUp() {
-        taskManager = new TaskManager();
+        // 服务只依赖总线（execution 节直读 AttributeBase 静态 counter，无组件装配需求）
         registry = new BusRegistry();
-        service = new SystemHealthService(taskManager, registry);
+        service = new SystemHealthService(registry);
     }
 
     @After
     public void tearDown() {
-        taskManager.shutdownAll();
         MDC.clear();
     }
 
@@ -69,30 +78,25 @@ public class SystemHealthServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    public void snapshotContainsThreeSectionsWithEngineAndBusData() throws Exception {
-        // 引擎有真实执行记录
-        taskManager.getMdcScheduledExecutorService()
-                .schedule(() -> { }, 0, TimeUnit.MILLISECONDS).get(5, TimeUnit.SECONDS);
-
+    public void snapshotContainsThreeSectionsWithExecutionBusThreads() throws Exception {
+        // counter 单调递增且进程级共享（并行测试可能推高）。先驱动一次确定性写失败
+        // （future.get() 返回即 whenComplete 记账完成）把下界锚定在已推高的读数上——
+        // 消除「counter 恒 0 时夹逼恒真」的退化窗口：快照若编造常数 0 必然低于下界而挂
+        long before = AttributeBase.commandFailedCount();
+        driveOneFailedWrite();
+        long after = AttributeBase.commandFailedCount();
+        assertThat("写失败确定性推高 counter（本测试自己驱动的因果）", after > before, is(true));
         Map<String, Object> snap = service.snapshot(1_000L);
+        long afterSnapshot = AttributeBase.commandFailedCount();
         assertThat(snap.get("timestamp"), is(1_000L));
 
-        Map<String, Object> scheduler = section(snap, "scheduler");
-        assertThat(scheduler, notNullValue());
-        Map<String, Object> metrics = section(scheduler, "metrics");
-        assertThat("submitted 至少计入上面那次调度", (Long) metrics.get("submitted") >= 1, is(true));
-        // 103000 观测补盲：blocking 探针（运行超 1s 任务计数 + 当前清单）必须在 scheduler 节直读
-        assertThat("metrics 含 blockingTasks 计数", metrics.containsKey("blockingTasks"), is(true));
-        List<Map<String, Object>> blockingList = (List<Map<String, Object>>) scheduler.get("blockingTaskList");
-        assertThat("blockingTaskList 节存在（空清单=无钉死早段，如实展示）",
-                blockingList != null, is(true));
-        Map<String, Object> queues = section(scheduler, "queues");
-        assertThat(queues.containsKey("laneQueuedTotal"), is(true));
-        assertThat(queues.containsKey("wheelPending"), is(true));
-        Map<String, Object> workers = section(scheduler, "workers");
-        assertThat("默认 6 worker（IO 收敛 P2 上调）", (Integer) workers.get("count"), is(6));
-        List<Map<String, Object>> workerList = (List<Map<String, Object>>) workers.get("list");
-        assertThat("每个 worker 一条忙闲记录", workerList.size(), is(6));
+        Map<String, Object> execution = section(snap, "execution");
+        assertThat("execution 节来自 AttributeBase 进程级静态 counter，恒可采集",
+                execution, notNullValue());
+        Long commandFailed = (Long) execution.get("commandFailed");
+        assertThat("execution.commandFailed 存在且为计数读数", commandFailed, notNullValue());
+        assertThat("快照值 ≥ 已推高下界且 ≤ 快照后直读（活 counter 透出）",
+                commandFailed >= after && commandFailed <= afterSnapshot, is(true));
 
         Map<String, Object> bus = section(snap, "bus");
         assertThat(bus, notNullValue());
@@ -111,8 +115,7 @@ public class SystemHealthServiceTest {
     public void ratesAreNullOnFirstReadAndDifferencedOnSecond() {
         Map<String, Object> first = service.snapshot(1_000L);
         assertThat("首次读取无窗口，速率如实 null",
-                section(first, "scheduler").get("executedPerSecond"), nullValue());
-        assertThat(section(first, "bus").get("publishPerSecond"), nullValue());
+                section(first, "bus").get("publishPerSecond"), nullValue());
         assertThat(section(first, "threads").get("churnPerSecond"), nullValue());
         assertThat(section(first, "threads").get("rateWindowMillis"), nullValue());
 
@@ -138,68 +141,11 @@ public class SystemHealthServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    public void breakerTableReflectsOpenLaneWithCooldown() throws Exception {
-        // 同车道 5 个失败任务（默认 failThreshold=5）→ 熔断 OPEN
-        MDC.put(MdcContext.INTEGRATION_COORDINATE_KEY, BOOM_LANE);
-        for (int i = 0; i < 5; i++) {
-            final int n = i;
-            try {
-                taskManager.getMdcScheduledExecutorService()
-                        .schedule((Runnable) () -> { throw new IllegalStateException("boom-" + n); },
-                                0, TimeUnit.MILLISECONDS)
-                        .get(5, TimeUnit.SECONDS);
-            } catch (ExecutionException expected) {
-                // 失败任务按预期以 ExecutionException 完成
-            }
-        }
-
-        Map<String, Object> snap = service.snapshot(1_000L);
-        Map<String, Object> breakers = section(section(snap, "scheduler"), "breakers");
-        Map<String, Object> boom = section(breakers, BOOM_LANE);
-        assertThat("失败车道必须出现在熔断表", boom, notNullValue());
-        assertThat(boom.get("state"), is("OPEN"));
-        assertThat("冷却剩余 > 0", (Long) boom.get("cooldownRemainingMillis") > 0, is(true));
-        assertThat((Long) boom.get("openCount"), is(1L));
-        assertThat("失败摘要可见病因（异常类名+消息）",
-                (String) boom.get("lastFailureSummary"), is("IllegalStateException: boom-4"));
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    public void commBreakerTableReflectsCommFailedDevice() {
-        String commKey = "com.ecat:integration-sailhero:so2-1";
-        for (int i = 0; i < 5; i++) {
-            taskManager.reportCommFailure(commKey, "so2chr$ Serial response timeout");
-        }
-        assertThat("5 连败后轮询守卫跳过", taskManager.isCommOpen(commKey), is(true));
-
-        Map<String, Object> snap = service.snapshot(1_000L);
-        Map<String, Object> scheduler = section(snap, "scheduler");
-
-        Map<String, Object> commBreakers = section(scheduler, "commBreakers");
-        Map<String, Object> comm = section(commBreakers, commKey);
-        assertThat("风暴设备出现在通讯熔断表", comm, notNullValue());
-        assertThat(comm.get("state"), is("OPEN"));
-        assertThat("通讯失败计数进表", comm.get("commFailures"), is(5L));
-        assertThat("守卫跳过计入 skippedCount", comm.get("skippedCount"), is(1L));
-        assertTrue("lastFailureSummary 前缀「通讯失败」",
-                ((String) comm.get("lastFailureSummary")).startsWith("通讯失败"));
-
-        // 车道熔断表补 commFailures 字段（未接入通讯信号的车道如实为 0，不隐藏字段）
-        Map<String, Object> breakers = section(scheduler, "breakers");
-        for (Map.Entry<String, Object> e : breakers.entrySet()) {
-            assertThat("车道表条目含 commFailures 字段: " + e.getKey(),
-                    ((Map<String, Object>) e.getValue()).containsKey("commFailures"), is(true));
-        }
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
     public void missingComponentsReportedAsNullSections() {
-        SystemHealthService bare = new SystemHealthService(null, null);
+        SystemHealthService bare = new SystemHealthService(null);
         Map<String, Object> snap = bare.snapshot(1_000L);
-        assertThat("未装配组件如实 null（不编造空结构）", snap.get("scheduler"), nullValue());
-        assertThat(snap.get("bus"), nullValue());
+        assertThat("总线未装配如实 null（不编造空结构）", snap.get("bus"), nullValue());
+        assertThat("execution 节来自静态 counter，总线缺失不受影响", snap.get("execution"), notNullValue());
         assertThat("线程节恒可采集", section(snap, "threads").get("total") instanceof Integer, is(true));
     }
 
@@ -235,6 +181,42 @@ public class SystemHealthServiceTest {
         assertThat("清单条数 = 总数", list.size(), is((Integer) threads.get("total")));
         assertThat("每条都有名字", list.get(0).containsKey("name"), is(true));
         assertThat("每条都有栈首帧键（无栈时值可为 null）", list.get(0).containsKey("firstFrame"), is(true));
+    }
+
+    /** 写失败驱动夹具：最小 Integer 属性经 IO 写模板收 false（State 包消费测试同款形态）。 */
+    private static class FailingWriteAttr extends AttributeBase<Integer> {
+        FailingWriteAttr() {
+            super("health_fail_attr", null, null, null, 0, false, true,
+                    (Function<AttrChangedCallbackParams<Integer>, CompletableFuture<Boolean>>) null);
+        }
+        @Override protected CompletableFuture<Boolean> setValue(Integer newValue) {
+            return setValueWithIoBody(newValue, () -> Boolean.FALSE);
+        }
+        @Override public String getDisplayValue(UnitInfo toUnit) { return String.valueOf(value); }
+        @Override protected Integer convertFromUnitImp(Integer v, UnitInfo u) { return v; }
+        @Override public ConfigDefinition getValueDefinition() { return null; }
+        @Override protected I18nKeyPath getI18nPrefixPath() { return new I18nKeyPath("state.health_fail_attr.", ""); }
+        @Override public AttributeType getAttributeType() { return AttributeType.UNKNOWN; }
+        @Override public Double convertValueToUnit(Double v, UnitInfo f, UnitInfo t) { return v; }
+    }
+
+    /**
+     * 驱动一次属性写失败：最小装配 mock 设备/总线（失败路径零发布，no-op publish 兜面），
+     * {@code get()} 返回即记账完成——确定性，无等待窗口。
+     */
+    private static void driveOneFailedWrite() throws Exception {
+        DeviceBase device = mock(DeviceBase.class);
+        EcatCore core = mock(EcatCore.class);
+        BusRegistry bus = mock(BusRegistry.class);
+        when(device.getId()).thenReturn("health-drive");
+        when(device.isReady()).thenReturn(true);
+        when(device.getCore()).thenReturn(core);
+        when(core.getBusRegistry()).thenReturn(bus);
+        doAnswer(inv -> null).when(bus).publish(any());
+        FailingWriteAttr attr = new FailingWriteAttr();
+        attr.setDevice(device);
+        Boolean ok = attr.setDisplayValue("1").get(5, TimeUnit.SECONDS);
+        assertThat("IO 载荷收 false（写失败）", ok, is(false));
     }
 
     /** 容量 1 + 首 consume 阻塞的探针：制造队列满触发 drop-oldest。 */

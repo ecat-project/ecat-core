@@ -31,14 +31,14 @@ import org.junit.Test;
 
 import com.ecat.core.Bus.consumer.AbstractBatchBusConsumer;
 import com.ecat.core.Integration.IntegrationBase;
-import com.ecat.core.Task.engine.SchedulerClock;
+import com.ecat.core.Utils.SchedulerClock;
 
 /**
  * 集成生命周期阶段测试：
  * ①drain 真把队列尾批 flush——真实 {@link AbstractBatchBusConsumer} + 假事件断言 flush 内容
  * （重启零丢尾的核心原语）；②onPause 卡死时有界放弃（WARN + 继续）；③onPause 抛异常不阻断后续集成。
  *
- * <p>阶段内 future.get(timeout) 的有界等待是被测对象本身（与 SchedulerEngineContractTest 同口径），
+ * <p>阶段内 future.get(timeout) 的有界等待是被测对象本身（停机编排既有口径），
  * 非测试同步；测试同步全部用 latch/报告返回值（禁 sleep）。
  */
 public class IntegrationLifecycleStageTest {

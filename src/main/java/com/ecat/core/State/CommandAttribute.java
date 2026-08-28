@@ -188,19 +188,25 @@ abstract class CommandAttribute<T> extends AttributeBase<T> {
             return CompletableFuture.completedFuture(false);
         }
 
-        return sendCommandImpl(cmd).thenApply(result -> {
+        // 朴素 CF 组合（19 号 v2 S3 写闸塌缩）：IO（sendCommandImpl）直接执行——互斥/超时由
+        // 载荷自身的 SDK 事务承担；成功后收尾走 confirmPublishTail（确认后更新+发布，序列
+        // 与原实现一致），失败不发布。收尾仍触发 onChangedCallback 一次（与旧 setValue 收尾
+        // 行为一致：部分集成命令属性的下游联动挂回调，IO 在 sendCommandImpl、回调只做通知）；
+        // accountedWrite 保留 commandFailed 记账口径
+        return accountedWrite(sendCommandImpl(cmd)
+            .thenCompose(result -> {
             if(result){
-                // 写入成功，更新属性状态
-                setValue(cmd);
-                publicState();  // 发布状态变更
-                log.info("Device " + getDevice().getId() + " - Send Command Successed: " + getValue() +
-                        " (" + getCurrentCommandI18nName() + ")");
+                // 写入成功，收尾（confirmPublishTail 直写不走 setValue——避免二次触发 onChangedCallback）
+                return confirmPublishTail(cmd,
+                    () -> "Device " + getDevice().getId() + " - Send Command Successed: " + getValue() +
+                        " (" + getCurrentCommandI18nName() + ")",
+                    true);
             }
-            return result;
+            return CompletableFuture.completedFuture(false);
         }).exceptionally(e -> {
             log.error("Device " + getDevice().getId() + " - Send Command Failed: " + e.getMessage());
             return false;
-        });
+        }));
     }
 
     /**

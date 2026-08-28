@@ -74,7 +74,7 @@ public class GuardedExecutorTest {
     public void hungTask_completesWithTimeoutExceptionAndCallerUnblocks() throws Exception {
         CountDownLatch taskStarted = new CountDownLatch(1);
         CountDownLatch releaseTask = new CountDownLatch(1);
-        GuardedExecutor.GuardedFuture<String> future = executor.doSubmit("g1", "hung",
+        GuardedExecutor.GuardedFuture<String> future = executor.doSubmit("test:g1", "hung",
                 () -> {
                     taskStarted.countDown();
                     // 不可中断挂死：忽略 interrupt，直到测试显式放行（占槽至自然结束的诚实边界）
@@ -107,7 +107,7 @@ public class GuardedExecutorTest {
     public void afterTimeout_otherGateTaskStillRuns() throws Exception {
         CountDownLatch taskStarted = new CountDownLatch(1);
         CountDownLatch releaseTask = new CountDownLatch(1);
-        executor.doSubmit("hung-gate", "hung", (Callable<Void>) () -> {
+        executor.doSubmit("test:hung-gate", "hung", (Callable<Void>) () -> {
             taskStarted.countDown();
             releaseTask.await();
             return null;
@@ -117,7 +117,7 @@ public class GuardedExecutorTest {
         // 等 hung 任务被执法（否则它只占 1/4 槽，证明力不足）
         waitForStatAtLeast("timedOut", 1, 5000);
 
-        GuardedExecutor.GuardedFuture<String> healthy = executor.doSubmit("other-gate", "healthy",
+        GuardedExecutor.GuardedFuture<String> healthy = executor.doSubmit("test:other-gate", "healthy",
                 () -> "ok", 5000);
         assertEquals("ok", healthy.get(5, TimeUnit.SECONDS));
         releaseTask.countDown();
@@ -129,7 +129,7 @@ public class GuardedExecutorTest {
         CountDownLatch taskStarted = new CountDownLatch(1);
         CountDownLatch releaseTask = new CountDownLatch(1);
         CountDownLatch callbackFired = new CountDownLatch(1);
-        GuardedExecutor.GuardedFuture<Void> future = executor.doSubmit("g-cb", "hung-cb", () -> {
+        GuardedExecutor.GuardedFuture<Void> future = executor.doSubmit("test:g-cb", "hung-cb", () -> {
             taskStarted.countDown();
             releaseTask.await();
             return null;
@@ -150,14 +150,14 @@ public class GuardedExecutorTest {
         CountDownLatch firstFinished = new CountDownLatch(1);
         AtomicInteger secondStartedWhileFirstRunning = new AtomicInteger();
 
-        executor.doSubmit("serial", "first", () -> {
+        executor.doSubmit("test:serial", "first", () -> {
             firstStarted.countDown();
             firstFinished.await(5, TimeUnit.SECONDS);
             return null;
         }, 5000);
         assertTrue(firstStarted.await(5, TimeUnit.SECONDS));
 
-        executor.doSubmit("serial", "second", () -> {
+        executor.doSubmit("test:serial", "second", () -> {
             if (firstFinished.getCount() > 0) {
                 secondStartedWhileFirstRunning.incrementAndGet();
             }
@@ -176,12 +176,12 @@ public class GuardedExecutorTest {
         CountDownLatch bothRunning = new CountDownLatch(2);
         CountDownLatch release = new CountDownLatch(1);
 
-        executor.doSubmit("gate-a", "a", (Callable<Void>) () -> {
+        executor.doSubmit("test:gate-a", "a", (Callable<Void>) () -> {
             bothRunning.countDown();
             release.await(5, TimeUnit.SECONDS);
             return null;
         }, 5000);
-        executor.doSubmit("gate-b", "b", (Callable<Void>) () -> {
+        executor.doSubmit("test:gate-b", "b", (Callable<Void>) () -> {
             bothRunning.countDown();
             release.await(5, TimeUnit.SECONDS);
             return null;
@@ -201,7 +201,7 @@ public class GuardedExecutorTest {
         CountDownLatch release = new CountDownLatch(1);
         for (int i = 0; i < 4; i++) {
             final int idx = i;
-            executor.doSubmit("occupy-" + idx, "occupier-" + idx, (Callable<Void>) () -> {
+            executor.doSubmit("test:occupy-" + idx, "occupier-" + idx, (Callable<Void>) () -> {
                 allStarted.countDown();
                 release.await(10, TimeUnit.SECONDS);
                 return null;
@@ -210,16 +210,16 @@ public class GuardedExecutorTest {
         assertTrue(allStarted.await(5, TimeUnit.SECONDS));
 
         try {
-            executor.doSubmit("victim-gate", "victim-label", () -> "never", 1000);
+            executor.doSubmit("test:victim-gate", "victim-label", () -> "never", 1000);
             fail("池满应 REJECTED");
         } catch (RejectedExecutionException e) {
-            assertTrue("异常应点名 gate: " + e.getMessage(), e.getMessage().contains("victim-gate"));
+            assertTrue("异常应点名 gate: " + e.getMessage(), e.getMessage().contains("test:victim-gate"));
             assertTrue("异常应点名 label: " + e.getMessage(), e.getMessage().contains("victim-label"));
         }
         assertTrue(executor.stats().contains("rejected=1"));
 
         // 同 gate 排队语义不受池满影响：已占槽 gate 的新任务入 FIFO 队列而非 REJECTED
-        executor.doSubmit("occupy-0", "queued-after", () -> "queued", 1000);
+        executor.doSubmit("test:occupy-0", "queued-after", () -> "queued", 1000);
         release.countDown();
         waitForStatAtLeast("rejected", 1, 5000); // 无新增 REJECTED 即排队成功
     }
@@ -240,7 +240,7 @@ public class GuardedExecutorTest {
             CountDownLatch allStarted = new CountDownLatch(4);
             for (int i = 0; i < 4; i++) {
                 final int idx = i;
-                executor.doSubmit("fill-" + idx, "filler-" + idx, (Callable<Void>) () -> {
+                executor.doSubmit("test:fill-" + idx, "filler-" + idx, (Callable<Void>) () -> {
                     allStarted.countDown();
                     release.await();
                     return null;
@@ -249,20 +249,20 @@ public class GuardedExecutorTest {
             assertTrue(allStarted.await(5, TimeUnit.SECONDS));
 
             try {
-                executor.doSubmit("log-victim-gate", "log-victim-label", () -> "never", 1000);
+                executor.doSubmit("test:log-victim-gate", "log-victim-label", () -> "never", 1000);
                 fail("池满应 REJECTED");
             } catch (RejectedExecutionException expected) {
             }
             boolean hasError = appender.list.stream().anyMatch(e ->
                     e.getLevel() == Level.ERROR
                             && e.getFormattedMessage().contains("guarded-task-rejected")
-                            && e.getFormattedMessage().contains("log-victim-gate"));
+                            && e.getFormattedMessage().contains("test:log-victim-gate"));
             assertTrue("池满 REJECTED 必须输出含 gate 点名的 ERROR 日志, 实际: " + appender.list, hasError);
             // 真凶点名：日志必须列出占槽者（filler 任务），被拒者无辜、占槽者才是排障目标
             boolean namesOccupier = appender.list.stream().anyMatch(e ->
                     e.getLevel() == Level.ERROR
                             && e.getFormattedMessage().contains("guarded-task-rejected")
-                            && e.getFormattedMessage().contains("fill-0")
+                            && e.getFormattedMessage().contains("test:fill-0")
                             && e.getFormattedMessage().contains("已运行"));
             assertTrue("池满 REJECTED 日志必须点名占槽者及已运行时长, 实际: " + appender.list, namesOccupier);
         } finally {
@@ -285,7 +285,7 @@ public class GuardedExecutorTest {
         try {
             // 真凶：不可中断挂死任务（吞 interrupt，模拟 native 调用/不检查 interrupt 的场景），
             // 短超时让看门狗执法（future 已 TimeoutException 但槽仍被占）
-            executor.doSubmit("zombie-gate", "zombie-label", (Callable<Void>) () -> {
+            executor.doSubmit("test:zombie-gate", "zombie-label", (Callable<Void>) () -> {
                 while (release.getCount() > 0) {
                     try {
                         release.await(10, TimeUnit.MILLISECONDS);
@@ -301,7 +301,7 @@ public class GuardedExecutorTest {
             CountDownLatch allStarted = new CountDownLatch(3);
             for (int i = 0; i < 3; i++) {
                 final int idx = i;
-                executor.doSubmit("slow-" + idx, "slow-label-" + idx, (Callable<Void>) () -> {
+                executor.doSubmit("test:slow-" + idx, "slow-label-" + idx, (Callable<Void>) () -> {
                     allStarted.countDown();
                     release.await();
                     return null;
@@ -310,7 +310,7 @@ public class GuardedExecutorTest {
             assertTrue(allStarted.await(5, TimeUnit.SECONDS));
 
             try {
-                executor.doSubmit("victim2", "victim2-label", () -> "never", 1000);
+                executor.doSubmit("test:victim2", "victim2-label", () -> "never", 1000);
                 fail("池满应 REJECTED");
             } catch (RejectedExecutionException expected) {
             }
@@ -319,7 +319,7 @@ public class GuardedExecutorTest {
                     .filter(m -> m.contains("guarded-task-rejected"))
                     .reduce((first, second) -> second).orElse("");
             assertTrue("僵尸占槽者必须被点名标注, 实际: " + rejectLog,
-                    rejectLog.contains("zombie-gate") && rejectLog.contains("僵尸"));
+                    rejectLog.contains("test:zombie-gate") && rejectLog.contains("僵尸"));
             assertTrue("合法慢任务占槽者照常点名但不标僵尸, 实际: " + rejectLog,
                     rejectLog.contains("slow-0")
                             && rejectLog.indexOf("slow-0") >= 0
@@ -337,7 +337,7 @@ public class GuardedExecutorTest {
         TraceContext.setTraceId("trace-guarded-test");
         try {
             AtomicReference<String> seen = new AtomicReference<>();
-            GuardedExecutor.GuardedFuture<Void> future = executor.doSubmit("mdc-gate", "mdc-task", () -> {
+            GuardedExecutor.GuardedFuture<Void> future = executor.doSubmit("test:mdc-gate", "mdc-task", () -> {
                 seen.set(TraceContext.getTraceId());
                 return null;
             }, 5000);
@@ -383,6 +383,44 @@ public class GuardedExecutorTest {
         }
     }
 
+    // ==================== gate 键形执法（E4-4，防全域键 E1 事故复发） ====================
+
+    /**
+     * 红：无资源分隔符的全域键（"serial-async"，事故 E1 原形——2026-08-23 把 40 条独立
+     * 串口绑成一条全局 FIFO，13 分钟拖停 87 台设备轮询）必须在提交期被拒——裸串编译
+     * 照过的立法空档已关闭（键形上签名）。
+     */
+    @Test
+    public void globalScopeGate_rejectedAtSubmit() {
+        try {
+            executor.doSubmit("serial-async", "e1-repro", () -> "never", 1000);
+            fail("全域键（不含 ':' 资源分隔符）应在提交期被拒（事故 E1 形态）");
+        } catch (IllegalArgumentException e) {
+            assertTrue("异常须点名 gate 并指出键形要求: " + e.getMessage(),
+                    e.getMessage().contains("serial-async")
+                            && e.getMessage().contains("serial-io:/dev/ttyUSB0"));
+        }
+    }
+
+    /** 红：视图构造期同执法——非法键形在 guardedExecutorFor 即抛，不等首次提交。 */
+    @Test
+    public void globalScopeGate_rejectedAtViewConstruction() {
+        try {
+            GuardedExecutor.guardedExecutorFor("http-server", 5000);
+            fail("无资源分隔符的 gate 应在视图构造期被拒");
+        } catch (IllegalArgumentException e) {
+            assertTrue("异常须点名 gate: " + e.getMessage(), e.getMessage().contains("http-server"));
+        }
+    }
+
+    /** 绿：资源级键（{前缀}:{资源标识}；多段 ':' 如 host:port 同为资源段）照常提交执行。 */
+    @Test(timeout = 10000)
+    public void resourceLevelGate_accepted() throws Exception {
+        GuardedExecutor.GuardedFuture<String> future = executor.doSubmit(
+                "tcp-connect:127.0.0.1:502", "legal-key", () -> "ok", 5000);
+        assertEquals("ok", future.get(5, TimeUnit.SECONDS));
+    }
+
     // ==================== 辅助：轮询等 stats 事件（等事件非等时间） ====================
 
     private void waitForStatAtLeast(String key, long minValue, long timeoutMs) throws InterruptedException {
@@ -409,12 +447,12 @@ public class GuardedExecutorTest {
     // 静态共享实例 API 冒烟（submit/视图/账目）
     @Test(timeout = 10000)
     public void sharedInstance_apiSmoke() throws Exception {
-        GuardedExecutor.GuardedFuture<String> future = GuardedExecutor.submit("shared-gate", "smoke",
+        GuardedExecutor.GuardedFuture<String> future = GuardedExecutor.submit("test:shared-gate", "smoke",
                 () -> "shared-ok", 5000);
         assertEquals("shared-ok", future.get(5, TimeUnit.SECONDS));
         assertTrue(GuardedExecutor.getStats().contains("completed="));
 
-        java.util.concurrent.ExecutorService view = GuardedExecutor.guardedExecutorFor("view-gate", 5000);
+        java.util.concurrent.ExecutorService view = GuardedExecutor.guardedExecutorFor("test:view-gate", 5000);
         java.util.concurrent.Future<Integer> viewed = view.submit(() -> 42);
         assertEquals(Integer.valueOf(42), viewed.get(5, TimeUnit.SECONDS));
         try {

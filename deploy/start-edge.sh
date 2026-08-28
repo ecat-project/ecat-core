@@ -75,5 +75,5 @@ echo "${pid}" > "${PID_FILE}"
 
 echo "已启动：PID ${pid}"
 echo "  工作目录（.ecat-data 所在，须为部署根）：${DEPLOY_ROOT}"
-echo "  日志目录：${LOG_DIR}（lifecycle/comm-health/error/app + core-api.log；DEBUG 默认不落盘）"
+echo "  日志目录：${LOG_DIR}（error/app + core-api.log；DEBUG 默认不落盘）"
 echo "  优雅停机：kill -15 ${pid}   （SIGTERM → shutdown hook → 状态持久化，勿用 kill -9）"

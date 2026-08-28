@@ -23,22 +23,23 @@ import java.util.List;
 import java.util.Map;
 
 import com.ecat.core.Bus.BusRegistry;
-import com.ecat.core.Task.TaskManager;
-import com.ecat.core.Task.engine.SchedulerEngine;
+import com.ecat.core.State.AttributeBase;
 
 /**
  * 平台自观测快照服务（14 号架构 §5.4-2，HA system_health 同名思想的 Java 版）。
  *
- * <p>三层信号里的「指标」层：调度（引擎计数 + 车道熔断表 + worker 忙闲）、总线（发布计数 +
- * 消费者队列深度/丢批）、线程（普查 + churn 率）。全部内存读数，不落盘、不打日志、不启动任何
- * 采样线程——快照只在端点被读时组装，事件热路径上唯一的可观测成本是各处一次原子自增。
+ * <p>三层信号里的「指标」层：执行（写命令失败累计 counter——指标注册柜台退役
+ * （21 号 D-21-1）后唯一幸存指标，长在 AttributeBase 咽喉自持）、总线（发布计数 +
+ * 消费者队列深度/丢批）、线程（普查 + churn 率）。全部内存读数，不落盘、不打日志、不启动
+ * 任何采样线程——快照只在端点被读时组装，事件热路径上唯一的可观测成本是一次原子自增。
  *
  * <p><b>速率差分模型</b>：每次快照记录一个样本（时刻 + 各累计计数），速率 = 最新样本与窗口内
  * 最旧样本的差 ÷ 时间差。窗口 60s：常规周期性拉取（监控/脚本）时速率即 60s 滑窗均值；只有一次
  * 读数时速率如实为 null（不编 0），两次读数间隔超过窗口时仍可计算（锚点样本保留），并把实际
  * 窗口跨度随 rateWindowMillis 一并暴露——读者看到的是真实口径而非假装的 60s。
  *
- * <p>严格模式：任一组件未装配（null）对应节如实输出 null，不输出编造的零值结构。
+ * <p>严格模式：组件未装配（null）对应节如实输出 null，不输出编造的零值结构。execution 节
+ * 来自 AttributeBase 进程级静态 counter（属性写必经咽喉），恒可采集。
  */
 public class SystemHealthService {
 
@@ -48,20 +49,18 @@ public class SystemHealthService {
     /** 样本数上限：锚点 + 最多 63 个窗口内样本（防高频拉取无限膨胀）。 */
     private static final int MAX_SAMPLES = 64;
 
-    private final TaskManager taskManager;
     private final BusRegistry busRegistry;
 
     /** 读时差分样本（仅 snapshot 调用线程读写；synchronized 保护——读端点频率极低）。 */
     private final List<Sample> samples = new ArrayList<>();
 
-    public SystemHealthService(TaskManager taskManager, BusRegistry busRegistry) {
-        this.taskManager = taskManager;
+    public SystemHealthService(BusRegistry busRegistry) {
         this.busRegistry = busRegistry;
     }
 
     /**
-     * 全量健康快照：{timestamp, scheduler, bus, threads}。
-     * scheduler/bus 节在对应组件缺失时为 null；threads 节恒可采集。
+     * 全量健康快照：{timestamp, execution, bus, threads}。
+     * bus 节在总线未装配时为 null；execution（写命令失败 counter）与 threads 节恒可采集。
      */
     public Map<String, Object> snapshot() {
         return snapshot(System.currentTimeMillis());
@@ -71,12 +70,10 @@ public class SystemHealthService {
      * 指定时刻的快照（测试注入时钟用——速率窗口的差分须可确定性驱动，不靠真实时间流逝）。
      */
     Map<String, Object> snapshot(long atMs) {
-        SchedulerEngine engine = taskManager != null ? taskManager.getSchedulerEngine() : null;
         long published = busRegistry != null ? busRegistry.getPublishedCount() : 0L;
-        long executed = engine != null ? engine.getMetrics().getExecuted().sum() : 0L;
         long threadStarts = ManagementFactory.getThreadMXBean().getTotalStartedThreadCount();
 
-        Sample sample = new Sample(atMs, published, executed, threadStarts);
+        Sample sample = new Sample(atMs, published, threadStarts);
         Window window;
         synchronized (samples) {
             recordAndPrune(sample);
@@ -86,12 +83,11 @@ public class SystemHealthService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("timestamp", sample.atMs);
 
-        Map<String, Object> scheduler = SchedulerHealth.collect(engine);
-        if (scheduler != null) {
-            scheduler.put("executedPerSecond",
-                    window == null ? null : rate(window, sample.executedTotal, window.oldest.executedTotal));
-        }
-        out.put("scheduler", scheduler);
+        // 执行节（21 号）：写命令失败累计——旧注册柜台 9 键中唯一有真实判读的指标
+        // （F27 验收 + 消费测试），counter 长在 AttributeBase 咽喉自持，不经注册表
+        Map<String, Object> execution = new LinkedHashMap<>();
+        execution.put("commandFailed", AttributeBase.commandFailedCount());
+        out.put("execution", execution);
 
         Map<String, Object> bus = BusHealth.collect(busRegistry);
         if (bus != null) {
@@ -126,13 +122,11 @@ public class SystemHealthService {
     private static final class Sample {
         final long atMs;
         final long publishedTotal;
-        final long executedTotal;
         final long threadStarts;
 
-        Sample(long atMs, long publishedTotal, long executedTotal, long threadStarts) {
+        Sample(long atMs, long publishedTotal, long threadStarts) {
             this.atMs = atMs;
             this.publishedTotal = publishedTotal;
-            this.executedTotal = executedTotal;
             this.threadStarts = threadStarts;
         }
     }

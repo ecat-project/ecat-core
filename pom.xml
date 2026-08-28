@@ -55,12 +55,6 @@
       <artifactId>icu4j</artifactId>
       <version>73.2</version>
     </dependency>
-    <!-- <dependency>
-      <groupId>com.ecat</groupId>
-      <artifactId>ecat-core-annotation</artifactId>
-      <version>1.0.0</version>
-      <scope>provided</scope>
-    </dependency> -->
   </dependencies>
   <modules>
   </modules>
