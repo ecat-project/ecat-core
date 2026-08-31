@@ -173,7 +173,8 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
         if (options.contains(newValue)) {
             return super.updateValue(newValue, status);
         } else {
-            log.error("Attempted to update SelectAttribute with invalid option: {}", newValue);
+            log.error("Attempted to update SelectAttribute with invalid option: {}, attrId={}, deviceId={}",
+                newValue, attributeID, device != null ? device.getId() : null);
             return false;
         }
     }
@@ -186,7 +187,8 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
         if (options.contains(newValue)) {
             return super.updateValue(newValue);
         } else {
-            log.error("Attempted to update SelectAttribute with invalid option: {}", newValue);
+            log.error("Attempted to update SelectAttribute with invalid option: {}, attrId={}, deviceId={}",
+                newValue, attributeID, device != null ? device.getId() : null);
             return false;
         }
     }
