@@ -26,6 +26,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 import com.ecat.core.Log.ClassLoaderCoordinateFilter;
@@ -39,6 +41,21 @@ import com.ecat.core.Log.ClassLoaderCoordinateFilter;
  * sweep 动作执行时该计数应已回落（unregisterPackagePrefix 先于移除动作发生）。
  */
 public class IntegrationBaseRemovalHostTest {
+
+    @Before
+    public void unregisterOwnPackagePrefixBefore() {
+        // static 注册表全 JVM 共享且 register 是 put 覆盖语义（同 key 不增计数）：单 fork
+        // 顺序跑全模块测试时，先跑的类若残留同包前缀（本包所有集成夹具共用
+        // com.ecat.core.Integration），before/before+1 计数算术即被击穿；类顺序=目录枚举
+        // 顺序（Windows/Linux 不同）→ 预清本类要用的 key 恢复确定性（bug-record-20260831-115342）
+        ClassLoaderCoordinateFilter.unregisterPackagePrefix(getClass().getPackage().getName());
+    }
+
+    @After
+    public void unregisterOwnPackagePrefixAfter() {
+        // 用例中途失败时不向后续类泄漏本包前缀注册
+        ClassLoaderCoordinateFilter.unregisterPackagePrefix(getClass().getPackage().getName());
+    }
 
     /** 最小集成替身（IntegrationBase 未实现 onInit/onStart/onPause，测试补空实现）。 */
     static class SweepIntegration extends IntegrationBase {

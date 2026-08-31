@@ -25,7 +25,9 @@ import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.Device.DeviceBase;
@@ -329,42 +331,28 @@ public class StateManagerTest {
     /**
      * 生产构造自持 ecat-state-commit 单线程（每秒 MapDB commit 是文件 IO，禁入业务池/
      * 不占引擎车道，见 StateManager 构造注释）；shutdown 先停该计时器再关 DB。
-     * 确定性事件等待：轮询线程表到「线程出现/消失」为止，不 sleep 固定时长。
+     * 断言锚定本实例调度器（包内字段缝）——全部实例计时线程同名 ecat-state-commit-N，
+     * 扫全 JVM 线程表会被其他实例残留线程误伤（bug-record-20260831-115342）。
      */
     @Test
-    public void testProductionConstructor_selfCommitThreadLifecycle() {
+    public void testProductionConstructor_selfCommitThreadLifecycle() throws Exception {
         StateManager sm = new StateManager(TEST_DIR);
         try {
-            assertTrue("生产构造应启动具名 ecat-state-commit 计时线程",
-                awaitThreadState("ecat-state-commit-", true));
+            ScheduledExecutorService selfCommit = sm.selfCommitScheduler;
+            assertNotNull("生产构造应创建自有 commit 调度器", selfCommit);
+
+            // 具名线程自证：让本调度器执行任务回报线程名——确定性且锚定本实例
+            Future<String> workerName = selfCommit.submit(() -> Thread.currentThread().getName());
+            String name = workerName.get(5, TimeUnit.SECONDS);
+            assertTrue("生产构造应启动具名 ecat-state-commit 计时线程，实际: " + name,
+                name.startsWith("ecat-state-commit-"));
 
             sm.shutdown();
-            sm = null; // 防止 @After 重复 shutdown
-            assertTrue("shutdown 应停自有计时线程（不再发起新一轮 commitAll）",
-                awaitThreadState("ecat-state-commit-", false));
+            assertTrue("shutdown 应停自有计时线程（graceful：在飞轮次完成后终止，不再发起新一轮 commitAll）",
+                selfCommit.awaitTermination(5, TimeUnit.SECONDS));
+            assertTrue(selfCommit.isTerminated());
         } finally {
-            if (sm != null) {
-                sm.shutdown();
-            }
+            sm.shutdown(); // 幂等；失败路径不泄漏计时线程
         }
-    }
-
-    /** 轮询线程表直到出现（expected=true）/消失（expected=false），5s 保险丝。 */
-    private static boolean awaitThreadState(String namePrefix, boolean expected) {
-        long deadline = System.currentTimeMillis() + 5_000;
-        while (System.currentTimeMillis() < deadline) {
-            boolean found = false;
-            for (Thread t : Thread.getAllStackTraces().keySet()) {
-                if (t.isAlive() && t.getName().startsWith(namePrefix)) {
-                    found = true;
-                    break;
-                }
-            }
-            if (found == expected) {
-                return true;
-            }
-            Thread.yield();
-        }
-        return false;
     }
 }

@@ -50,8 +50,10 @@ public class StateManager {
 
     private final String baseDir;
     private final Map<String, DB> dbCache = new ConcurrentHashMap<>();
-    /** 自有每秒 commit 计时器（仅生产构造创建；注入形态/无持久化为 null），shutdown 时先停。 */
-    private final ScheduledExecutorService selfCommitScheduler;
+    /** 自有每秒 commit 计时器（仅生产构造创建；注入形态/无持久化为 null），shutdown 时先停。
+     * 包内可见 = 生命周期测试缝：所有实例计时线程同名 ecat-state-commit-0，测试须锚定
+     * 本实例调度器断言终止，不能扫全 JVM 线程表（bug-record-20260831-115342）。 */
+    final ScheduledExecutorService selfCommitScheduler;
     private final Log log = LogFactory.getLogger(getClass());
 
     /**
