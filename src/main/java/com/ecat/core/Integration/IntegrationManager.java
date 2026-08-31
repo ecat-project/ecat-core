@@ -55,6 +55,7 @@ import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -2007,6 +2008,15 @@ public class IntegrationManager {
         // 缓存命中返回的同样是完整旧版或新版的深拷贝，对外语义与重读磁盘一致。
         // 读方不加锁也避免紧循环读者（状态查询等）占住 configFileSync 使写方饥饿。
         // saveIntegrationConfig 的读-改-写原子性由其自身持锁保证（其内部的 load 调用发生在锁内）。
+        //
+        // Windows 替换窗口治理（bug-record-20260831）：上述「原子替换」前提在 Windows 不完全成立——
+        // MoveFileEx(MOVEFILE_REPLACE_EXISTING) 原子性无契约（MSFT 确认 not always atomic），JDK 非原子
+        // move 降级路径更是显式 DeleteFile+rename，目标路径存在瞬时不出现/不可开的窗口。旧实现把窗口内
+        // 的「文件缺席/open 失败」当作「无配置」：返回空 map（读者静默撕裂）、建空文件（另一读者解析到
+        // 空配置；且 createNewFile 命中窗口后 FileWriter 以截断模式打开写方刚替换完成的完整文件，
+        // 把整份配置抹成 integrations:{}——写方后续基于空快照写回，键永久丢失）。
+        // 治理：缺席/不可开先与写方在 configFileSync 汇合再复检（见 existsWithNoWriterInFlight），
+        // 窗口过境后重读；只有「无在飞写方且文件确不存在」（首启）才建空文件返回空 map。
         File configFile = new File(INTEGRATIONS_CONFIG_PATH);
 
         FileStatStamp stamp = stampOf(configFile);
@@ -2015,37 +2025,81 @@ public class IntegrationManager {
             return deepCopyConfig(cached.parsed);
         }
 
-        synchronized (configParseLock) {
-            // 锁内复核：等待期间并发 miss 可能已填充。
-            stamp = stampOf(configFile);
-            cached = configReadCache;
-            if (isConfigCacheHit(cached, configFile, stamp)) {
-                return deepCopyConfig(cached.parsed);
-            }
-
-            // 确保文件存在（不存在则创建空文件）。createNewFile 原子：并发读者/写者同建只有一个成功写入。
-            if (!configFile.exists()) {
-                configReadCache = null; // 文件消失：废弃缓存，重建后的内容以下一次 miss 重解析为准
+        FileSystemException transientOpenFailure = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (!configFile.exists() && !existsWithNoWriterInFlight(configFile)) {
+                // 与写方汇合后文件仍不存在：真首启（无写方动过磁盘），保持既有语义——建空文件返回空 map。
+                synchronized (configParseLock) {
+                    configReadCache = null; // 文件不存在：废弃缓存，重建后的内容以下一次 miss 重解析为准
+                }
                 createEmptyConfigFile(configFile);
                 return new HashMap<>();
             }
+            // 此处文件在（或窗口刚过境已回来）——进入解析；解析仍可能撞上下一个写方的窗口，
+            // 撞上则本轮作废，退到循环头重新汇合。
 
-            try (InputStream inputStream = new FileInputStream(configFile)) {
-                configParseCount.incrementAndGet();
-                Yaml yaml = new Yaml();
-                Map<String, Map<String, Object>> config = yaml.load(inputStream);
-                Map<String, Map<String, Object>> result = config != null ? config : new HashMap<>();
-                // 解析前后 stat 一致 → 解析内容确属该戳，可入缓存；不一致说明解析期间文件被原子替换
-                // （读到的是旧或新的完整版本，仍正确），放弃缓存让下一次读重解析，杜绝「戳与内容错配」。
-                FileStatStamp after = stampOf(configFile);
-                if (after != null && after.sameAs(stamp)) {
-                    configReadCache = new ConfigReadCacheEntry(configFile.getPath(), after, result);
+            synchronized (configParseLock) {
+                // 锁内复核：等待期间并发 miss 可能已填充。
+                stamp = stampOf(configFile);
+                cached = configReadCache;
+                if (isConfigCacheHit(cached, configFile, stamp)) {
+                    return deepCopyConfig(cached.parsed);
                 }
-                return deepCopyConfig(result);
-            } catch (IOException e) {
-                log.error("读取配置文件失败: " + e.getMessage());
-                return new HashMap<>();
+
+                // 锁内缺席不在锁内建空文件（可能是写方窗口）：退到循环头与写方汇合后重试。
+                if (!configFile.exists()) {
+                    continue;
+                }
+
+                // NIO 打开（Files.newInputStream）：Windows 上默认 share 含 FILE_SHARE_DELETE
+                // （WindowsChannelFactory.Flags），读者持有句柄不再阻塞写方 rename——java.io 打开
+                // 不带该标志（io_util_md.c winFileHandleOpen），会放大写方 move 的 AccessDenied 重试。
+                try (InputStream inputStream = Files.newInputStream(configFile.toPath())) {
+                    configParseCount.incrementAndGet();
+                    Yaml yaml = new Yaml();
+                    Map<String, Map<String, Object>> config = yaml.load(inputStream);
+                    Map<String, Map<String, Object>> result = config != null ? config : new HashMap<>();
+                    // 解析前后 stat 一致 → 解析内容确属该戳，可入缓存；不一致说明解析期间文件被原子替换
+                    // （读到的是旧或新的完整版本，仍正确），放弃缓存让下一次读重解析，杜绝「戳与内容错配」。
+                    FileStatStamp after = stampOf(configFile);
+                    if (after != null && after.sameAs(stamp)) {
+                        configReadCache = new ConfigReadCacheEntry(configFile.getPath(), after, result);
+                    }
+                    return deepCopyConfig(result);
+                } catch (FileSystemException e) {
+                    // 目标缺席（NoSuchFile）或共享冲突（替换在飞）：瞬态窗口，退到循环头汇合重试。
+                    transientOpenFailure = e;
+                } catch (IOException e) {
+                    log.error("读取配置文件失败: " + e.getMessage());
+                    return new HashMap<>();
+                }
             }
+        }
+
+        // 重试穷尽：多轮「汇合后仍撞窗口」在写方有界替换下不该发生，此态=真实 IO 故障
+        // （文件不可开且非首启）——按既有 IO 失败语义记日志返空，不建空文件（防把可读故障
+        // 转成「空配置+空文件」落盘扩散）。
+        log.error("读取配置文件失败（替换窗口重试穷尽）: "
+            + (transientOpenFailure != null ? transientOpenFailure.getMessage() : configFile.getPath()));
+        return new HashMap<>();
+    }
+
+    /**
+     * 与写方汇合后复检目标文件存在性：{@code true}=此刻文件在（完整的旧版或新版）。
+     *
+     * <p>integrations.yml 的替换只发生在写方 {@code configFileSync} 临界区内
+     * （{@link #updateIntegrationsConfig} 的 tmp→target 替换全程持锁）——取到该锁即无在飞替换，
+     * 「目标路径缺席」这一窗口态此刻必已消散：文件在=完整版本可读；文件不在=真缺失（首启，
+     * 无写方动过磁盘）。这是 Windows 替换窗口（MoveFileEx 非契约原子/JDK 降级路径删除+重命名/
+     * 杀毒过滤驱动放大）下区分「替换中」与「无配置」的唯一判据。
+     *
+     * <p>锁序约束：本方法获取 configFileSync，调用方不得已持有 configParseLock——
+     * {@code saveIntegrationConfig} 持 configFileSync 调 {@code loadIntegrationsConfig} 取
+     * configParseLock，反向嵌套会死锁（本方法在 load 的 parse 锁外调用；写方路径经可重入直接进入）。
+     */
+    private boolean existsWithNoWriterInFlight(File configFile) {
+        synchronized (configFileSync) {
+            return configFile.exists();
         }
     }
 
@@ -2228,8 +2282,12 @@ public class IntegrationManager {
      * 不带 FILE_SHARE_DELETE。读者存活毫秒级，故对 move 做有界重试（5 次 × 20ms）而非放弃
      * （放弃=本次配置写入丢失，仅留错误日志）。重试穷尽仍失败由调用方 catch IOException 记日志，
      * 旧文件完整保留（tmp+rename 的降级保证：不产生截断损坏）。
+     *
+     * <p>包级实例方法（非 static）是刻意留的测试缝：IntegrationsYmlWindowsReplaceShapeRedTest
+     * 覆写本方法注入「删除目标+重命名」的 Windows 非原子替换语义，在 Linux 上复现并锁死
+     * Windows 静默撕裂缺陷——勿改回 static。
      */
-    private static void moveAtomicallyWithRetry(File tmpFile, File configFile) throws IOException {
+    void moveAtomicallyWithRetry(File tmpFile, File configFile) throws IOException {
         IOException last = null;
         for (int attempt = 0; attempt < 5; attempt++) {
             try {

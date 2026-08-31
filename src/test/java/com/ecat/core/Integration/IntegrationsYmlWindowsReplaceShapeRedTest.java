@@ -25,6 +25,8 @@ import org.junit.Test;
 
 import java.io.File;
 import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -40,62 +42,56 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 
 /**
- * 红测试：integrations.yml 读-改-写竞态（架构审查 01-F5 静态推演的运行时复现）。
+ * Windows 替换形状下的静默撕裂复现（Linux 注入）。
  *
- * <p>历史被测缺陷（已修，现为回归守卫）：loadIntegrationsConfig 无锁全量读；
- * updateIntegrationsConfig 直接 new FileOutputStream 截断写回（无 tmp+rename 原子替换）；
- * saveIntegrationConfig 三段式读改写段间无互斥。现行实现：写方经 configFileSync 互斥 +
- * tmp→target 原子替换；读方无锁 + stat 戳缓存；Windows 替换窗口（目标瞬时缺席/不可开）经
- * 写方汇合复检治理（详见 IntegrationsYmlWindowsReplaceShapeRedTest 与 bug-record-20260831）。
- *
- * <p>并发下的可观察坏果，本测试断言其正确不变量（均为 0）：
+ * <p>背景（bug-record-20260831）：同事 Windows+mvn 跑 {@link IntegrationsYmlConcurrentWriteRedTest}
+ * 失败——仅「读者静默撕裂（条目数&lt;60）」计数非零，其余坏果全零。Linux 原子 rename 下不可复现，
+ * 根因是 Windows 特有的两个瞬态读失败路径，都被 loadIntegrationsConfig 当作「无配置」返回空 map：
  * <ol>
- *   <li><b>丢更新</b>：两个并发 save 各自基于旧快照覆盖写回，后写者抹掉先写者的字段
- *       ——轮末应有键缺失；</li>
- *   <li><b>撕裂读</b>：读者在写者「已截断、未写完」窗口打开文件——
- *       a) 读到半截 YAML 抛 SnakeYAML RuntimeException（loadIntegrationsConfig 只 catch IOException，
- *       运行时异常直接外溢）；b) 更隐蔽的静默撕裂：读到空/半截内容返回
- *       {@code new HashMap<>()}，integrations 节点条目数低于种子数；</li>
- *   <li><b>落盘持久损坏</b>：双写者并发截断同一文件时，先开者按旧偏移继续写在已被后开者截断的
- *       文件上，产生 NUL 稀疏洞——竞态平息后轮末终读仍抛异常，损坏留盘波及后续所有读者。</li>
+ *   <li><b>目标瞬时不存在的窗口</b>：JDK8 Windows 非原子 move 降级路径是显式
+ *       DeleteFile(target)+MoveFileEx（WindowsFileCopy.move）；ATOMIC_MOVE 单次
+ *       MoveFileEx(MOVEFILE_REPLACE_EXISTING) 的原子性无契约保证（MSFT 确认 not always atomic，
+ *       杀毒/过滤驱动会放大窗口）。窗口内读者 exists()==false → 建空文件+返回空 map，
+ *       读者建的空文件还会被另一读者解析（同一坏果放大）。</li>
+ *   <li><b>open 瞬态失败</b>：java.io 在 Windows 打开文件不带 FILE_SHARE_DELETE
+ *       （io_util_md.c winFileHandleOpen），任何 open 失败（含替换在飞的共享冲突）一律映射
+ *       FileNotFoundException → catch IOException → 返回空 map。</li>
  * </ol>
  *
- * <p>稳定性设计：3 轮，每轮 2 写者 × 40 次全量读改写 + 2 读者紧循环；种子 60 条使单次 dump
- * 达毫秒级，竞态窗口充足。有界时间窗口：写者迭代固定、读者由 stop 标志收口、join 带超时兜底。
+ * <p>复现手段：覆写 {@code moveAtomicallyWithRetry} 注入「删除目标 + 窗口停顿 + 重命名」的
+ * Windows 替换形状（删除停顿=模拟非原子窗口/过滤驱动放大），读者侧生产代码零改动——
+ * 与真实 Windows 的可观察行为（空 map 静默撕裂、无 YAML 异常、无丢更新、无持久损坏）逐项对齐。
  *
- * <p>红 = 断言失败且失败计数正是上述缺陷之一；绿 = 全部计数为 0（缺陷不存在）。
+ * <p>红 = 静默撕裂 &gt; 0（证明该机制足以产生实测签名）；绿 = 全零（读者侧窗口治理生效：
+ * 缺席/不可开先与写方在 configFileSync 汇合再复检，不把「替换中」误判为「无配置」）。
  *
  * @author coffee
  */
-public class IntegrationsYmlConcurrentWriteRedTest {
+public class IntegrationsYmlWindowsReplaceShapeRedTest {
 
-    /** 种子条目数：撑大单次 dump 的耗时，放大截断窗口。 */
     private static final int SEED_ENTRIES = 60;
-    /** 每写者每轮的全量读改写次数。 */
     private static final int WRITES_PER_WRITER = 40;
-    /** 稳定性轮数。 */
-    private static final int ROUNDS = 3;
+    private static final int ROUNDS = 2;
     private static final int WRITERS = 2;
     private static final int READERS = 2;
-    /** join 兜底超时（毫秒）：写者迭代有界、读者受 stop 收口，正常远小于此值。 */
+    /** 注入的「目标不存在」窗口毫秒数：放大窗口保证确定性复现（真实 Windows 为亚毫秒级）。 */
+    private static final long ABSENT_WINDOW_MS = 3L;
     private static final long JOIN_TIMEOUT_MS = 60_000L;
 
     private IntegrationManager manager;
     private File testDir;
-    /** 静态路径字段先值，@After 恢复，避免泄漏到同 JVM 的后续测试。 */
     private static String originalConfigPath;
     private static String originalItemPath;
 
     @Before
     public void setUp() throws Exception {
-        testDir = new File("target", ".ecat-yml-race-red");
+        testDir = new File("target", ".ecat-yml-win-shape-red");
         deleteRecursively(testDir);
         assertTrue("测试目录创建失败: " + testDir, testDir.mkdirs() || testDir.exists());
 
-        manager = new IntegrationManager(mock(EcatCore.class), new IntegrationRegistry(), mock(StateManager.class));
+        manager = new WindowsReplaceShapeManager(
+            mock(EcatCore.class), new IntegrationRegistry(), mock(StateManager.class));
 
-        // INTEGRATIONS_CONFIG_PATH 是 private static（ IntegrationManager :80），测试注入临时路径，
-        // 与 IntegrationManagerTest 的反射注入先例一致；记录先值，@After 恢复。
         originalConfigPath = (String) getStaticField("INTEGRATIONS_CONFIG_PATH");
         originalItemPath = (String) getStaticField("INTEGRATION_ITEM_PATH");
         setStaticField("INTEGRATIONS_CONFIG_PATH", testDir.getAbsolutePath() + "/core/integrations.yml");
@@ -114,7 +110,7 @@ public class IntegrationsYmlConcurrentWriteRedTest {
     }
 
     @Test
-    public void concurrentSaveAndLoadMustNotLoseUpdatesNorServeTornReads() throws Exception {
+    public void windowsShapedReplaceMustNotServeAbsentOrEmptyConfigToReaders() throws Exception {
         long totalMissingKeys = 0;
         long totalReaderTornExceptions = 0;
         long totalReaderSilentTorn = 0;
@@ -132,25 +128,22 @@ public class IntegrationsYmlConcurrentWriteRedTest {
             totalReaderIterations += r.readerIterations;
         }
 
-        // 正确不变量：写入持久（无丢更新）+ 零撕裂读（异常与静默均无）+ 轮末文件可读（无持久损坏）。
-        // 回归守卫：任一计数非零=写方互斥/原子替换/读者窗口治理之一被破坏。
         assertTrue(
-            "integrations.yml 并发读写观察到竞态坏果（" + ROUNDS + " 轮汇总）：丢更新缺失键=" + totalMissingKeys
+            "Windows 替换形状（删除目标+重命名非原子窗口）下 integrations.yml 读者观察到静默撕裂"
+                + "（" + ROUNDS + " 轮汇总）：丢更新缺失键=" + totalMissingKeys
                 + "，读者撕裂读异常=" + totalReaderTornExceptions
                 + "，读者静默撕裂(条目数<" + SEED_ENTRIES + ")=" + totalReaderSilentTorn
                 + "，写者内部撕裂读=" + totalWriterTornReads
-                + "，轮末文件持久损坏(终读抛异常)=" + totalFinalReadCorrupt
+                + "，轮末文件持久损坏=" + totalFinalReadCorrupt
                 + "（读者总迭代=" + totalReaderIterations + "）。"
-                + "缺陷：写方互斥/原子替换或读者窗口治理被破坏"
-                + "（现行实现=configFileSync 互斥 + tmp→target 原子替换 + Windows 窗口汇合复检）",
+                + "缺陷：目标瞬时缺席/不可开被 loadIntegrationsConfig 当作「无配置」返回空 map",
             totalMissingKeys == 0 && totalReaderTornExceptions == 0
                 && totalReaderSilentTorn == 0 && totalWriterTornReads == 0
                 && totalFinalReadCorrupt == 0);
     }
 
-    /** 单轮竞态场景：seed 全量写 → 栅栏同启 2 写者 + 2 读者 → join → 统计坏果。 */
+    /** 单轮：seed → 栅栏同启 2 写者 + 2 紧循环读者 → join → 统计。与主红测试同款场景。 */
     private RoundResult runRound(int round) throws Exception {
-        // 种子：SEED_ENTRIES 条集成配置一次写入（此时单线程，无竞态）。
         Map<String, Object> seedIntegrations = new LinkedHashMap<>();
         for (int s = 0; s < SEED_ENTRIES; s++) {
             seedIntegrations.put("seed:r" + round + ":g" + s, integrationConfig("seed", s));
@@ -163,8 +156,6 @@ public class IntegrationsYmlConcurrentWriteRedTest {
         final CyclicBarrier barrier = new CyclicBarrier(WRITERS + READERS);
         final List<Thread> threads = new ArrayList<>();
 
-        // 写者：每轮各做 WRITES_PER_WRITER 次 saveIntegrationConfig（全量读-改-写）。
-        // 正常返回的键轮末必须仍在文件中（正确语义）；内部 load 读到截断文件会抛 RuntimeException，计数不中断。
         final List<Set<String>> savedOkPerWriter = Collections.synchronizedList(new ArrayList<Set<String>>());
         final AtomicLong writerTornReads = new AtomicLong(0);
         for (int w = 0; w < WRITERS; w++) {
@@ -183,17 +174,13 @@ public class IntegrationsYmlConcurrentWriteRedTest {
                         manager.saveIntegrationConfig(coordinate, integrationConfig("race", k));
                         savedOk.add(coordinate);
                     } catch (RuntimeException e) {
-                        // saveIntegrationConfig 内部 loadIntegrationsConfig 读到截断 YAML —— 撕裂读外溢，缺陷证据。
                         writerTornReads.incrementAndGet();
                     }
                 }
-            }, "yml-writer-" + round + "-" + w);
+            }, "win-shape-writer-" + round + "-" + w);
             threads.add(t);
         }
 
-        // 读者：紧循环 loadIntegrationsConfig。
-        // a) RuntimeException = 半截 YAML 解析失败（loadIntegrationsConfig 只 catch IOException）；
-        // b) integrations 节点条目数 < SEED_ENTRIES = 静默撕裂（读到已截断未写完的内容被当作空/半截配置返回）。
         final AtomicLong readerTornExceptions = new AtomicLong(0);
         final AtomicLong readerSilentTorn = new AtomicLong(0);
         final AtomicLong readerIterations = new AtomicLong(0);
@@ -216,14 +203,13 @@ public class IntegrationsYmlConcurrentWriteRedTest {
                         readerTornExceptions.incrementAndGet();
                     }
                 }
-            }, "yml-reader-" + round + "-" + r);
+            }, "win-shape-reader-" + round + "-" + r);
             threads.add(t);
         }
 
         for (Thread t : threads) {
             t.start();
         }
-        // 先 join 写者（迭代有界，自然结束），再放行读者 stop 标志，最后 join 读者——顺序颠倒会互相等待。
         for (int i = 0; i < WRITERS; i++) {
             Thread writer = threads.get(i);
             writer.join(JOIN_TIMEOUT_MS);
@@ -236,10 +222,6 @@ public class IntegrationsYmlConcurrentWriteRedTest {
             assertTrue("读者 " + reader.getName() + " 未在有界窗口内结束（测试自身缺陷）", !reader.isAlive());
         }
 
-        // 轮末静置状态：文件必须可读且包含种子 + 两写者全部正常返回的保存键。
-        // 双写者并发 new FileOutputStream 互相截断时，先开者按自身偏移继续写在已截断文件上，
-        // 产生 NUL 稀疏洞——轮末终读本身抛 SnakeYAML RuntimeException，即「落盘持久损坏」，
-        // 比瞬态撕裂读更严重（损坏留盘，波及后续所有读者）。
         Set<String> expectedKeys = new TreeSet<>(seedIntegrations.keySet());
         for (Set<String> savedOk : savedOkPerWriter) {
             expectedKeys.addAll(savedOk);
@@ -260,6 +242,9 @@ public class IntegrationsYmlConcurrentWriteRedTest {
         Set<String> missing = new TreeSet<>(expectedKeys);
         missing.removeAll(finalKeys);
 
+
+
+
         RoundResult result = new RoundResult();
         result.missingKeys = missing.size();
         result.finalReadCorrupt = finalReadCorrupt ? 1 : 0;
@@ -270,7 +255,32 @@ public class IntegrationsYmlConcurrentWriteRedTest {
         return result;
     }
 
-    /** 与生产写入字段一致的最小集成配置（saveIntegrationConfig 仅持久化这些字段）。 */
+    /**
+     * Windows 替换形状注入：删除目标 → 停顿（放大瞬时缺席窗口）→ 重命名覆盖。
+     *
+     * <p>对应真实 Windows 行为：JDK8 非原子 move 降级路径显式 DeleteFile+MoveFileEx；
+     * MoveFileEx(REPLACE) 原子性无契约（MSFT not always atomic）；停顿模拟过滤驱动/杀毒放大。
+     * 停顿发生在写方 configFileSync 临界区内——与生产替换的位置一致，读者不受写锁保护
+     * （锁自由读），恰是被测窗口。
+     */
+    private static final class WindowsReplaceShapeManager extends IntegrationManager {
+        WindowsReplaceShapeManager(EcatCore core, IntegrationRegistry registry, StateManager stateManager) {
+            super(core, registry, stateManager);
+        }
+
+        @Override
+        void moveAtomicallyWithRetry(java.io.File tmpFile, java.io.File configFile) throws java.io.IOException {
+            Files.deleteIfExists(configFile.toPath());
+            try {
+                Thread.sleep(ABSENT_WINDOW_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new java.io.IOException("Windows 形状替换被中断", e);
+            }
+            Files.move(tmpFile.toPath(), configFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
     private Map<String, Object> integrationConfig(String group, int seq) {
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("groupId", "com.ecat");
@@ -308,7 +318,6 @@ public class IntegrationsYmlConcurrentWriteRedTest {
         }
     }
 
-    /** 单轮统计。 */
     private static final class RoundResult {
         long missingKeys;
         long finalReadCorrupt;
