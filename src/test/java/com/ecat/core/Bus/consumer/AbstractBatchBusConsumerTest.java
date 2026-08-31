@@ -38,6 +38,21 @@ public class AbstractBatchBusConsumerTest {
         }
     }
 
+    /**
+     * 确定性等待主类 flush 完成计数：flushLatch 在 flush() 内部放行，而主类
+     * flushedBatches 计数在 flush() 返回之后——两者间的窗口在慢环境下会让
+     * 断言读到旧值，故对最终状态做有界条件等待而非依赖 latch 时序。
+     */
+    private static void awaitFlushedBatches(AbstractBatchBusConsumer<?> c, int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (c.getFlushedBatchesCount() < expected) {
+            if (System.nanoTime() > deadline) {
+                fail("等待 flushedBatches=" + expected + " 超时，实际=" + c.getFlushedBatchesCount());
+            }
+            Thread.sleep(10);
+        }
+    }
+
     /** N 满 flush：投 batchSize 条 → 触发一次 flush，批内含全部 N 条，顺序保留。 */
     @Test
     public void flushWhenBatchSizeReached() throws InterruptedException {
@@ -53,7 +68,7 @@ public class AbstractBatchBusConsumerTest {
             assertEquals("顺序应保留", i, c.flushed.get(0).get(i).intValue());
         }
         assertEquals(batchSize, c.getProcessedCount());
-        assertEquals(1, c.getFlushedBatchesCount());
+        awaitFlushedBatches(c, 1);
         c.shutdown();
     }
 
