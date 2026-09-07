@@ -16,6 +16,7 @@
 | 组件 | 文件 | 作用 |
 |------|------|------|
 | ClassLoaderCoordinateFilter | ecat-core/.../Log/ClassLoaderCoordinateFilter.java | TurboFilter，根据 logger.getName() 自动设置 MDC 坐标 |
+| StreamCapture | ecat-core/.../Log/StreamCapture.java | System.out/err 裸打印桥接进 logback（STDOUT=INFO / STDERR=ERROR，printStackTrace 多行聚合一条，重入守卫防回环）；logback.xml 经 console appender 之后的 `<define>` 挂载 |
 | IntegrationBase | ecat-core/.../Integration/IntegrationBase.java | 集成基类，在 onLoad 时自动注册包名前缀 |
 | SiftingAppender | logback.xml | 根据 MDC 坐标将日志分流到不同文件 |
 | CoordinateConverter | ecat-core/.../Utils/CoordinateConverter.java | 从 MDC 获取坐标，格式化输出 |
@@ -684,6 +685,7 @@ java -jar ecat-core.jar -Decat.log.turbo.debug=true -Decat.log.turbo.debug.logge
 | 文件 | 路径 |
 |------|------|
 | ClassLoaderCoordinateFilter | ecat-core/src/main/java/com/ecat/core/Log/ClassLoaderCoordinateFilter.java |
+| StreamCapture | ecat-core/src/main/java/com/ecat/core/Log/StreamCapture.java |
 | IntegrationBase | ecat-core/src/main/java/com/ecat/core/Integration/IntegrationBase.java |
 | IntegrationDeviceBase | ecat-core/src/main/java/com/ecat/core/Integration/IntegrationDeviceBase.java |
 | logback.xml | ecat-core/src/main/resources/logback.xml |

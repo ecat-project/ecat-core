@@ -87,6 +87,9 @@ public class LogbackConfigLoadTest {
     @After
     public void tearDown() {
         context.stop();
+        // 生产 logback.xml 的 <define>（StreamCapture）在本测试装载时已把 System.out/err
+        // 全局替换为桥——进程级状态必须对称卸载，否则污染同 JVM 的其他测试
+        StreamCapture.uninstall();
         if (previousLogDir == null) {
             System.clearProperty("LOG_DIR");
         } else {
