@@ -38,20 +38,6 @@
         </encoder>
     </appender>
 
-    <!-- ==================== System.out/err 桥接挂载（必须在 console appender 之后） ====================
-      背景：第三方库异常路径裸 printStackTrace → System.err，生产启动脚本把 stdout/stderr 重定向到
-      无轮转无限频的 core-api.log，串口 IO 异常风暴（3000 堆栈/秒 ≈ 25.9MB/s）经此刷爆磁盘
-      （bug-record-20260907-093000 层 3）。StreamCapture 把两个裸通道收编进 logback：
-      err→STDERR logger ERROR、out→STDOUT logger INFO，复用本配置的限频（ErrorRateLimitFilter）
-      与轮转体系；printStackTrace 多行聚合成一条，限频器按整条判定。
-      为什么必须在 console appender 之后：logback 1.2.13 的 ConsoleAppender 经 ConsoleTarget
-      枚举取流，该枚举在类加载期（即上面 console appender 构造时）固化当时的 System.out/err，
-      此后 System.setOut/setErr 对其不可见——appender 先于桥启动 ⇒ console 输出不回流进桥
-      （防回环实证见 StreamCaptureTest#productionConfigMountsCaptureWithoutLoopOrErrorStatus）。
-      <define> 语义：DefinePropertyAction.end() 按文档序在解析期同步调 getPropertyValue() → install()，
-      启动期必执行且仅一次（install 幂等，logback reset 重装载也零副作用）。 -->
-    <define name="streamCaptureMounted" class="com.ecat.core.Log.StreamCapture"/>
-
     <!-- ==================== 通道 1：错误 error.log（WARN+，限频后） ==================== -->
     <appender name="file_error" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${log.path}/error.log</file>
@@ -112,11 +98,6 @@
         <appender-ref ref="async_app" />
         <appender-ref ref="broadcast" />
     </logger>
-
-    <!-- 桥接通道级别闸门：StreamCapture 收编的裸 System.out/err 经这两个 logger 进体系；
-         需要全静默 legacy System.out（49 处，另行清理）时把 STDOUT 改 level="OFF" 即全静默 -->
-    <logger name="STDOUT" level="INFO" />
-    <logger name="STDERR" level="ERROR" />
 
     <!-- ruoyi 框架日志级别（实测其 INFO 量可忽略，噪声源不在 ruoyi 侧） -->
     <logger name="com.ruoyi" level="info" />
