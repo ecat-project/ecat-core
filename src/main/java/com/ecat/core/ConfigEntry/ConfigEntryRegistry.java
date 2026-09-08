@@ -31,6 +31,7 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -49,6 +50,9 @@ public class ConfigEntryRegistry {
     private final Map<String, ConfigEntry> entryCache = new ConcurrentHashMap<>();
     private final ConfigEntryPersistence persistence;
     private final EcatCore core;
+
+    /** 删除重入护栏：entryId 在集合中=该 entry 的外层删除流程已在进行（integration 回调重入），幂等返回。 */
+    private final Set<String> removalsInProgress = ConcurrentHashMap.newKeySet();
 
     // ==================== 异常类 ====================
 
@@ -305,18 +309,28 @@ public class ConfigEntryRegistry {
             throw new EntryNotFoundException(entryId);
         }
 
-        // 1. 先通知 integration 停止设备
-        notifyIntegrationRemove(entry);
+        // integration 回调再进本方法时外层删除已在进行，幂等返回，递归深度封顶 1
+        // （不挪动「先通知后删除」顺序——EntryInUseException 否决权依赖通知先于状态变更）
+        if (!removalsInProgress.add(entryId)) {
+            return;
+        }
 
-        // 2. 从缓存移除
-        entryCache.remove(entryId);
+        try {
+            // 1. 先通知 integration 停止设备
+            notifyIntegrationRemove(entry);
 
-        // 3. 从持久化删除
-        persistence.delete(entryId);
+            // 2. 从缓存移除
+            entryCache.remove(entryId);
 
-        publishConfigEntryEvent(entry, ConfigEntryEvent.Action.REMOVE);
+            // 3. 从持久化删除
+            persistence.delete(entryId);
 
-        log.info("Removed config entry: entryId={}", entryId);
+            publishConfigEntryEvent(entry, ConfigEntryEvent.Action.REMOVE);
+
+            log.info("Removed config entry: entryId={}", entryId);
+        } finally {
+            removalsInProgress.remove(entryId);
+        }
     }
 
     // ==================== 查询方法 ====================
@@ -527,6 +541,12 @@ public class ConfigEntryRegistry {
         } catch (Exception e) {
             log.error("Failed to notify integration {} to remove entry {}: {}",
                     coordinate, entry.getEntryId(), e.getMessage());
+        } catch (Throwable t) {
+            // Error（SOE/OOM 等）原会穿透 HTTP handler（只 catch Exception）→ 请求挂死、日志只剩空消息。
+            // 留全栈证据并转 EntryNotificationException 上抛：删除中止（entry 保留），不再无声假挂。
+            log.error("Integration {} removeEntry callback threw Error, aborting entry removal {}",
+                    coordinate, entry.getEntryId(), t);
+            throw new EntryNotificationException(entry, coordinate, "remove", t);
         }
     }
 

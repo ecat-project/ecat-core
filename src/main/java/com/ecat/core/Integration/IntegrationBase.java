@@ -326,17 +326,14 @@ public abstract class IntegrationBase implements IntegrationLifecycle, RemovalHo
     }
 
     /**
-     * 删除配置条目
-     * <p>
-     * 子类可重写此方法以提供自定义的删除逻辑。
-     *
-     * @param entryId 配置条目 ID
+     * 删除配置条目的集成侧回调：清理本集成在该 entry 名下持有的资源后返回。
+     * Registry 负责缓存移除 + 持久化删除——回调里不得再回查 Registry（会重入）。
+     * 持有 entry 级资源的子类（如 broker/连接池）必须覆写本方法做自己的停机；
+     * 名下无资源的集成保持默认无操作即可。
      */
     public void removeEntry(String entryId) {
-        ConfigEntryRegistry registry = getEntryRegistry();
-        if (registry != null) {
-            registry.removeEntry(entryId);
-        }
+        // 回调契约：默认无操作。Registry 是删除属主；旧默认实现回查 registry.removeEntry
+        // 与 Registry 的通知回调互递归（StackOverflowError，见 bugs/bug-record-20260907-195458）。
     }
 
     /**
