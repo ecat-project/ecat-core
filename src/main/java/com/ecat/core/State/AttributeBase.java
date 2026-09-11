@@ -944,7 +944,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      */
     private T convertStringToType(String source) throws Exception {
         if (targetType == Integer.class) {
-            return targetType.cast((int) Double.parseDouble(source));
+            return targetType.cast((int) parseIntegerValued(source, targetType));
         }
         if (targetType == Double.class) {
             return targetType.cast(Double.parseDouble(source));
@@ -959,19 +959,45 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
             return targetType.cast(Float.parseFloat(source));
         }
         if (targetType == Short.class) {
-            return targetType.cast((short) Double.parseDouble(source));
+            return targetType.cast((short) parseIntegerValued(source, targetType));
         }
         if (targetType == Long.class) {
-            return targetType.cast((long) Double.parseDouble(source));
+            return targetType.cast((long) parseIntegerValued(source, targetType));
         }
         if (targetType == Byte.class) {
-            return targetType.cast((byte) Double.parseDouble(source));
+            return targetType.cast((byte) parseIntegerValued(source, targetType));
         }
         // 可继续扩展其他常见类型...
         throw new UnsupportedOperationException(
             "不支持的目标类型: " + targetType.getSimpleName() +
             "，请子类覆盖 setDisplayValue(String) 方法实现自定义转换"
         );
+    }
+
+    /**
+     * 整型目标（Integer/Short/Long/Byte）的字符串解析——拒绝非零小数与非法值，不静默截断。
+     *
+     * <p><b>为什么</b>：historically 此处用 {@code (int) Double.parseDouble(source)} 浮点强转，
+     * "26.5" 被向零截断成 26 且报写入成功（bug-record-20260911-103000：用户以为下发了 26.5
+     * 设备实际收到 26，无任何提示）——违反严格模式「不静默改值」。改为显式拒绝，
+     * 经 setDisplayValue 的类型转换失败管道变成明确失败回执。</p>
+     *
+     * <p><b>判定按数学值非字符串形态</b>："25.0"/"2.5e1" 解析后是整数 25 → 放行；
+     * 仅含非零小数部分（26.5/26.01/-0.5）或非有限值（NaN/Infinity）才拒绝。</p>
+     *
+     * @param source     输入字符串
+     * @param targetType 整型目标类型（仅用于报错文案）
+     * @return 整数值（已验证无小数部分）
+     * @throws NumberFormatException     非数字串（parseDouble 既有行为透传）
+     * @throws IllegalArgumentException  含非零小数或非有限值
+     */
+    private static double parseIntegerValued(String source, Class<?> targetType) {
+        double d = Double.parseDouble(source);
+        if (!Double.isFinite(d) || d != Math.rint(d)) {
+            throw new IllegalArgumentException(
+                "参数仅支持整数值，收到: \"" + source + "\"（目标类型 " + targetType.getSimpleName() + "）");
+        }
+        return d;
     }
 
     /**
