@@ -29,5 +29,7 @@ public enum CommTraceTransport {
     /** Modbus TCP / RTU over TCP（ModbusSource 事务层，portId=ip:port）。 */
     MODBUS_TCP,
     /** 原生 TCP 客户端（ReconnectTcpClient，portId=host:port）。 */
-    TCP_CLIENT
+    TCP_CLIENT,
+    /** HTTP 客户端（httpserver 仓 EasyHttpClient SDK 层捕获，覆盖全部已迁/将迁 HTTP 集成；portId=host:port，缺省端口补全 80/443）。 */
+    HTTP
 }

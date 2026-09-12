@@ -29,6 +29,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 
 /**
  * 通讯帧全局有界环形缓冲（独立数据面，不经 logback）。
@@ -46,20 +47,24 @@ import java.util.concurrent.atomic.AtomicLong;
  * 懒启动的投递线程读环增量、按订阅者过滤后 send；投递时不持任何 ecat 锁，慢订阅者由环容量
  * 兜底（丢最旧），不阻塞捕获热路径。
  *
- * <p>设备上下文：捕获线程的 MDC（引擎/组件层已设 {@code integration.coordinate}）；
- * MDC 无设备维度键，deviceId/deviceName 仅当上游显式设置 {@code device.id}/{@code device.name}
- * 时继承，拿不到为 null（如实）。
+ * <p>设备上下文（工单 G）：捕获线程的 MDC 携带 {@code device.id}/{@code device.name}
+ * （传输 SDK 轮询链起链处经 DeviceMdcContext 注入，逐轮随快照恢复）与
+ * {@code integration.coordinate}。读线程（serial sweeper / tcp selector）无任务 MDC 的 RX 帧
+ * 按「本口最近一次带设备键 TX + 新鲜度窗口」回填归属——串口源锁纪律下同口至多一笔在飞事务，
+ * RX=最近 TX 的应答，归属结构性成立；无 TX / 窗口过期 / unsolicited 推送保持 null（如实）。
  *
  * <p>容量经 {@code ecat.commtrace.capacity} 系统属性配置，默认 50_000 帧（约
- * 50k × ~300B ≈ 15MB 稳态上限）。
+ * 50k × ~300B ≈ 15MB 稳态上限）；回填窗口经 {@code ecat.commtrace.rx-attrib-window-ms} 配置
+ * （EcatConfig 集中读取），默认 30s。
  *
  * @author coffee
  */
 public final class CommTraceBuffer implements AutoCloseable {
 
-    /** MDC 设备维度键（上游按需设置；不设则事件设备字段为 null）。 */
-    public static final String MDC_DEVICE_ID_KEY = "device.id";
-    public static final String MDC_DEVICE_NAME_KEY = "device.name";
+    /** MDC 设备维度键（上游按需设置；不设则事件设备字段为 null 或按本口最近 TX 回填）。
+     *  键名真相源在 {@link MdcContext}（键族集中），此处别名保持既有公开引用不破。 */
+    public static final String MDC_DEVICE_ID_KEY = MdcContext.DEVICE_ID_KEY;
+    public static final String MDC_DEVICE_NAME_KEY = MdcContext.DEVICE_NAME_KEY;
 
     private static final int DEFAULT_CAPACITY = 50_000;
 
@@ -92,6 +97,29 @@ public final class CommTraceBuffer implements AutoCloseable {
     private final AtomicLong writeCount = new AtomicLong(0);
     private final ConcurrentHashMap<String, PortStats> portStats = new ConcurrentHashMap<>();
 
+    // ===== RX 设备归属回填（工单 G）：读线程（serial sweeper / tcp selector）无任务 MDC，
+    //       按「本口最近一次带设备键 TX + 新鲜度窗口」回填；无 TX/过期/异口不回填（如实 null） =====
+    private final ConcurrentHashMap<String, PortDeviceCtx> lastTxDevice = new ConcurrentHashMap<>();
+    /** 回填新鲜度窗口（微秒）：窗口外的陈旧 TX 归属不可靠，不回填。 */
+    private final long backfillWindowMicros;
+    /** 微秒时钟（帧时间戳来源；测试注入可控序列，非消费方 API）。 */
+    private final LongSupplier clockMicros;
+
+    /** 本口最近一次带设备键 TX 的设备上下文（不可变；TS 只用于窗口判定的快照）。 */
+    private static final class PortDeviceCtx {
+        final String deviceId;
+        final String deviceName;
+        final String coordinate;
+        final long tsMicros;
+
+        PortDeviceCtx(String deviceId, String deviceName, String coordinate, long tsMicros) {
+            this.deviceId = deviceId;
+            this.deviceName = deviceName;
+            this.coordinate = coordinate;
+            this.tsMicros = tsMicros;
+        }
+    }
+
     // ===== SSE 投递（信号式单写者，仿 LogBuffer；append 只 release 信号） =====
     private final CopyOnWriteArraySet<CommTraceSubscriber> subscribers = new CopyOnWriteArraySet<>();
     private final Semaphore deliverySignal = new Semaphore(0);
@@ -100,13 +128,28 @@ public final class CommTraceBuffer implements AutoCloseable {
     private volatile long lastDeliveredSeq = 0L;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
-    /** 测试/独立运行可自建实例；生产用 {@link #instance()}。 */
+    /** 测试/独立运行可自建实例；生产用 {@link #instance()}。回填窗口取 EcatConfig 集中配置。 */
     public CommTraceBuffer(int capacity) {
+        this(capacity, com.ecat.core.Config.EcatConfig.commTraceRxAttributionWindowMs(), null);
+    }
+
+    /** 全参构造（测试注入窗口与时钟缝用，包内可见）。clockMicros 传 null 用系统默认微秒钟。 */
+    CommTraceBuffer(int capacity, long backfillWindowMs, LongSupplier clockMicros) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("commtrace capacity must be > 0, got " + capacity);
         }
+        if (backfillWindowMs < 0) {
+            throw new IllegalArgumentException("backfillWindowMs must be >= 0, got " + backfillWindowMs);
+        }
         this.capacity = capacity;
         this.ring = new CommTraceEvent[capacity];
+        this.backfillWindowMicros = backfillWindowMs * 1000L;
+        this.clockMicros = clockMicros != null ? clockMicros : CommTraceBuffer::defaultNowMicros;
+    }
+
+    /** 默认微秒钟：墙钟秒级 + nanoTime 微秒尾部（原 append 内联公式抽出，字段化后供缝替换）。 */
+    private static long defaultNowMicros() {
+        return System.currentTimeMillis() * 1000 + (System.nanoTime() / 1000) % 1000;
     }
 
     // ========== 捕获热路径 ==========
@@ -115,6 +158,13 @@ public final class CommTraceBuffer implements AutoCloseable {
     public void tx(CommTraceTransport transport, String portId, byte[] payload, String txnId) {
         append(transport, portId, CommTraceDirection.TX, payload,
                 payload != null ? payload.length : 0, txnId, null);
+    }
+
+    /** 捕获一帧 TX（length 独立于 payload 长度：调用方为免整包拷贝可只填前缀字节，
+     *  真实全长经 length 记账——与 {@link #rx(CommTraceTransport, String, byte[], int, String, Double)}
+     *  同语义：前缀须覆盖 min(length, 截断上限) 字节）。 */
+    public void tx(CommTraceTransport transport, String portId, byte[] payload, int length, String txnId) {
+        append(transport, portId, CommTraceDirection.TX, payload, length, txnId, null);
     }
 
     /** 捕获一帧 RX（带与 TX 配对的 txnId 和响应耗时）。 */
@@ -141,18 +191,38 @@ public final class CommTraceBuffer implements AutoCloseable {
         if (closed.get() || payload == null) {
             return;
         }
-        long tsMicros = System.currentTimeMillis() * 1000 + (System.nanoTime() / 1000) % 1000;
-        // MDC 继承：coordinate 由引擎/组件层设置；设备维度键上游不设则 null（如实）
+        long tsMicros = clockMicros.getAsLong();
+        // MDC 继承：coordinate 由引擎/组件层设置；设备维度键由轮询链起链线程的 DeviceMdcContext 设置
         String coordinate = MDC.get(MdcContext.INTEGRATION_COORDINATE_KEY);
         String deviceId = MDC.get(MDC_DEVICE_ID_KEY);
         String deviceName = MDC.get(MDC_DEVICE_NAME_KEY);
+        String key = portKey(transport, portId);
+        if (dir == CommTraceDirection.TX) {
+            // 带键 TX 记录本口设备上下文：先记后入环，使与并发 RX 的竞态窗内 RX 能看到（读到旧值亦有效）
+            if (deviceId != null || deviceName != null) {
+                lastTxDevice.put(key, new PortDeviceCtx(deviceId, deviceName, coordinate, tsMicros));
+            }
+        } else if (deviceId == null && deviceName == null) {
+            // 读线程（serial sweeper/tcp selector）无任务 MDC：按本口最近带键 TX 回填。
+            // 串口源锁纪律下同口至多一笔在飞事务，RX=最近 TX 的应答，归属结构性成立；
+            // 无 TX/窗口过期不回填（unsolicited 推送如实保持 null）。
+            PortDeviceCtx ctx = lastTxDevice.get(key);
+            if (backfillWindowMicros > 0 && ctx != null
+                    && tsMicros - ctx.tsMicros <= backfillWindowMicros) {
+                deviceId = ctx.deviceId;
+                deviceName = ctx.deviceName;
+                if (coordinate == null) {
+                    coordinate = ctx.coordinate;
+                }
+            }
+        }
 
         long idx = writeCount.getAndIncrement();
         int slot = (int) (idx % capacity);
         ring[slot] = new CommTraceEvent(idx + 1, tsMicros, transport, portId, deviceId, deviceName,
                 coordinate, dir, CommTraceEvent.truncate(payload, length), length, txnId,
                 durationMillis);
-        PortStats stats = portStats.computeIfAbsent(portKey(transport, portId), k -> new PortStats());
+        PortStats stats = portStats.computeIfAbsent(key, k -> new PortStats());
         stats.record(dir, tsMicros);
         if (!subscribers.isEmpty()) {
             deliverySignal.release();

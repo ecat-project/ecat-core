@@ -121,16 +121,19 @@ public final class CommTraceEvent {
         return out;
     }
 
-    /** 派生 ISO-8601 时间戳（微秒精度折叠到毫秒 + 小数位）。 */
+    /** SSE/REST 时间出口共用格式：固定毫秒三位 + UTC Z 后缀（Instant.toString 毫秒为零时
+     *  会掉小数段，长度不稳定，前端解析契约须定长）。线程安全（DateTimeFormatter 无状态）。 */
+    private static final java.time.format.DateTimeFormatter ISO_MILLIS_UTC =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+                    .withZone(java.time.ZoneOffset.UTC);
+
+    /**
+     * 派生 ISO-8601 时间戳（合法格式：固定毫秒三位 + Z 后缀，Z 后零字符）。
+     * 微秒亚毫秒残差折叠（除以 1000 取整）——曾把微秒尾直接拼在 Z 后（{@code ...057Z437}），
+     * 非法 ISO-8601 导致前端 {@code new Date} 解析 Invalid。
+     */
     public String renderIsoTime() {
-        long ms = tsMicros / 1000;
-        int frac = (int) (tsMicros % 1000);
-        String base = new java.sql.Timestamp(ms).toInstant().toString(); // ISO-8601, 含毫秒
-        if (frac == 0) {
-            return base;
-        }
-        // 把微秒剩余位接到毫秒后（best-effort 展示精度）
-        return base + String.format(java.util.Locale.ROOT, "%03d", frac).replaceAll("0+$", "");
+        return ISO_MILLIS_UTC.format(java.time.Instant.ofEpochMilli(tsMicros / 1000));
     }
 
     /** q 子串匹配目标串（deviceId/deviceName/portId/coordinate + ascii payload）。 */

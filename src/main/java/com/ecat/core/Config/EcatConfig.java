@@ -49,4 +49,25 @@ public final class EcatConfig {
             throw new IllegalArgumentException("ecat.guarded.timeout-ms 配置非法: " + raw, e);
         }
     }
+
+    /**
+     * 通讯追踪 RX 设备归属回填的新鲜度窗口：{@code ecat.commtrace.rx-attrib-window-ms}，
+     * 未配置 30s。窗口外的陈旧 TX 上下文不回填（归属不可靠，如实 null）。
+     * 严格模式同 {@link #guardedTimeoutMs()}：0 = 关闭回填（合法边界，显式关闭），负数非法。
+     */
+    public static long commTraceRxAttributionWindowMs() {
+        String raw = System.getProperty("ecat.commtrace.rx-attrib-window-ms");
+        if (raw == null) {
+            return 30_000L;
+        }
+        try {
+            long value = Long.parseLong(raw.trim());
+            if (value < 0) {
+                throw new IllegalArgumentException("必须为非负整数(0=关闭回填), 实际: " + raw);
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("ecat.commtrace.rx-attrib-window-ms 配置非法: " + raw, e);
+        }
+    }
 }

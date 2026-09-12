@@ -63,6 +63,13 @@ public final class MdcContext {
     public static final String INTEGRATION_COORDINATE_KEY = "integration.coordinate";
 
     /**
+     * MDC 中设备维度键名（键族真相源在此，数据面 CommTraceBuffer 与写入方
+     * DeviceMdcContext 引用同一常量，防止键字符串漂移导致静默丢归属）。
+     */
+    public static final String DEVICE_ID_KEY = "device.id";
+    public static final String DEVICE_NAME_KEY = "device.name";
+
+    /**
      * 私有构造函数，防止实例化
      */
     private MdcContext() {

@@ -17,11 +17,13 @@
 package com.ecat.core.CommTrace;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.HashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -128,6 +130,47 @@ public class CommTraceBufferTest {
     }
 
     @Test
+    public void txWithIndependentLengthTruncatesAndKeepsOriginalLength() {
+        // HTTP 埋点形态：编码器为避免整包拷贝只填前缀字节（前缀覆盖 min(length,256) 契约），
+        // 真实全长经 length 传入（与 rx(data, length) 同语义）——isTruncated 按 length 判定
+        byte[] prefix = new byte[256];
+        System.arraycopy("GET /api HTTP/1.1".getBytes(), 0, prefix, 0, 17);
+        buffer.tx(CommTraceTransport.HTTP, "h:80", prefix, 5000, "http-1");
+        CommTraceEvent e = buffer.query(CommTraceFilter.all(), 1, 0).get(0);
+        assertEquals("payload 截断到上限 256", 256, e.getPayload().length);
+        assertEquals("原始全长按 length 记账", 5000, e.getOriginalLength());
+        assertTrue("全长大于前缀须标记截断", e.isTruncated());
+
+        // 全长小于上限时前缀即全部（不截断）
+        byte[] small = "POST /x HTTP/1.1".getBytes();
+        buffer.tx(CommTraceTransport.HTTP, "h:80", small, small.length, "http-2");
+        CommTraceEvent e2 = buffer.query(CommTraceFilter.all(), 1, 0).get(0);
+        assertEquals(small.length, e2.getPayload().length);
+        assertFalse(e2.isTruncated());
+    }
+
+    @Test
+    public void httpTransportPairGroupedInOverview() {
+        buffer.tx(CommTraceTransport.HTTP, "10.0.0.5:80", new byte[]{1}, "http-1");
+        buffer.rx(CommTraceTransport.HTTP, "10.0.0.5:80", new byte[]{2}, "http-1", 12.5);
+        buffer.error(CommTraceTransport.HTTP, "10.0.0.5:80");
+
+        Map<String, Object> overview = buffer.overview();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> transports = (Map<String, Object>) overview.get("transports");
+        assertNotNull("HTTP 传输组存在（枚举值可捕获可分组）", transports.get("HTTP"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> ports =
+                (List<Map<String, Object>>) ((Map<String, Object>) transports.get("HTTP")).get("ports");
+        assertEquals(1, ports.size());
+        Map<String, Object> port = ports.get(0);
+        assertEquals("10.0.0.5:80", port.get("port"));
+        assertEquals(1L, port.get("txCount"));
+        assertEquals(1L, port.get("rxCount"));
+        assertEquals(1L, port.get("errorCount"));
+    }
+
+    @Test
     public void getFrameReturnsEventOrNull() {
         fill("p1", 3);
         assertNotNull("环内 seq 可查", buffer.getFrame(2));
@@ -141,16 +184,16 @@ public class CommTraceBufferTest {
         buffer.error(CommTraceTransport.SERIAL, "p1");
         buffer.error(CommTraceTransport.SERIAL, "p1");
 
-        java.util.Map<String, Object> overview = buffer.overview();
+        Map<String, Object> overview = buffer.overview();
         @SuppressWarnings("unchecked")
-        java.util.Map<String, Object> serial =
-                (java.util.Map<String, Object>) overview.get("transports");
+        Map<String, Object> serial =
+                (Map<String, Object>) overview.get("transports");
         assertNotNull("SERIAL 组存在", serial.get("SERIAL"));
         @SuppressWarnings("unchecked")
-        java.util.List<java.util.Map<String, Object>> ports =
-                (java.util.List<java.util.Map<String, Object>>) ((java.util.Map<String, Object>) serial.get("SERIAL")).get("ports");
+        List<Map<String, Object>> ports =
+                (List<Map<String, Object>>) ((Map<String, Object>) serial.get("SERIAL")).get("ports");
         assertEquals(1, ports.size());
-        java.util.Map<String, Object> p1 = ports.get(0);
+        Map<String, Object> p1 = ports.get(0);
         assertEquals(1L, p1.get("txCount"));
         assertEquals(1L, p1.get("rxCount"));
         assertEquals(2L, p1.get("errorCount"));
