@@ -53,8 +53,14 @@ import java.util.function.LongSupplier;
  * 按「本口最近一次带设备键 TX + 新鲜度窗口」回填归属——串口源锁纪律下同口至多一笔在飞事务，
  * RX=最近 TX 的应答，归属结构性成立；无 TX / 窗口过期 / unsolicited 推送保持 null（如实）。
  *
- * <p>容量经 {@code ecat.commtrace.capacity} 系统属性配置，默认 50_000 帧（约
- * 50k × ~300B ≈ 15MB 稳态上限）；回填窗口经 {@code ecat.commtrace.rx-attrib-window-ms} 配置
+ * <p>归属合成次序（资源归属登记工单 W2）：带 {@link ResourceOwner} 的 tx/rx 重载是权威入口——
+ * 设备三字段（id/name/coordinate）整组取 owner.mdcEntries() 投影，压线程 MDC 与回填且不逐字段
+ * 混搭（owner 缺的维度如实 null）；无 owner 重载走既有 MDC &gt; 回填 &gt; null 路径不变；
+ * 带 owner 的 TX 同样写入本口设备上下文，供后续无 owner RX 回填。
+ *
+ * <p>容量经 {@code ecat.commtrace.capacity} 系统属性配置，默认 2_000 帧（全传输共享环，
+ * 按 100-200 帧/分搅动保 ~10 分钟事故现场，约 2_000 × ~800B ≈ 1.6MB 稳态上限）；
+ * 回填窗口经 {@code ecat.commtrace.rx-attrib-window-ms} 配置
  * （EcatConfig 集中读取），默认 30s。
  *
  * @author coffee
@@ -66,10 +72,16 @@ public final class CommTraceBuffer implements AutoCloseable {
     public static final String MDC_DEVICE_ID_KEY = MdcContext.DEVICE_ID_KEY;
     public static final String MDC_DEVICE_NAME_KEY = MdcContext.DEVICE_NAME_KEY;
 
-    private static final int DEFAULT_CAPACITY = 50_000;
+    private static final int DEFAULT_CAPACITY = 2_000;
 
     private static final class Holder {
-        static final CommTraceBuffer INSTANCE = new CommTraceBuffer(
+        static final CommTraceBuffer INSTANCE = createDefault();
+    }
+
+    /** 默认实例构造：容量经 {@code ecat.commtrace.capacity} 系统属性覆盖，缺省
+     *  DEFAULT_CAPACITY。独立方法（非 Holder 内联）便于测试设置属性后走同一构造路径。 */
+    static CommTraceBuffer createDefault() {
+        return new CommTraceBuffer(
                 Integer.getInteger("ecat.commtrace.capacity", DEFAULT_CAPACITY));
     }
 
@@ -157,27 +169,55 @@ public final class CommTraceBuffer implements AutoCloseable {
     /** 捕获一帧 TX。payload 截断为事件内副本，调用方数组可复用。 */
     public void tx(CommTraceTransport transport, String portId, byte[] payload, String txnId) {
         append(transport, portId, CommTraceDirection.TX, payload,
-                payload != null ? payload.length : 0, txnId, null);
+                payload != null ? payload.length : 0, txnId, null, null);
     }
 
     /** 捕获一帧 TX（length 独立于 payload 长度：调用方为免整包拷贝可只填前缀字节，
      *  真实全长经 length 记账——与 {@link #rx(CommTraceTransport, String, byte[], int, String, Double)}
      *  同语义：前缀须覆盖 min(length, 截断上限) 字节）。 */
     public void tx(CommTraceTransport transport, String portId, byte[] payload, int length, String txnId) {
-        append(transport, portId, CommTraceDirection.TX, payload, length, txnId, null);
+        append(transport, portId, CommTraceDirection.TX, payload, length, txnId, null, null);
     }
 
     /** 捕获一帧 RX（带与 TX 配对的 txnId 和响应耗时）。 */
     public void rx(CommTraceTransport transport, String portId, byte[] payload, String txnId,
             Double durationMillis) {
         append(transport, portId, CommTraceDirection.RX, payload,
-                payload != null ? payload.length : 0, txnId, durationMillis);
+                payload != null ? payload.length : 0, txnId, durationMillis, null);
     }
 
     /** 捕获一帧 RX（length 独立于 payload 长度，读缓冲按有效长度截断）。 */
     public void rx(CommTraceTransport transport, String portId, byte[] data, int length,
             String txnId, Double durationMillis) {
-        append(transport, portId, CommTraceDirection.RX, data, length, txnId, durationMillis);
+        append(transport, portId, CommTraceDirection.RX, data, length, txnId, durationMillis, null);
+    }
+
+    // ===== owner 权威入口（资源归属登记工单 W2）：归属合成次序 owner > MDC > 回填 =====
+
+    /** 捕获一帧 TX（权威归属：owner 设备三字段整组投影，不读线程 MDC）。 */
+    public void tx(CommTraceTransport transport, String portId, byte[] payload, String txnId,
+            ResourceOwner owner) {
+        append(transport, portId, CommTraceDirection.TX, payload,
+                payload != null ? payload.length : 0, txnId, null, owner);
+    }
+
+    /** 捕获一帧 TX（length 独立记账 + 权威归属 owner）。 */
+    public void tx(CommTraceTransport transport, String portId, byte[] payload, int length,
+            String txnId, ResourceOwner owner) {
+        append(transport, portId, CommTraceDirection.TX, payload, length, txnId, null, owner);
+    }
+
+    /** 捕获一帧 RX（权威归属：owner 整组投影压线程 MDC 与回填）。 */
+    public void rx(CommTraceTransport transport, String portId, byte[] payload, String txnId,
+            Double durationMillis, ResourceOwner owner) {
+        append(transport, portId, CommTraceDirection.RX, payload,
+                payload != null ? payload.length : 0, txnId, durationMillis, owner);
+    }
+
+    /** 捕获一帧 RX（length 独立记账 + 权威归属 owner）。 */
+    public void rx(CommTraceTransport transport, String portId, byte[] data, int length,
+            String txnId, Double durationMillis, ResourceOwner owner) {
+        append(transport, portId, CommTraceDirection.RX, data, length, txnId, durationMillis, owner);
     }
 
     /** 记一次通道错误（写失败/传输异常；不产生帧，只累计 per-port 错误计数）。 */
@@ -187,22 +227,35 @@ public final class CommTraceBuffer implements AutoCloseable {
     }
 
     private void append(CommTraceTransport transport, String portId, CommTraceDirection dir,
-            byte[] payload, int length, String txnId, Double durationMillis) {
+            byte[] payload, int length, String txnId, Double durationMillis, ResourceOwner owner) {
         if (closed.get() || payload == null) {
             return;
         }
         long tsMicros = clockMicros.getAsLong();
-        // MDC 继承：coordinate 由引擎/组件层设置；设备维度键由轮询链起链线程的 DeviceMdcContext 设置
-        String coordinate = MDC.get(MdcContext.INTEGRATION_COORDINATE_KEY);
-        String deviceId = MDC.get(MDC_DEVICE_ID_KEY);
-        String deviceName = MDC.get(MDC_DEVICE_NAME_KEY);
+        String coordinate;
+        String deviceId;
+        String deviceName;
+        if (owner != null) {
+            // 权威入口：三字段整组取 owner.mdcEntries() 投影（与日志 enrichment 同刻同源），
+            // 不读线程 MDC——中间层线程（SDK worker）常驻无关设备键，逐字段混搭会张冠李戴；
+            // owner 缺的维度如实 null（ENTRY/LEGACY 层无设备身份），也不用回填补
+            Map<String, String> ownerEntries = owner.mdcEntries();
+            deviceId = ownerEntries.get(MdcContext.DEVICE_ID_KEY);
+            deviceName = ownerEntries.get(MdcContext.DEVICE_NAME_KEY);
+            coordinate = ownerEntries.get(MdcContext.INTEGRATION_COORDINATE_KEY);
+        } else {
+            // MDC 继承：coordinate 由引擎/组件层设置；设备维度键由轮询链起链线程的 DeviceMdcContext 设置
+            coordinate = MDC.get(MdcContext.INTEGRATION_COORDINATE_KEY);
+            deviceId = MDC.get(MDC_DEVICE_ID_KEY);
+            deviceName = MDC.get(MDC_DEVICE_NAME_KEY);
+        }
         String key = portKey(transport, portId);
         if (dir == CommTraceDirection.TX) {
             // 带键 TX 记录本口设备上下文：先记后入环，使与并发 RX 的竞态窗内 RX 能看到（读到旧值亦有效）
             if (deviceId != null || deviceName != null) {
                 lastTxDevice.put(key, new PortDeviceCtx(deviceId, deviceName, coordinate, tsMicros));
             }
-        } else if (deviceId == null && deviceName == null) {
+        } else if (owner == null && deviceId == null && deviceName == null) {
             // 读线程（serial sweeper/tcp selector）无任务 MDC：按本口最近带键 TX 回填。
             // 串口源锁纪律下同口至多一笔在飞事务，RX=最近 TX 的应答，归属结构性成立；
             // 无 TX/窗口过期不回填（unsolicited 推送如实保持 null）。

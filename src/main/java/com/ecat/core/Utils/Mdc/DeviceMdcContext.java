@@ -16,20 +16,35 @@
 
 package com.ecat.core.Utils.Mdc;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.slf4j.MDC;
 
+import com.ecat.core.CommTrace.ResourceOwner;
 import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Device.RemovalHost;
+import com.ecat.core.Integration.IntegrationBase;
 
 /**
- * 设备维度 MDC 上下文 scope（工单 G：通讯追踪设备归属注入）。
+ * 设备维度 MDC 上下文 scope（工单 G：通讯追踪设备归属注入；资源归属登记工单升级注入源）。
  *
  * <p><b>应用场景</b>：传输 SDK（serial/modbus/tcp/httpserver）的轮询周期链在
  * {@code chain.start()} 处对提交线程 MDC 做全量快照、逐轮恢复——本 scope 在起链处把
  * 设备标识写入当前线程 MDC，使后续每轮轮询（及其经 MdcExecutorService 派生的 IO 线程）
  * 的日志与通讯帧捕获（CommTraceBuffer）自动携带设备归属，无需任何逐轮开销。
+ *
+ * <p><b>注入源两级</b>（D1'：owner 单一真相源，升级在注入端不在消费端）：
+ * <ul>
+ *   <li>{@link #scopeOf(ResourceOwner)}——权威路径：键集由 owner.mdcEntries() 按 level
+ *       派发（DEVICE→设备三键 / ENTRY→entry+coordinate / INTEGRATION→coordinate /
+ *       LEGACY→rawIdentity）。owner 已过账本级构造校验，键集恒一致；日志 enrichment
+ *       与帧归因同一真相源，id/name 同刻同源。</li>
+ *   <li>{@link #scopeOf(RemovalHost)}——宿主路径（轮询 SDK 既有调用面）：按宿主类型
+ *       派发——DeviceBase→设备三键、IntegrationBase→coordinate（推送/上报链路的升级
+ *       收益）、其余宿主（测试假宿主）no-op 容忍。MDC 路径不适用账本级严格失败：
+ *       设备缺 name/coordinate 时省键注入（id 恒有），不抛。</li>
+ * </ul>
  *
  * <p><b>为什么是 scope 而非裸 put</b>：起链线程（ConfigFlow/看门狗 worker）是复用线程，
  * 设备键泄漏会污染同线程后续无关注入——try-with-resources 保证异常路径也恢复先前置。
@@ -46,14 +61,40 @@ public final class DeviceMdcContext {
     }
 
     /**
-     * 按宿主取 scope：宿主是设备（传输 SDK 轮询工厂的 {@code RemovalHost host} 形参）
-     * 时注入设备键；非设备宿主（测试假宿主等）返回 no-op scope——调用方无需 instanceof 分支。
+     * 按宿主取 scope（轮询 SDK 的 {@code RemovalHost host} 形参调用面）：
+     * DeviceBase→设备三键；IntegrationBase→coordinate；非设备/集成宿主（测试假宿主等）
+     * 返回 no-op scope——调用方无需 instanceof 分支。null 宿主同 no-op（防御显式命名）。
      */
     public static Scope scopeOf(RemovalHost host) {
         if (host instanceof DeviceBase) {
             return scope((DeviceBase) host);
         }
+        if (host instanceof IntegrationBase) {
+            String coordinate = ((IntegrationBase) host).getCoordinate();
+            if (coordinate == null) {
+                // onLoad 前无 coordinate：容忍不注入（MDC 路径不适用账本级严格失败）
+                return NO_OP;
+            }
+            Map<String, String> entries = new LinkedHashMap<>();
+            entries.put(MdcContext.INTEGRATION_COORDINATE_KEY, coordinate);
+            return new Scope(entries);
+        }
         return NO_OP;
+    }
+
+    /**
+     * 按 owner 取 scope（权威路径）：键集整体取 {@link ResourceOwner#mdcEntries()} 派发，
+     * 不与宿主路径混搭。null owner 或空键集 no-op（防御显式命名，不猜）。
+     */
+    public static Scope scopeOf(ResourceOwner owner) {
+        if (owner == null) {
+            return NO_OP;
+        }
+        Map<String, String> entries = owner.mdcEntries();
+        if (entries.isEmpty()) {
+            return NO_OP;
+        }
+        return new Scope(entries);
     }
 
     /**
@@ -76,15 +117,27 @@ public final class DeviceMdcContext {
         private final boolean noOp;
 
         private Scope(DeviceBase device) {
+            this(buildDeviceEntries(device));
+        }
+
+        /** 通用键集 scope：entries 值恒非 null（构建方保证，MDC 不接受 null 值）。 */
+        private Scope(Map<String, String> entries) {
             this.previous = MDC.getCopyOfContextMap();
             this.noOp = false;
-            MDC.put(MdcContext.DEVICE_ID_KEY, device.getId());
+            entries.forEach(MDC::put);
+        }
+
+        /** 设备三键构建（容忍路径：name/coordinate 缺失省键，id 恒有）。 */
+        private static Map<String, String> buildDeviceEntries(DeviceBase device) {
+            Map<String, String> entries = new LinkedHashMap<>();
+            entries.put(MdcContext.DEVICE_ID_KEY, device.getId());
             if (device.getName() != null) {
-                MDC.put(MdcContext.DEVICE_NAME_KEY, device.getName());
+                entries.put(MdcContext.DEVICE_NAME_KEY, device.getName());
             }
             if (device.getCoordinate() != null) {
-                MDC.put(MdcContext.INTEGRATION_COORDINATE_KEY, device.getCoordinate());
+                entries.put(MdcContext.INTEGRATION_COORDINATE_KEY, device.getCoordinate());
             }
+            return entries;
         }
 
         private Scope() {

@@ -70,6 +70,14 @@ public final class MdcContext {
     public static final String DEVICE_NAME_KEY = "device.name";
 
     /**
+     * entry 维度与归属占位键名（资源归属登记工单补齐，命名沿用本键族"实体.属性"法）：
+     * entry.id 由 ENTRY 层 ResourceOwner 注入；owner.rawIdentity 由 LEGACY 层兼容占位
+     * owner 注入（旧签名自由串原样呈现，不伪造结构身份）。
+     */
+    public static final String ENTRY_ID_KEY = "entry.id";
+    public static final String OWNER_RAW_IDENTITY_KEY = "owner.rawIdentity";
+
+    /**
      * 私有构造函数，防止实例化
      */
     private MdcContext() {

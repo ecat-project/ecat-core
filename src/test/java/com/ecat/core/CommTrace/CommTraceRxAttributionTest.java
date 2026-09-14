@@ -20,6 +20,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -33,6 +34,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.MDC;
 
+import com.ecat.core.ConfigEntry.ConfigEntry;
+import com.ecat.core.Device.DeviceBase;
 import com.ecat.core.Utils.Mdc.MdcContext;
 
 /**
@@ -120,6 +123,104 @@ public class CommTraceRxAttributionTest {
         CommTraceEvent rx = lastFrame();
         assertEquals("无键 TX 不覆盖本口已记录的设备上下文", "dev-1", rx.getDeviceId());
         assertEquals("一号设备", rx.getDeviceName());
+    }
+
+    // ========== owner 权威入口（W2）：合成次序 owner > 线程 MDC > 回填 ==========
+
+    /** 最小设备桩：device(...) 工厂的展示宿主形态（仅供设备名现取）。 */
+    private static final class NamedDevice extends DeviceBase {
+        NamedDevice(String name) {
+            super(new ConfigEntry(), "named-" + name, Collections.singletonMap("name", (Object) name));
+        }
+
+        @Override
+        public void init() {
+        }
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void stop() {
+        }
+
+        @Override
+        public void release() {
+        }
+    }
+
+    private static final String COORD_B = "com.ecat:integration-b";
+
+    @Test
+    public void ownerRxBeatsThreadMdc() {
+        // 中间层线程常驻无关设备键（SDK worker）：owner 整组压线程 MDC
+        withDeviceMdc("dev-1", "一号设备", "com.ecat:integration-a");
+        ResourceOwner owner = ResourceOwner.device(COORD_B, "ent-9", "dev-9");
+
+        buffer.rx(CommTraceTransport.SERIAL, "/dev/ttyUSB30", new byte[]{2}, null, null, owner);
+
+        CommTraceEvent rx = lastFrame();
+        assertEquals("owner deviceId 压线程 MDC", "dev-9", rx.getDeviceId());
+        assertEquals("owner coordinate 压线程 MDC", COORD_B, rx.getCoordinate());
+        assertNull("owner 无 name 则如实 null（MDC 的 name 不混入）", rx.getDeviceName());
+    }
+
+    @Test
+    public void ownerRxBeatsBackfill() {
+        withDeviceMdc("dev-1", "一号设备", "com.ecat:integration-a");
+        buffer.tx(CommTraceTransport.SERIAL, "/dev/ttyUSB31", new byte[]{1}, null);
+        MDC.clear();
+        ResourceOwner owner = ResourceOwner.device(COORD_B, "ent-9", "dev-9");
+
+        // 同口最近 TX 记的是 dev-1，但 owner 明示 dev-9：权威压回填
+        buffer.rx(CommTraceTransport.SERIAL, "/dev/ttyUSB31", new byte[]{2}, null, null, owner);
+
+        CommTraceEvent rx = lastFrame();
+        assertEquals("owner 压本口回填", "dev-9", rx.getDeviceId());
+        assertEquals(COORD_B, rx.getCoordinate());
+    }
+
+    @Test
+    public void ownerGroupIsIntegralNoPerFieldMixing() {
+        // ENTRY 层 owner（无设备字段）：deviceId/name 必须如实 null——若按字段级
+        // 「owner 缺则取 MDC」混搭，线程 MDC 的 dev-1/一号设备 会张冠李戴进本帧
+        withDeviceMdc("dev-1", "一号设备", "com.ecat:integration-a");
+        ResourceOwner owner = ResourceOwner.entry(COORD_B, "ent-9");
+
+        buffer.rx(CommTraceTransport.SERIAL, "/dev/ttyUSB32", new byte[]{2}, null, null, owner);
+
+        CommTraceEvent rx = lastFrame();
+        assertNull("ENTRY 层 owner 无设备身份，不得混入 MDC 的 deviceId", rx.getDeviceId());
+        assertNull(rx.getDeviceName());
+        assertEquals("coordinate 是 owner 与 MDC 共有维度，整组取 owner", COORD_B, rx.getCoordinate());
+    }
+
+    @Test
+    public void ownerSuppliesNameWhenMdcEmpty() {
+        MDC.clear();
+        ResourceOwner owner = ResourceOwner.device(COORD_B, "ent-9", "dev-9", new NamedDevice("九号设备"));
+
+        buffer.rx(CommTraceTransport.SERIAL, "/dev/ttyUSB33", new byte[]{2}, null, null, owner);
+
+        CommTraceEvent rx = lastFrame();
+        assertEquals("dev-9", rx.getDeviceId());
+        assertEquals("宿主现取名经 owner 投影进帧", "九号设备", rx.getDeviceName());
+        assertEquals(COORD_B, rx.getCoordinate());
+    }
+
+    @Test
+    public void ownerTxFeedsBackfillForLaterOwnerlessRx() {
+        MDC.clear();
+        ResourceOwner owner = ResourceOwner.device(COORD_B, "ent-9", "dev-9");
+        buffer.tx(CommTraceTransport.SERIAL, "/dev/ttyUSB34", new byte[]{1}, null, owner);
+        assertEquals("带 owner TX 帧自带归属", "dev-9", lastFrame().getDeviceId());
+
+        buffer.rx(CommTraceTransport.SERIAL, "/dev/ttyUSB34", new byte[]{2}, null, null);
+
+        CommTraceEvent rx = lastFrame();
+        assertEquals("带 owner TX 写入本口设备上下文：无 owner RX 回填成立", "dev-9", rx.getDeviceId());
+        assertEquals(COORD_B, rx.getCoordinate());
     }
 
     @Test

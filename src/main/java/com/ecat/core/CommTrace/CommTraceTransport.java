@@ -31,5 +31,11 @@ public enum CommTraceTransport {
     /** 原生 TCP 客户端（ReconnectTcpClient，portId=host:port）。 */
     TCP_CLIENT,
     /** HTTP 客户端（httpserver 仓 EasyHttpClient SDK 层捕获，覆盖全部已迁/将迁 HTTP 集成；portId=host:port，缺省端口补全 80/443）。 */
-    HTTP
+    HTTP,
+    /** TCP 服务端入站/出站（tcp 库 server 连接捕获，portId=监听口+remote 对端；被动侧归因=server owner 直读）。 */
+    TCP_SERVER,
+    /** HTTP 服务端入站请求/响应（httpserver 库入站捕获；只记元数据不记 body，凭据类头禁入环，portId=ip:port）。 */
+    HTTP_SERVER,
+    /** MQTT 链路（mqtt 库 broker 侧消息与 client 句柄收发双面捕获，portId=clientId/topic）。 */
+    MQTT
 }

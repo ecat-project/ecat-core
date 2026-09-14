@@ -72,6 +72,32 @@ public class CommTraceBufferTest {
     }
 
     @Test
+    public void defaultCapacity2000AndSystemPropertyOverride() {
+        // 缺省 2_000：全传输共享环的内存预算锚点（~800B/条 ≈ 1.6MB），先清属性保证断言不受
+        // 外部 -D 注入干扰；覆盖路径走生产同一 createDefault() 构造（非测试旁路）
+        System.clearProperty("ecat.commtrace.capacity");
+        CommTraceBuffer def = CommTraceBuffer.createDefault();
+        int defaultCapacity;
+        try {
+            defaultCapacity = ((Number) def.overview().get("capacity")).intValue();
+        } finally {
+            def.close();
+        }
+        assertEquals("环默认容量 2_000", 2_000, defaultCapacity);
+
+        System.setProperty("ecat.commtrace.capacity", "7");
+        CommTraceBuffer overridden = CommTraceBuffer.createDefault();
+        int overriddenCapacity;
+        try {
+            overriddenCapacity = ((Number) overridden.overview().get("capacity")).intValue();
+        } finally {
+            overridden.close();
+            System.clearProperty("ecat.commtrace.capacity");
+        }
+        assertEquals("ecat.commtrace.capacity 覆盖生效", 7, overriddenCapacity);
+    }
+
+    @Test
     public void filterByTransportPortDir() {
         buffer.tx(CommTraceTransport.SERIAL, "p1", new byte[]{1}, null);
         buffer.rx(CommTraceTransport.SERIAL, "p1", new byte[]{2}, null, null);
@@ -117,27 +143,39 @@ public class CommTraceBufferTest {
     }
 
     @Test
-    public void payloadTruncatedAt256AndOriginalLengthKept() {
-        byte[] big = new byte[1000];
-        for (int i = 0; i < big.length; i++) {
-            big[i] = (byte) i;
-        }
-        buffer.tx(CommTraceTransport.SERIAL, "p1", big, null);
-        CommTraceEvent e = buffer.query(CommTraceFilter.all(), 1, 0).get(0);
-        assertEquals("截断到 256B", 256, e.getPayload().length);
-        assertEquals("原始全长保留", 1000, e.getOriginalLength());
-        assertTrue(e.isTruncated());
+    public void payloadTruncationBoundaryAt500() {
+        // 截断上限 500B（装下一个完整协议帧：Modbus 全帧 256/260B、HJ212 典型 300-600B）
+        buffer.tx(CommTraceTransport.SERIAL, "p1", new byte[499], null);
+        buffer.tx(CommTraceTransport.SERIAL, "p1", new byte[500], null);
+        buffer.tx(CommTraceTransport.SERIAL, "p1", new byte[501], null);
+        List<CommTraceEvent> frames = buffer.query(CommTraceFilter.all(), 3, 0);
+        assertEquals(3, frames.size());
+
+        CommTraceEvent under = frames.get(0);
+        assertEquals("499B 不截断", 499, under.getPayload().length);
+        assertEquals(499, under.getOriginalLength());
+        assertFalse(under.isTruncated());
+
+        CommTraceEvent atLimit = frames.get(1);
+        assertEquals("500B 恰在上限不截断", 500, atLimit.getPayload().length);
+        assertEquals(500, atLimit.getOriginalLength());
+        assertFalse(atLimit.isTruncated());
+
+        CommTraceEvent over = frames.get(2);
+        assertEquals("501B 截断到 500B", 500, over.getPayload().length);
+        assertEquals("原始全长保留", 501, over.getOriginalLength());
+        assertTrue(over.isTruncated());
     }
 
     @Test
     public void txWithIndependentLengthTruncatesAndKeepsOriginalLength() {
-        // HTTP 埋点形态：编码器为避免整包拷贝只填前缀字节（前缀覆盖 min(length,256) 契约），
+        // HTTP 埋点形态：编码器为避免整包拷贝只填前缀字节（前缀覆盖 min(length,截断上限) 契约），
         // 真实全长经 length 传入（与 rx(data, length) 同语义）——isTruncated 按 length 判定
-        byte[] prefix = new byte[256];
+        byte[] prefix = new byte[500];
         System.arraycopy("GET /api HTTP/1.1".getBytes(), 0, prefix, 0, 17);
         buffer.tx(CommTraceTransport.HTTP, "h:80", prefix, 5000, "http-1");
         CommTraceEvent e = buffer.query(CommTraceFilter.all(), 1, 0).get(0);
-        assertEquals("payload 截断到上限 256", 256, e.getPayload().length);
+        assertEquals("payload 截断到上限 500", 500, e.getPayload().length);
         assertEquals("原始全长按 length 记账", 5000, e.getOriginalLength());
         assertTrue("全长大于前缀须标记截断", e.isTruncated());
 

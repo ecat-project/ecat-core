@@ -22,7 +22,8 @@ import java.nio.charset.StandardCharsets;
  * 通讯帧捕获事件（不可变）。环内只存本对象（payload 已截断的副本），hex/ascii 渲染
  * 是纯派生计算、按需在读端点调用——环内不预渲染，写热路径不为渲染付代价。
  *
- * <p>payload 截断上限 256 字节；{@link #getOriginalLength()} 保留原始全长，
+ * <p>payload 截断上限 500 字节（装下一个完整协议帧：Modbus 全帧 256/260B、HJ212 典型
+ * 300-600B）——协议排障价值在帧内容完整；{@link #getOriginalLength()} 保留原始全长，
  * {@link #isTruncated()} 标记是否截断。
  *
  * <p>设备上下文（deviceId/deviceName/coordinate）在捕获点从 MDC 继承（引擎已设
@@ -31,8 +32,8 @@ import java.nio.charset.StandardCharsets;
  * @author coffee
  */
 public final class CommTraceEvent {
-    /** payload 截断上限（字节）。 */
-    public static final int MAX_PAYLOAD_BYTES = 256;
+    /** payload 截断上限（字节）：500 = 装下一个完整协议帧（Modbus 全帧 256/260B、HJ212 典型 300-600B）。 */
+    public static final int MAX_PAYLOAD_BYTES = 500;
 
     private final long seq;
     private final long tsMicros;
