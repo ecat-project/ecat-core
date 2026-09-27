@@ -228,15 +228,28 @@ public class ConfigFlowService {
         String flowId = flow.getFlowId();
         if (result.getType() == ConfigFlowResult.ResultType.CREATE_ENTRY
                 || result.getType() == ConfigFlowResult.ResultType.REMOVE_ENTRY) {
+            // 持久化先于 finish：终态副作用可能失败，失败时流程必须还活着
+            ConfigFlowInstance instance = buildInstance(flow, result);
+            try {
+                applyTerminalResult(instance);
+            } catch (ConfigEntryRegistry.DuplicateUniqueIdException e) {
+                // 持久化点身份冲突（确认屏首屏排重后、提交前的并发窗口）：与 handleStep 期
+                // 冲突走 ABORT 不同，此时用户已走完全部步骤，不能弃流程——以 null 输入重驱
+                // 当前步（handleStep(null)=重显首屏的框架约定），flow 用自家约定把冲突错误
+                // 挂回表单（如确认屏 config_summary），响应与其它步校验失败同款
+                // （show_form+errors）：不裸 500、确认页错误仍在、未落新 entry、可回退修改。
+                log.warn("持久化身份冲突，保持流程存活并重显当前步: flowId={}, uniqueId={}, detail={}",
+                        flowId, e.getUniqueId(), e.getMessage());
+                return drive(flow, flow.getCurrentStep(), null);
+            }
             flowRegistry.finishActiveFlow(flowId);
             log.info("流程完成: flowId={}, type={}", flowId, result.getType());
+            return instance;
         } else if (result.getType() == ConfigFlowResult.ResultType.ABORT) {
             flowRegistry.abortActiveFlow(flowId);
             log.info("流程中止: flowId={}, reason={}", flowId, result.getReason());
         }
-        ConfigFlowInstance instance = buildInstance(flow, result);
-        applyTerminalResult(instance);
-        return instance;
+        return buildInstance(flow, result);
     }
 
     /**
@@ -247,7 +260,7 @@ public class ConfigFlowService {
      * @param providerCoordinate 提供者的 Maven coordinate (groupId:artifactId)
      */
     public ConfigFlowInstance startFlow(String providerCoordinate) {
-        return startFlow(providerCoordinate, null, FlowContextConfig.defaults());
+        return startFlow(providerCoordinate, null, null);
     }
 
     /**
@@ -259,16 +272,16 @@ public class ConfigFlowService {
      * @param initialData 初始上下文数据（可为 null）
      */
     public ConfigFlowInstance startFlow(String providerCoordinate, Map<String, Object> initialData) {
-        return startFlow(providerCoordinate, initialData, FlowContextConfig.defaults());
+        return startFlow(providerCoordinate, initialData, null);
     }
 
     /**
-     * 启动指定集成的配置流程（注入行为配置）。
-     * <p>业务驱动 flow（如 env-air-device-manager）用此重载开启 last-writer-win 等：
-     * 经 {@link FlowContextConfig} 传入，避免给 startFlow 叠加多个布尔参数（后期扩展只改配置类）。
+     * 启动指定集成的配置流程（显式注入行为配置，覆盖入口默认）。
+     * <p>经 {@link FlowContextConfig} 传入，避免给 startFlow 叠加多个布尔参数（后期扩展只改配置类）。
+     * 显式配置（含显式关闭 last-writer-win 的 {@link FlowContextConfig#defaults()}）被尊重、不被入口默认覆盖。
      *
      * @param providerCoordinate 提供者 coordinate
-     * @param config             行为配置（null 走默认）；见 {@link FlowContextConfig}
+     * @param config             行为配置；null 走 USER 入口默认（last-writer-win）；见 {@link FlowContextConfig}
      */
     public ConfigFlowInstance startFlow(String providerCoordinate, FlowContextConfig config) {
         return startFlow(providerCoordinate, null, config);
@@ -293,9 +306,12 @@ public class ConfigFlowService {
         }
         // setup：coordinate + 行为配置 + 预填初始数据（sourceType 默认 USER → startStepId 路由到 userStep）
         flow.getContext().setCoordinate(providerCoordinate);
-        if (config != null) {
-            flow.getContext().setConfig(config);
-        }
+        // USER 源向导入口默认 last-writer-win（2026-09-26 裁决）：45 仓设备向导在 SN 步尽早 setEntryUniqueId
+        // 占坑，用户 abandon 后 30min TTL 窗内同 SN 重试是正常路径——新向导顶替（abort）泄漏的旧向导，
+        // 而非误报「设备已存在」。显式传 config（含显式关闭 LWW）尊重传入不被覆盖；
+        // 持久化 entry 冲突不受此 flag 影响、仍 fail-loud；discovery/RECONFIGURE 不经本入口不受影响。
+        flow.getContext().setConfig(config != null
+                ? config : FlowContextConfig.builder().lastWriterWins(true).build());
         if (initialData != null && !initialData.isEmpty()) {
             flow.getContext().getEntryData().putAll(initialData);
         }

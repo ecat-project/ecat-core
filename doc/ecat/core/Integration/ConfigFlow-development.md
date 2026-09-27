@@ -110,13 +110,15 @@ public abstract class AbstractConfigFlow {
 
 ### 3.2 ConfigFlowResult
 
-流程执行结果，包含三种类型：
+流程执行结果，包含五种类型：
 
 | 类型 | 说明 | 使用场景 |
 |------|------|---------|
 | `SHOW_FORM` | 显示表单 | 需要用户输入 |
 | `CREATE_ENTRY` | 创建配置条目 | 流程完成 |
 | `ABORT` | 中止流程 | 发生错误 |
+| `REMOVE_ENTRY` | 删除已有配置条目 | 流程内删除设备 |
+| `SUBFLOW_COMPLETE` | 子 flow 出口信号 | 子 flow 完成交回宿主：仅由 `registerFlowStep` 包装器翻译为 `handleStep(尾步, null)`，不允许逃逸到驱动层 |
 
 ### 3.3 ConfigItem 类型系统
 

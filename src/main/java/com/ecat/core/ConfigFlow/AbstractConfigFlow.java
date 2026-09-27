@@ -580,6 +580,69 @@ public abstract class AbstractConfigFlow {
         this.registry = registry;
     }
 
+    // ========== 子 flow 挂载（组合） ==========
+
+    /**
+     * 把一个子 flow 的全部步骤挂载进本 flow（宿主）。
+     *
+     * <p>组合契约：
+     * <ul>
+     *   <li>sub 须为 {@link AbstractSubConfigFlow} 子类——入口已显式声明（registerStepEntry）、
+     *       结构禁令已在构造期生效，本方法不再重复校验。</li>
+     *   <li>子 flow 步骤的落盘直接写进宿主 context（挂载时注入 + 包装器每次调用前同步）。</li>
+     *   <li>子 flow 尾步 return subFlowComplete() → 自动翻译为 handleStep(tailStepId, null)，
+     *       即再驱动宿主尾步（tail 步须能以 null 输入回显——与 goPrevious 同一惯例）。</li>
+     * </ul>
+     *
+     * @param sub        子 flow 实例（每个实例只允许挂载一次；不允许挂载自身）
+     * @param tailStepId 宿主侧尾步 stepId——子 flow 完成后落到哪一步（须已注册）
+     * @return 子 flow 入口步 stepId（sub 构造器 registerStepEntry 的声明值），宿主用它进入子 flow
+     * @throws IllegalArgumentException sub 为 null 或子 flow 自身
+     * @throws IllegalStateException 其他校验失败（已挂载/未声明入口/尾步未注册/stepId 冲突）
+     */
+    public String registerFlowStep(AbstractSubConfigFlow sub, String tailStepId) {
+        if (sub == null || sub == this) {
+            throw new IllegalArgumentException("sub flow 不能为 null 或自身");
+        }
+        if (sub.mounted) {
+            throw new IllegalStateException("该子 flow 已被挂载（一个实例只允许挂进一个宿主）: "
+                    + sub.getClass().getSimpleName());
+        }
+        if (sub.entryStepId == null) {
+            throw new IllegalStateException("子 flow 未声明入口步——构造器内须调用 registerStepEntry: "
+                    + sub.getClass().getSimpleName());
+        }
+        if (tailStepId == null || !stepDefinitions.containsKey(tailStepId)) {
+            throw new IllegalStateException("尾步尚未注册——请先注册宿主自己的步骤，再挂载子 flow: " + tailStepId);
+        }
+        for (Map.Entry<String, StepDefinition> e : sub.stepDefinitions.entrySet()) {
+            if (stepDefinitions.containsKey(e.getKey())) {
+                throw new IllegalStateException("stepId 与宿主已有步骤冲突: " + e.getKey());
+            }
+            stepDefinitions.put(e.getKey(), wrapSubStep(sub, e.getValue(), tailStepId));
+        }
+        sub.mounted = true;
+        sub.setContext(context);   // 注入宿主 context（包装器每次调用前还会同步一次，双保险）
+        return sub.entryStepId;
+    }
+
+    /**
+     * 子 flow 步骤包装器：调用前同步 context 与 sourceType；返回时翻译出口信号。
+     * SUBFLOW_COMPLETE → handleStep(tailStepId, null)（再驱动宿主尾步，与 goPrevious 同习语）。
+     */
+    private StepDefinition wrapSubStep(AbstractSubConfigFlow sub, StepDefinition def, String tailStepId) {
+        return new StepDefinition(input -> {
+            sub.setContext(context);           // 逐调用同步：即使未来出现 context 交换也保持正确
+            sub.setSourceType(getSourceType()); // 同步会话模式：service 的 setSourceType 只打在宿主实例上，
+                                                // 不同步则子 flow 的 getSourceType() 在 reconfigure 下错误返回 USER
+            ConfigFlowResult result = def.getHandler().apply(input);
+            if (result.getType() == ConfigFlowResult.ResultType.SUBFLOW_COMPLETE) {
+                return handleStep(tailStepId, null);
+            }
+            return result;
+        }, def.getStepInfo());
+    }
+
     // ========== 步骤数据操作（含 copy 逻辑，保留在 Flow 层） ==========
 
     /**

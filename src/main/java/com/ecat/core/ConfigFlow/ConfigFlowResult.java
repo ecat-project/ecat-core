@@ -26,12 +26,13 @@ import java.util.Map;
 /**
  * 配置流程结果容器（新版，仅支持 ConfigSchema）
  *
- * <p>封装配置流程执行的四种结果类型：
+ * <p>封装配置流程执行的五种结果类型：
  * <ul>
  *   <li>{@link ResultType#SHOW_FORM} - 显示表单</li>
  *   <li>{@link ResultType#CREATE_ENTRY} - 创建配置条目（流程完成）</li>
  *   <li>{@link ResultType#ABORT} - 中止流程</li>
  *   <li>{@link ResultType#REMOVE_ENTRY} - 删除已有配置条目</li>
+ *   <li>{@link ResultType#SUBFLOW_COMPLETE} - 子 flow 出口信号（驱动层不可见，见 {@link #subFlowComplete()}）</li>
  * </ul>
  *
  * <p>数据存储： 所有数据通过 {@link FlowContext} 统一管理，避免数据复制。
@@ -52,7 +53,11 @@ public class ConfigFlowResult {
         /** 中止流程 */
         ABORT,
         /** 删除已有配置条目 */
-        REMOVE_ENTRY
+        REMOVE_ENTRY,
+        /** 子 flow 完成：仅由 AbstractConfigFlow.registerFlowStep 的包装器翻译为
+         *  handleStep(尾步, null)，不允许逃逸到驱动层（service/controller 永远看不到它）。
+         *  泄漏时驱动层按非终态 no-op/fail-loud 处理，不会误持久化。 */
+        SUBFLOW_COMPLETE
     }
 
     /**
@@ -192,6 +197,20 @@ public class ConfigFlowResult {
      */
     public static ConfigFlowResult removeEntry(ConfigEntry entry, FlowContext context) {
         return new ConfigFlowResult(ResultType.REMOVE_ENTRY, null, null, null, context, null, entry);
+    }
+
+    /**
+     * 子 flow 出口信号。
+     *
+     * <p>构造后字段全 null——它是纯控制信号，不携带数据。仅由
+     * {@link AbstractSubConfigFlow#subFlowComplete()} 产生，经宿主
+     * {@link AbstractConfigFlow#registerFlowStep} 挂载时的包装器翻译为
+     * {@code handleStep(尾步, null)}，结构上不逃逸到驱动层。
+     *
+     * @return SUBFLOW_COMPLETE 类型的结果
+     */
+    public static ConfigFlowResult subFlowComplete() {
+        return new ConfigFlowResult(ResultType.SUBFLOW_COMPLETE, null, null, null, null, null, null);
     }
 
     /**

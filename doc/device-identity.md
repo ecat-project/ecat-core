@@ -107,6 +107,7 @@ ConfigEntry "网关 gw-001" (entryId=E1)
   - 缺身份字段的畸形 entry：创建时被表单拦、加载时被 schema 拒（明确报错），**不静默放行**。
   - 前提：改 load schema 必填前，确认所有存量 entry 已有该字段（否则像 sn-less legacy entry 一样 load fail，需先重建）。
 - **尽早排重**：`context.setEntryUniqueId(generateUniqueId(), isReconfigure)` 在**提交 uniqueId 决定字段的那个 step** 就调（不等 final_confirm），重名冲突早暴露、避免用户白填后续步。`FlowContext.setEntryUniqueId` 会查活跃 flow + 已存 entry 的 uniqueId 冲突。
+- **兜底：持久化点冲突不弃流程**：身份字段跨步/跨子 flow 晚齐备（排重只能挂确认屏首屏）的 flow，或首屏排重后、提交前的并发窗口，冲突会在持久化点（`ConfigEntryRegistry.createEntry`）收口——服务层捕获后以 null 输入重驱当前步，flow 首屏按自家约定把冲突错误挂回表单（如确认屏 config_summary），响应与其它步校验失败同款（show_form+errors）：不裸 500、确认页错误仍在、不落新 entry、流程保持存活可回退修改。flow 提交分支若直接 createEntry，须先重建身份+排重（参考 Hj212SensorConfigFlow.stepFinalConfirm）。
 - **reconfigure 复用旧 uniqueId**：身份不可变。reconfigure 时 `generateUniqueId` 返回被重配 entry 的原 uniqueId（查 `reconfigureEntryId`），不重算——防漂移。配合 reconfigure 时身份字段只读（如 SN readonly）。
 - **required 校验已收紧**：`AbstractConfigItem.validate` 的 required 不仅查 `null`，也查**空白串**（`value==null || (required && isBlankString(value))`）——堵住 API/脚本 POST 空 required 字段绕过前端 HTML5 的口子。
 
