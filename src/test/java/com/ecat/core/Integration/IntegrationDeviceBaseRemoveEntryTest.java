@@ -80,8 +80,9 @@ public class IntegrationDeviceBaseRemoveEntryTest {
 
     @Test
     public void removeEntry_doesNotDeleteStateDb_logicDeleteKeepsState() {
-        // 守护：逻辑删保留 state DB——removeEntry 不得调用 stateManager.removeDevice（物理删 state 文件）。
-        // deviceId 复原靠 matchIndex，与 state 无关；state 是设备历史，逻辑删应保留（与 disable 一致）。
+        // 守护：逻辑删保留 state——removeEntry 不得触碰持久化层（单库形态下 StateManager 无
+        // per-device 删除 API，任何交互都意味着越权写/关）。deviceId 复原靠 matchIndex，
+        // 与 state 无关；state 是设备历史，逻辑删应保留（与 disable 一致）。
         DeviceRegistry reg = new DeviceRegistry();
         StateManager stateManager = mock(StateManager.class);
         EcatCore core = mock(EcatCore.class);
@@ -95,6 +96,6 @@ public class IntegrationDeviceBaseRemoveEntryTest {
 
         integration.removeEntry(e1.getEntryId());
 
-        verify(stateManager, never()).removeDevice(any(DeviceBase.class));
+        verifyNoInteractions(stateManager);
     }
 }

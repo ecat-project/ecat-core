@@ -220,7 +220,6 @@ public class AttributeBasePersistenceTest {
         attr.setDevice(device);
 
         PersistedState state = new PersistedState();
-        state.version = 2;
         state.value = "GBW-E-0825";
         state.statusCode = 1;
         state.updateTimeEpochMs = 1787620333669L;

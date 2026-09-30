@@ -20,19 +20,15 @@ import java.time.Instant;
 
 /**
  * 属性持久化状态数据（不可变 AttrState 的精简映射，围绕 state 持久化）。
- * 通过 fastjson2 序列化为 JSON 存入 MapDB HTreeMap。
+ * 通过 fastjson2 序列化为 JSON 存入 MapDB states map。
  *
  * <p>不存 AttrState.valueType(Class) 和 context(EventContext)——运行时由 attr 重建，
  * 避免 Class 序列化要求类在 classpath、EventContext 瞬态落盘。
  *
- * <p>version 标识持久化结构版本；围绕 state 重设计前的旧数据（无 version 字段，
- * 反序列化为 0）在 restore 时识别并丢弃，不走迁移。
+ * <p>记录不携带版本字段：持久化结构版本治理在库级（StateManager 的 storeSchemaVersion
+ * 单轴策略 + StoreMigration 迁移链），打开库时统一判代，记录永远与当前代码同代。
  */
 public class PersistedState {
-
-    /** 持久化结构版本；旧数据（围绕 state 重设计前，JSON 无 version 字段）反序列化为 int 默认 0，
-     *  restore 时据此废弃。from() 写新数据时显式设 2。 */
-    public int version;
 
     /** 属性业务值（= state.value），Instant 归一为 epoch 毫秒（Long）保持读写对称 */
     public Object value;
@@ -54,7 +50,6 @@ public class PersistedState {
      */
     public static PersistedState from(AttrState<?> s) {
         PersistedState ps = new PersistedState();
-        ps.version = 2;  // 围绕 state 重设计后的新结构版本；version<2 的旧数据（含 F 前 version=1）restore 废弃
         Object persistValue = s.getValue();
         if (persistValue instanceof Instant) {
             persistValue = ((Instant) persistValue).toEpochMilli();

@@ -151,6 +151,7 @@ coherent 态）落盘，避免在 `updateValue` 内落盘存到「值新/状态�
 **前提：设备轮询路径必须调 `publicAttrsState()`**——否则该设备的属性 state 永不提交（既不上总线也不持久化）。
 极少数集成历史上不调 `publicAttrsState`（靠 `getState` 立即返回让数据对外可见），这些集成的数据属性默认非持久化，
 不受影响；但若要让它们的属性上总线/持久化，需补 `publicAttrsState()`。
+落盘后的库级布局、版本策略与崩溃恢复语义见同目录 state-persistence-design.md。
 
 ### 5.5 `device==null` 时不建 state（Placeholder 边界）
 

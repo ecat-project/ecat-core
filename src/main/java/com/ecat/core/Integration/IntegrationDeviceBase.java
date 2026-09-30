@@ -250,10 +250,6 @@ public abstract class IntegrationDeviceBase extends IntegrationBase implements I
         for (DeviceBase device : getAllDevices()) {
             stopWithManagedSweep(device);    // stop + 移除动作收尾（pause 后句柄不得残留；enable 后 onStart 重 start 重注册）
         }
-        // 关闭所有设备的持久化 DB（commit + close，保留文件）
-        if (core != null && core.getStateManager() != null) {
-            core.getStateManager().closeIntegrationDevices(devices.keySet());
-        }
     }
 
     /**

@@ -51,9 +51,9 @@ import com.ecat.core.Utils.LogFactory;
  *     AbstractBatchBusConsumer.shutdown() = 中断消费线程 + drain 队列残留 + buffer 尾批统一
  *     flush（该契约早已存在，缺的正是停机路径对它的调用）。①②产生的全部事件（含设备终态）
  *     在此落库，即「重启零丢尾」主干。</li>
- * <li><b>state-flush 状态持久化兜底</b>：StateManager.shutdown commit+close 剩余状态 DB
- *     （设备型集成的 DB 已在②各自关闭，此处兜底非设备型/直挂设备）。此阶段不中途放弃——
- *     未 close 的 DB 恰会丢要保的尾批，宁可超预算也跑完（超时仅 WARN 记录）。</li>
+ * <li><b>state-flush 状态持久化兜底</b>：StateManager.shutdown 最终 commit + close 单状态库
+ *     （全部设备共用一库，pause/设备收尾均不关库，此处是唯一关库点）。此阶段不中途放弃——
+ *     未 close 的库恰会丢要保的尾批，宁可超预算也跑完（超时仅 WARN 记录）。</li>
  * <li><b>release-integrations</b>：全部集成 onRelease——清日志上下文/类加载器映射等。放最后
  *     因为①~④的日志与集成定位依赖这些映射。</li>
  * <li><b>pools-shutdown</b>：TaskManager.shutdownAll——业务计时器 shutdownNow（若①未终止
