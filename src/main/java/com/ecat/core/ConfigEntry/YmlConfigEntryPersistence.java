@@ -18,6 +18,7 @@ package com.ecat.core.ConfigEntry;
 
 import com.ecat.core.ConfigFormatException;
 import com.ecat.core.FormatVersion;
+import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Utils.DateTimeUtils;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
@@ -124,7 +125,7 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
                     .append(" → 位置=").append(offence.cause.getLocation())
                     .append(",实际=").append(offence.cause.getActual()).append('\n');
         }
-        return new ConfigFormatException(BASE_DIR, "4.0", actual.toString().trim());
+        return new ConfigFormatException(BASE_DIR, IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, actual.toString().trim());
     }
 
     /**

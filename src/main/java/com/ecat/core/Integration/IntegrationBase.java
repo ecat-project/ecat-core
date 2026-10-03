@@ -267,10 +267,22 @@ public abstract class IntegrationBase implements IntegrationLifecycle, RemovalHo
     }
 
     /**
-     * 合并/升级配置条目到当前版本格式
+     * 合并/升级配置条目到本集成当前声明格式（{@link #entryFormatVersion()}）。
      * <p>
-     * 在加载持久化条目后、createEntry() 之前调用。
-     * 如果条目落后多个版本，应顺序升级每个版本。
+     * <b>调用时机由 core 执法——core 在 entry 恢复处统一执行版本门控</b>：core 对比盘面
+     * 版本与本集成声明——全部相等则<b>不会调用</b>本方法（零开销快路）；存在旧版本条目才调用；
+     * 存在比声明新的条目则直接 fail-closed 异常（数据比代码新，迁移无法修复，不进本方法）。
+     * <p>
+     * 契约（由 core 执法，违反=坐标级隔离+启动报告点账失败）：
+     * <ol>
+     * <li>调用时机：core 门控判定存在 version &lt; entryFormatVersion() 的条目时才调用（需要才调，无迁移需求零调用）；</li>
+     * <li>入参=该坐标全量条目；返回=全量条目列表（entryId 集合必须与入参一致），或 null=无变更；</li>
+     * <li>阶梯逐 minor 推进：每条从其当前版本顺序升级到 entryFormatVersion()，迁移后 version 必须==entryFormatVersion()；</li>
+     * <li>禁止变更已 ==entryFormatVersion() 条目的 data（版本不推进的数据变更不会被写回，重启即失）；</li>
+     * <li>迁移函数必须幂等：同盘面重复执行结果一致（崩溃续推依赖——entry yml 即账本，写回中途崩重启续推）；</li>
+     * <li>抛异常=迁移失败，坐标级隔离+启动报告点账，重启重试。</li>
+     * </ol>
+     * 存在旧版本条目但返回 null=迁移函数缺陷，core 以 ConfigFormatException 拒绝放行。
      * <p>
      * 示例实现：
      * <pre>{@code
@@ -278,25 +290,14 @@ public abstract class IntegrationBase implements IntegrationLifecycle, RemovalHo
      * public List<ConfigEntry> mergeEntries(List<ConfigEntry> entries) {
      *     List<ConfigEntry> merged = new ArrayList<>();
      *     boolean hasChanges = false;
-     *
      *     for (ConfigEntry entry : entries) {
      *         ConfigEntry current = entry;
-     *         int originalVersion = entry.getVersion();
-     *
-     *         // 顺序版本升级
-     *         if (entry.getVersion() < 2) {
-     *             current = upgradeV1toV2(current);
-     *         }
-     *         if (current.getVersion() < 3) {
-     *             current = upgradeV2toV3(current);
-     *         }
-     *
-     *         if (current.getVersion() != originalVersion) {
+     *         if (FormatVersion.compare(current.getVersion(), "4.0") < 0) {
+     *             current = upgradePre4To4_0(current);   // 迁移步负责把 version 推进到目标声明值
      *             hasChanges = true;
      *         }
      *         merged.add(current);
      *     }
-     *
      *     return hasChanges ? merged : null;
      * }
      * }</pre>

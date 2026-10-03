@@ -236,7 +236,7 @@ public class IntegrationManagerStartupTimeoutTest {
                 .enabled(true)
                 .createTime(ZonedDateTime.now())
                 .updateTime(ZonedDateTime.now())
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
     }
 }

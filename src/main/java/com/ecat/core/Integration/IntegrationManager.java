@@ -16,7 +16,9 @@
 
 package com.ecat.core.Integration;
 
+import com.ecat.core.ConfigFormatException;
 import com.ecat.core.EcatCore;
+import com.ecat.core.FormatVersion;
 import com.ecat.core.Bus.BusRegistry;
 import com.ecat.core.Bus.BusTopic;
 import com.ecat.core.Bus.event.AllLoadedEvent;
@@ -690,9 +692,10 @@ public class IntegrationManager {
      * <p>
      * 流程：
      * 1. 从 Registry 获取该集成的所有 entries
-     * 2. 调用 integration.mergeEntries() 进行版本升级
-     * 3. 如果有合并结果，持久化并使用合并后的 entries
-     * 4. 对每个启用的 entry 调用 createEntry()
+     * 2. 版本门控：全==集成声明→跳过迁移（零开销快路）；存在旧版→调 mergeEntries 迁移，
+     *    迁移结果两阶段执法（先全量校验后写回，整批拒写回语义）；数据比声明新→fail-closed
+     *    异常（坐标级隔离+启动报告点账）
+     * 3. 对每个启用的 entry 调用 createEntry()
      *
      * <p>包内可见：单测直接驱动（注入假集成断言启动报告内容）。
      *
@@ -716,19 +719,27 @@ public class IntegrationManager {
 
         long coordinateStartNanos = System.nanoTime();
         try {
-            // 1. 调用 mergeEntries() 进行版本升级
-            List<ConfigEntry> mergedEntries = integration.mergeEntries(entries);
-            if (mergedEntries != null) {
-                // 2. 持久化合并后的 entries
-                for (ConfigEntry merged : mergedEntries) {
-                    entryRegistry.updateEntry(merged.getEntryId(), merged);
+            // 1. 版本门控：越界 fail-closed → 有旧版才调迁移 → 迁移结果执法 → 仅推进条目写回
+            String declared = integration.entryFormatVersion();
+            assertNoNewerThanDeclared(entries, declared, coordinate);
+
+            List<ConfigEntry> effectiveEntries = entries;
+            if (hasStaleEntries(entries, declared)) {
+                List<ConfigEntry> mergedEntries = integration.mergeEntries(entries);
+                if (mergedEntries == null) {
+                    throw new ConfigFormatException(coordinate, declared,
+                            "存在旧版本条目但迁移函数返回 null(声明无变更)，迁移函数缺陷");
                 }
-                entries = mergedEntries;
-                log.info("Merged {} entries for {}", entries.size(), coordinate);
+                // 执法先于一切写：任一查失败=迁移函数缺陷，整批拒写回（零写发生）
+                enforceMigrationResult(entries, mergedEntries, declared, coordinate, entryRegistry);
+                // 写回仅版本推进条目：entry yml 即账本，写回中途崩=断点续推（重启门控重分类）
+                writeBackChanged(entries, mergedEntries, coordinate, entryRegistry);
+                effectiveEntries = mergedEntries;
+                log.info("Migrated {} entries for {}", mergedEntries.size(), coordinate);
             }
 
-            // 3. 创建设备
-            for (ConfigEntry entry : entries) {
+            // 2. 创建设备
+            for (ConfigEntry entry : effectiveEntries) {
                 if (!entry.isEnabled()) {
                     continue;
                 }
@@ -755,7 +766,7 @@ public class IntegrationManager {
 
             // 4. 通知集成所有已持久化 entry 加载完毕（即使 entries 为空也必须调用）
             try {
-                integration.onAllExistEntriesLoaded(entries);
+                integration.onAllExistEntriesLoaded(effectiveEntries);
                 log.info("All entries loaded for {}, ready={}", coordinate,
                     integration.isReady());
             } catch (UnsupportedOperationException e) {
@@ -787,6 +798,120 @@ public class IntegrationManager {
             log.warn("createEntry 阻塞 {}ms 超出 {}ms 预算: entry={} integration={} "
                     + "——启动契约：createEntry 禁阻塞（存量豁免至 D 阶段骨架收编）",
                     ms, createEntryBudgetMs, entryId, coordinate);
+        }
+    }
+
+    /**
+     * 越界扫描：数据比集成声明新=前向不兼容（迁移无法修复的终态故障），fail-closed。
+     * 逐条先 requireWellFormed（非法格式=盘面不变量破坏，同显式失败）；
+     * 任一越界即抛，消息列全部越界条目清单。
+     */
+    private static void assertNoNewerThanDeclared(List<ConfigEntry> entries, String declared,
+                                                  String coordinate) {
+        List<String> newer = new ArrayList<>();
+        for (ConfigEntry entry : entries) {
+            FormatVersion.requireWellFormed(entry.getVersion(),
+                    coordinate + "(entryId=" + entry.getEntryId() + ")");
+            if (FormatVersion.compare(entry.getVersion(), declared) > 0) {
+                newer.add(entry.getEntryId() + "=" + entry.getVersion());
+            }
+        }
+        if (!newer.isEmpty()) {
+            throw new ConfigFormatException(coordinate, declared,
+                    newer.size() + " 条越界(数据比声明新): [" + String.join(", ", newer) + "]");
+        }
+    }
+
+    /**
+     * 旧版存在判定：任一 version &lt; 声明即 true（假定越界扫描已先行通过）。
+     * 返回 false=全条目==声明，门控走快路（不调 mergeEntries，零开销）。
+     */
+    private static boolean hasStaleEntries(List<ConfigEntry> entries, String declared) {
+        for (ConfigEntry entry : entries) {
+            if (FormatVersion.compare(entry.getVersion(), declared) < 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 迁移结果执法：三查全过才放行写回；任一失败=迁移函数缺陷，整批拒写回（零写发生）。
+     * <ol>
+     *   <li>版本到位：merged 逐条 version well-formed 且 ==声明（违者=迁移未完成其契约）；</li>
+     *   <li>id 集合一致：merged 的 entryId 集合必须与输入盘面一致（多/少/换 id 均拒）；</li>
+     *   <li>id 存在于缓存：防迁移函数凭空造 entry（缓存缺失=「更新不存在的条目」前兆）。</li>
+     * </ol>
+     * 执法先于一切写——若边写边查，中途失败=半批写回+异常，违反整批拒写回语义。
+     */
+    private static void enforceMigrationResult(List<ConfigEntry> originals, List<ConfigEntry> merged,
+                                               String declared, String coordinate,
+                                               ConfigEntryRegistry entryRegistry) {
+        List<String> notAtDeclared = new ArrayList<>();
+        for (ConfigEntry entry : merged) {
+            FormatVersion.requireWellFormed(entry.getVersion(),
+                    coordinate + "(entryId=" + entry.getEntryId() + ")");
+            if (FormatVersion.compare(entry.getVersion(), declared) != 0) {
+                notAtDeclared.add(entry.getEntryId() + "=" + entry.getVersion());
+            }
+        }
+        if (!notAtDeclared.isEmpty()) {
+            throw new ConfigFormatException(coordinate, declared,
+                    "迁移后 " + notAtDeclared.size() + " 条版本未推进到声明: ["
+                            + String.join(", ", notAtDeclared) + "]");
+        }
+
+        Set<String> originalIds = new HashSet<>();
+        for (ConfigEntry entry : originals) {
+            originalIds.add(entry.getEntryId());
+        }
+        Set<String> mergedIds = new HashSet<>();
+        for (ConfigEntry entry : merged) {
+            mergedIds.add(entry.getEntryId());
+        }
+        if (!originalIds.equals(mergedIds)) {
+            Set<String> missing = new HashSet<>(originalIds);
+            missing.removeAll(mergedIds);
+            Set<String> unexpected = new HashSet<>(mergedIds);
+            unexpected.removeAll(originalIds);
+            throw new ConfigFormatException(coordinate, declared,
+                    "迁移结果 entryId 集合与输入不一致: 缺失=" + missing + " 多出=" + unexpected);
+        }
+
+        List<String> notInCache = new ArrayList<>();
+        for (String entryId : mergedIds) {
+            if (entryRegistry.getByEntryId(entryId) == null) {
+                notInCache.add(entryId);
+            }
+        }
+        if (!notInCache.isEmpty()) {
+            throw new ConfigFormatException(coordinate, declared,
+                    "迁移结果含缓存中不存在的 entryId(凭空造 entry): " + notInCache);
+        }
+    }
+
+    /**
+     * 写回版本发生变化的条目（逐条独立原子写）：entry yml 即账本，版本未变的条目跳过
+     * （幂等续推的基石——写回中途崩，重启门控按盘面 version 重分类：已推进条目落快路、
+     * 未推进条目再迁移）。写回后异常不回滚前序条目：半迁移盘面合法。
+     * <p>
+     * 已知边界（javadoc 契约禁止项，运行时不覆盖）：迁移函数变更「已==声明条目」的 data
+     * 而不推进版本——版本比对不可见、不写回，变更留在迁移函数闭包内重启即失。
+     */
+    private void writeBackChanged(List<ConfigEntry> originals, List<ConfigEntry> merged,
+                                  String coordinate, ConfigEntryRegistry entryRegistry) {
+        Map<String, String> originalVersions = new HashMap<>();
+        for (ConfigEntry entry : originals) {
+            originalVersions.put(entry.getEntryId(), entry.getVersion());
+        }
+        for (ConfigEntry migrated : merged) {
+            String originalVersion = originalVersions.get(migrated.getEntryId());
+            if (FormatVersion.compare(migrated.getVersion(), originalVersion) == 0) {
+                continue;
+            }
+            entryRegistry.updateMigratedEntry(migrated);
+            log.info("Migrated entry {} for {}: {} -> {}",
+                    migrated.getEntryId(), coordinate, originalVersion, migrated.getVersion());
         }
     }
 

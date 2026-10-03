@@ -610,7 +610,7 @@ public class IntegrationManagerTest {
                 .entryId("entry-1")
                 .coordinate("com.test:stub")
                 .enabled(true)
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
         when(entryRegistry.listByCoordinate("com.test:stub"))
                 .thenReturn(Arrays.asList(testEntry));
@@ -674,11 +674,13 @@ public class IntegrationManagerTest {
                 .entryId("fail-entry-1")
                 .coordinate("com.test:failing")
                 .enabled(true)
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
         ConfigEntry entry2 = new ConfigEntry.Builder()
                 .entryId("normal-entry-1")
                 .coordinate("com.test:normal")
                 .enabled(true)
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
         when(entryRegistry.listByCoordinate("com.test:failing"))
                 .thenReturn(Arrays.asList(entry1));

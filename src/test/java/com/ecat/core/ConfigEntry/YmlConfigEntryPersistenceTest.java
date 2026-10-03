@@ -16,6 +16,7 @@
 
 package com.ecat.core.ConfigEntry;
 
+import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.ConfigFormatException;
 import com.ecat.core.Utils.DateTimeUtils;
 import org.junit.After;
@@ -97,7 +98,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.save(entry);
@@ -128,7 +129,7 @@ public class YmlConfigEntryPersistenceTest {
                 .title("Test Entry")
                 .data(data)
                 .enabled(false)
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.save(entry);
@@ -155,7 +156,7 @@ public class YmlConfigEntryPersistenceTest {
                 .title("Test Entry")
                 .createTime(now)
                 .updateTime(now)
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.save(entry);
@@ -180,7 +181,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.save(entry);
@@ -201,7 +202,7 @@ public class YmlConfigEntryPersistenceTest {
         assertEquals("coordinate 应该匹配", "com.ecat.integration:demo", loaded.getCoordinate());
         assertEquals("uniqueId 应该匹配", "demo_123", loaded.getUniqueId());
         assertEquals("title 应该匹配", "Test Entry", loaded.getTitle());
-        assertEquals("格式版本应为 String round-trip 保持", "4.0", loaded.getVersion());
+        assertEquals("格式版本应为 String round-trip 保持", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, loaded.getVersion());
 
         // 清理
         File dir = new File(".ecat-data/core/config_entries/com.ecat.integration/demo");
@@ -222,7 +223,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.save(entry);
@@ -233,7 +234,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Updated Title")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.update(updated);
@@ -247,7 +248,7 @@ public class YmlConfigEntryPersistenceTest {
 
         assertNotNull("应该找到 entry", loaded);
         assertEquals("title 应该更新", "Updated Title", loaded.getTitle());
-        assertEquals("格式版本应 round-trip 保持", "4.0", loaded.getVersion());
+        assertEquals("格式版本应 round-trip 保持", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, loaded.getVersion());
 
         // 清理
         File dir = new File(".ecat-data/core/config_entries/com.ecat.integration/demo");
@@ -268,7 +269,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.save(entry);
@@ -315,7 +316,7 @@ public class YmlConfigEntryPersistenceTest {
                 .enabled(true)
                 .createTime(createTime)
                 .updateTime(createTime)
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         // 保存
@@ -334,7 +335,7 @@ public class YmlConfigEntryPersistenceTest {
         assertEquals("uniqueId 应该匹配", original.getUniqueId(), loaded.getUniqueId());
         assertEquals("title 应该匹配", original.getTitle(), loaded.getTitle());
         assertEquals("enabled 应该匹配", original.isEnabled(), loaded.isEnabled());
-        assertEquals("格式版本应该匹配", "4.0", loaded.getVersion());
+        assertEquals("格式版本应该匹配", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, loaded.getVersion());
         assertTrue("加载后的格式版本应为 String 类型", loaded.getVersion() instanceof String);
 
         // 验证 data (注意 YAML 可能会改变数字类型)
@@ -364,7 +365,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.save(original);
@@ -395,7 +396,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_import")
                 .title("Imported")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .source(SourceType.IMPORT_FLOW)
                 .build();
 
@@ -430,7 +431,7 @@ public class YmlConfigEntryPersistenceTest {
                 .uniqueId(null)  // null uniqueId
                 .title(null)     // null title
                 .data(new HashMap<>())  // empty data
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         persistence.save(entry);

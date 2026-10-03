@@ -303,6 +303,31 @@ public class ConfigEntryRegistry {
     }
 
     /**
+     * 迁移写回专用更新：绕 withUpdate 防版本回抹，把迁移函数产出的条目（含推进后的 version）
+     * 整体落盘+换缓存。
+     * <p>
+     * 不走 {@link #updateEntry}——updateEntry 经 withUpdate 保留旧 version，会抹掉迁移推进的版本；
+     * 不通知集成、不发生命周期事件（boot 恢复期，设备创建由紧随的 createEntry 循环负责，
+     * 与既有 updateEntry 的通知语义一致——updateEntry 本就不通知）。
+     *
+     * @param migrated 迁移函数产出条目；entryId 必须已存在
+     * @throws EntryNotFoundException entryId 不存在
+     *         (执法层 enforceMigrationResult 已前置校验 id 存在于缓存，本分支确认不可达；
+     *          若触发即为执法校验缺陷，显式上浮点账，不吞不掩)
+     */
+    public void updateMigratedEntry(ConfigEntry migrated) {
+        ConfigEntry existing = entryCache.get(migrated.getEntryId());
+        if (existing == null) {
+            throw new EntryNotFoundException(migrated.getEntryId());
+        }
+        migrated.setUpdateTime(DateTimeUtils.now());
+        persistence.update(migrated);
+        entryCache.put(migrated.getEntryId(), migrated);
+        log.info("Migrated config entry: entryId={}, version {} -> {}",
+                migrated.getEntryId(), existing.getVersion(), migrated.getVersion());
+    }
+
+    /**
      * 重新配置条目 (不增加版本号)
      * <p>
      * 用于 reconfigure flow，只更新数据和配置，不改变版本号。

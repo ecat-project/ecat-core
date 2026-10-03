@@ -16,6 +16,7 @@
 
 package com.ecat.core.ConfigEntry;
 
+import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Utils.DateTimeUtils;
 import org.junit.Test;
 
@@ -67,7 +68,7 @@ public class ConfigEntryTest {
                 .title("Test Entry")
                 .data(data)
                 .enabled(false)
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         assertNotNull("data 不应为 null", entry.getData());
@@ -75,7 +76,7 @@ public class ConfigEntryTest {
         assertEquals("value1", entry.getData().get("key1"));
         assertEquals(123, entry.getData().get("key2"));
         assertFalse("应该被禁用", entry.isEnabled());
-        assertEquals("显式设置的格式版本应保持", "4.0", entry.getVersion());
+        assertEquals("显式设置的格式版本应保持", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, entry.getVersion());
     }
 
     @Test
@@ -123,7 +124,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -141,7 +142,7 @@ public class ConfigEntryTest {
         assertEquals("title 应该更新", "Updated Title", updated.getTitle());
 
         // 验证格式版本保持（不再自增）
-        assertEquals("格式版本应保持不变", "4.0", updated.getVersion());
+        assertEquals("格式版本应保持不变", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, updated.getVersion());
 
         // 验证时间戳
         assertNotNull("updateTime 不应为 null", updated.getUpdateTime());
@@ -158,7 +159,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .data(originalData)
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         Map<String, Object> newData = new HashMap<>();
@@ -182,7 +183,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .enabled(true)
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -201,7 +202,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -223,7 +224,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .data(originalData)
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         // 创建新的 empty map 而不是 null
@@ -251,7 +252,7 @@ public class ConfigEntryTest {
                 .entryId("test-id")
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
-                .version("4.0")
+                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -260,11 +261,11 @@ public class ConfigEntryTest {
 
         ConfigEntry updated = original.withUpdate(newData);
 
-        assertEquals("withUpdate 后格式版本应保持不变", "4.0", updated.getVersion());
+        assertEquals("withUpdate 后格式版本应保持不变", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, updated.getVersion());
 
         // 再次更新仍保持
         ConfigEntry thirdUpdate = updated.withUpdate(newData);
-        assertEquals("连续两次更新格式版本仍应不变", "4.0", thirdUpdate.getVersion());
+        assertEquals("连续两次更新格式版本仍应不变", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, thirdUpdate.getVersion());
     }
 
     // ==================== Lombok @Data 测试 ====================
