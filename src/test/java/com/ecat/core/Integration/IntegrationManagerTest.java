@@ -1,5 +1,7 @@
 package com.ecat.core.Integration;
 
+import com.ecat.core.ConfigFormatException;
+import com.ecat.core.ConfigVersion;
 import com.ecat.core.EcatCore;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.StateManager;
@@ -322,6 +324,7 @@ public class IntegrationManagerTest {
         Map<String, Object> integrations = new HashMap<>();
         integrations.put("test:disabled-stale", entry);
         Map<String, Object> root = new HashMap<>();
+        root.put("version", ConfigVersion.CURRENT_VERSION);
         root.put("integrations", integrations);
         writeYamlToFile(testConfigDir + "/core/integrations.yml", root);
 
@@ -330,6 +333,124 @@ public class IntegrationManagerTest {
         assertTrue("已停用应可启用", s.canEnable());
         assertFalse("已停用不应可停用", s.canDisable());
         assertFalse("enabled 真相值应如实下发为 false", s.isEnabled());
+    }
+
+    // ========== integrations.yml 文件格式版本戳 ==========
+
+    /**
+     * 手工预置一份 integrations.yml（root 结构自定义），落盘即被测读链的真实输入。
+     */
+    private void writeIntegrationsYml(Map<String, Object> root) throws IOException {
+        new File(testConfigDir + "/core").mkdirs();
+        writeYamlToFile(testConfigDir + "/core/integrations.yml", root);
+    }
+
+    @Test
+    public void updateIntegrationsConfigWriteStampsRootVersion() throws Exception {
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("enabled", true);
+        Map<String, Object> integrations = new HashMap<>();
+        integrations.put("test:stamp", entry);
+        Map<String, Map<String, Object>> seed = new HashMap<>();
+        seed.put("integrations", integrations);
+
+        integrationManager.updateIntegrationsConfig(seed);
+
+        Map<String, Object> root = readYamlFromFile(testConfigDir + "/core/integrations.yml");
+        assertEquals("覆盖写必须带当前文件格式版本戳", ConfigVersion.CURRENT_VERSION, root.get("version"));
+    }
+
+    @Test
+    public void futureVersionStampRejected() throws Exception {
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("enabled", true);
+        Map<String, Object> integrations = new HashMap<>();
+        integrations.put("test:future", entry);
+        Map<String, Object> root = new HashMap<>();
+        root.put("version", "5.0");
+        root.put("integrations", integrations);
+        writeIntegrationsYml(root);
+
+        try {
+            integrationManager.loadIntegrationsConfig();
+            fail("数据比代码新的未来戳必须 fail-closed 拒绝");
+        } catch (ConfigFormatException e) {
+            assertTrue("异常应点名读到的戳值", e.getActual().contains("5.0"));
+        }
+    }
+
+    @Test
+    public void missingStampRejected() throws Exception {
+        // 现网存量形态：root 无 version 键。旧宽门（无戳视为兼容）已废止。
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("enabled", true);
+        Map<String, Object> integrations = new HashMap<>();
+        integrations.put("test:missing", entry);
+        Map<String, Object> root = new HashMap<>();
+        root.put("integrations", integrations);
+        writeIntegrationsYml(root);
+
+        try {
+            integrationManager.loadIntegrationsConfig();
+            fail("无戳必须 fail-closed 拒绝（旧宽门已废止）");
+        } catch (ConfigFormatException e) {
+            assertTrue("无戳异常应明示缺失", e.getActual().contains("缺失"));
+        }
+    }
+
+    @Test
+    public void olderStampRejected() throws Exception {
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("enabled", true);
+        Map<String, Object> integrations = new HashMap<>();
+        integrations.put("test:older", entry);
+        Map<String, Object> root = new HashMap<>();
+        root.put("version", "3.9");
+        root.put("integrations", integrations);
+        writeIntegrationsYml(root);
+
+        try {
+            integrationManager.loadIntegrationsConfig();
+            fail("旧戳残留必须拒绝（无迁移通道，盖戳归归一停机窗）");
+        } catch (ConfigFormatException e) {
+            assertTrue("异常应点名读到的旧戳值", e.getActual().contains("3.9"));
+        }
+    }
+
+    @Test
+    public void currentStampLoadsNormally() throws Exception {
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("enabled", true);
+        Map<String, Object> integrations = new HashMap<>();
+        integrations.put("test:current", entry);
+        Map<String, Object> root = new HashMap<>();
+        root.put("version", ConfigVersion.CURRENT_VERSION);
+        root.put("integrations", integrations);
+        writeIntegrationsYml(root);
+
+        Map<String, Map<String, Object>> config = integrationManager.loadIntegrationsConfig();
+        assertTrue("当前戳文件应正常放行", ((Map<?, ?>) config.get("integrations")).containsKey("test:current"));
+    }
+
+    @Test
+    public void firstBootFileBornStamped() {
+        File configFile = new File(testConfigDir + "/core/integrations.yml");
+        assertFalse("前置自检：首启前文件不存在", configFile.exists());
+
+        Map<String, Map<String, Object>> config = integrationManager.loadIntegrationsConfig();
+
+        assertTrue("首启应返回空配置", config.isEmpty());
+        assertTrue("首启应建出配置文件", configFile.exists());
+        Map<String, Object> root;
+        try (FileInputStream in = new FileInputStream(configFile)) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = (Map<String, Object>) new Yaml().load(in);
+            root = parsed;
+        } catch (IOException e) {
+            throw new IllegalStateException("首启产物文件应可读", e);
+        }
+        assertEquals("首启建出的空文件必须出生即带戳（防次启自撞无戳异常）",
+            ConfigVersion.CURRENT_VERSION, root.get("version"));
     }
 
     // 辅助方法：将Map写入YAML文件（使用标准格式）

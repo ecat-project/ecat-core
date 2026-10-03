@@ -25,8 +25,9 @@ import java.util.regex.Pattern;
  * 消费点一律经本类判定与比较，禁各自手写解析——格式规则只此一份。
  * <p>
  * 注意区分三个 "版本" 概念：本类表达条目数据格式版本（"major.minor" 两段）；
- * {@link ConfigVersion} 表达 integrations.yml 文件版本（"major.minor.patch" 三段，
- * 与 CLI 版本同步）；集成自身版本另属集成元数据。三者语义独立，互不复用。
+ * {@link ConfigVersion} 表达 integrations.yml 文件格式版本（同为 "major.minor" 两段，
+ * 由 core 写入并在加载时 fail-closed 校验）；集成自身版本另属集成元数据。
+ * 三者语义独立，互不复用。
  *
  * @author coffee
  */

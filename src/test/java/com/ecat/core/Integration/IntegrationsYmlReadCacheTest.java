@@ -191,9 +191,10 @@ public class IntegrationsYmlReadCacheTest {
         }
     }
 
-    /** 固定字节数的合法配置（state 值同长度可互换：aaaa/bbbb/cccc）。 */
+    /** 固定字节数的合法配置（state 值同长度可互换：aaaa/bbbb/cccc）。root 带当前格式版本戳——加载校验门要求。 */
     private static String yamlOf(String stateValue) {
         return "# integrations\n"
+            + "version: \"4.0\"\n"
             + "integrations:\n"
             + "  com.ecat:fixture:\n"
             + "    groupId: com.ecat\n"

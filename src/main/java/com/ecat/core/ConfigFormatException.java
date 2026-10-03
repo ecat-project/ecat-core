@@ -51,6 +51,25 @@ public class ConfigFormatException extends RuntimeException {
         this.actual = actual;
     }
 
+    /**
+     * 带 hint 的扩展形态：三字段渲染结构与默认形态同构，修法指引由调用方按判定分支给出。
+     * <p>
+     * 用于默认形态的通用指引不适用/不够用的场景——如「无戳不视为兼容（旧宽门已废止）」、
+     * 「数据比代码新，前向不兼容」这类分支化指引。默认形态消息面不受本构造器影响。
+     *
+     * @param location 出错位置（人读定位）
+     * @param expected 期望的格式/值
+     * @param actual   实际读到的值描述
+     * @param hint     分支化修法指引（完整替换默认形态的通用指引）
+     */
+    public ConfigFormatException(String location, String expected, String actual, String hint) {
+        super("配置格式版本异常: 位置=" + location + " 期望=" + expected + " 实际=" + actual
+                + "。修法指引: " + hint);
+        this.location = location;
+        this.expected = expected;
+        this.actual = actual;
+    }
+
     public String getLocation() {
         return location;
     }

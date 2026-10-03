@@ -17,6 +17,7 @@
 package com.ecat.core.Integration;
 
 import com.ecat.core.ConfigFormatException;
+import com.ecat.core.ConfigVersion;
 import com.ecat.core.EcatCore;
 import com.ecat.core.FormatVersion;
 import com.ecat.core.Bus.BusRegistry;
@@ -2201,6 +2202,11 @@ public class IntegrationManager {
                     Yaml yaml = new Yaml();
                     Map<String, Map<String, Object>> config = yaml.load(inputStream);
                     Map<String, Map<String, Object>> result = config != null ? config : new HashMap<>();
+                    // parse 收口 fail-closed：root version 戳校验。本方法的全部调用方（boot 首读+
+                    // 运行时状态/enable/add/remove 等）都经此一处取得配置——校验挂收口即全体同门，
+                    // 任何读者都不基于不认识的格式行动，更不会把未来格式读-改-写回。空文件解析为
+                    // 空 map = 无戳，同拒（严格模式：空文件不享有豁免）。
+                    ConfigVersion.requireSupported(result.get("version"));
                     // 解析前后 stat 一致 → 解析内容确属该戳，可入缓存；不一致说明解析期间文件被原子替换
                     // （读到的是旧或新的完整版本，仍正确），放弃缓存让下一次读重解析，杜绝「戳与内容错配」。
                     FileStatStamp after = stampOf(configFile);
@@ -2262,7 +2268,16 @@ public class IntegrationManager {
     private static Map<String, Map<String, Object>> deepCopyConfig(Map<String, Map<String, Object>> source) {
         Map<String, Map<String, Object>> copy = new LinkedHashMap<>();
         for (Map.Entry<String, Map<String, Object>> entry : source.entrySet()) {
-            copy.put(entry.getKey(), (Map<String, Object>) deepCopyValue(entry.getValue()));
+            // root 下除 integrations 块外还挂标量键（root version 戳），非 Map 值只深拷贝值树、
+            // 不做强转——返回类型里 Map 的泛型实参本就是擦除下的类型虚构，标量键直传与解析读方视图一致。
+            Object value = deepCopyValue(entry.getValue());
+            if (value instanceof Map) {
+                copy.put(entry.getKey(), (Map<String, Object>) value);
+            } else {
+                @SuppressWarnings({"unchecked", "rawtypes"})
+                Map rawCopy = copy;
+                rawCopy.put(entry.getKey(), value);
+            }
         }
         return copy;
     }
@@ -2357,10 +2372,12 @@ public class IntegrationManager {
             // 写-写互斥仍由本方法持有 configFileSync 承担(共用件无内置锁,锁语义零变化)。
             boolean written;
             try {
-                // 经通配双转交予共用件(零拷贝,运行时对象与迁移前 yaml.dump(config) 逐字同一);
-                // T-2-4 落地后此处替换为带 version 戳的包装(本卡先保持原样)
-                @SuppressWarnings("unchecked")
-                Map<String, Object> docToWrite = (Map<String, Object>) (Map<?, ?>) config;
+                // dump 侧始终带文件格式版本戳：包装新 map 而非改写入参（入参元素类型容不下
+                // String 标量）；戳最后 put = 写侧权威——调用方结构若带着从别处快照来的旧戳，
+                // 一律覆盖为当前值，覆盖写永不出无戳/旧戳文件。
+                Map<String, Object> docToWrite = new LinkedHashMap<>();
+                docToWrite.putAll(config);
+                docToWrite.put("version", ConfigVersion.getVersion());
                 configYamlWriter.write(docToWrite, configFile);
                 written = true;
             } catch (IOException e) {
@@ -2545,8 +2562,10 @@ public class IntegrationManager {
                     options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK); // 关键配置
                     
                     Yaml yaml = new Yaml(options);
-                    // 创建空配置
+                    // 创建空配置。出生即带文件格式版本戳：首启建出的文件下一次启动就要过
+                    // 加载校验门，无戳空文件会令「首启成功、次启自撞无戳异常」。
                     Map<String, Object> emptyConfig = new HashMap<>();
+                    emptyConfig.put("version", ConfigVersion.getVersion());
                     emptyConfig.put("integrations", new LinkedHashMap<>());
                     
                     yaml.dump(emptyConfig, writer);

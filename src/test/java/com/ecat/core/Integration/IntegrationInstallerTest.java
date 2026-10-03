@@ -398,20 +398,7 @@ public class IntegrationInstallerTest {
 
     @Test
     public void testConfigVersion() {
-        // 验证 ConfigVersion 常量
-        assertEquals("版本号应为 1.0.0", "1.0.0", com.ecat.core.ConfigVersion.getVersion());
-        assertEquals("完整版本号应为 ecat-cli 1.0.0", "1.0.0", com.ecat.core.ConfigVersion.getVersion());
-    }
-
-    @Test
-    public void testConfigVersion_IsCompatible() {
-        // 测试版本兼容性检查
-        assertTrue("1.0.0 应该兼容", com.ecat.core.ConfigVersion.isCompatible("1.0.0"));
-        assertTrue("1.1.0 应该兼容", com.ecat.core.ConfigVersion.isCompatible("1.1.0"));
-        assertTrue("1.99.99 应该兼容", com.ecat.core.ConfigVersion.isCompatible("1.99.99"));
-        assertTrue("null 应该兼容（旧版本）", com.ecat.core.ConfigVersion.isCompatible(null));
-        assertTrue("空字符串应该兼容（旧版本）", com.ecat.core.ConfigVersion.isCompatible(""));
-        assertFalse("2.0.0 不应该兼容", com.ecat.core.ConfigVersion.isCompatible("2.0.0"));
-        assertFalse("0.9.0 不应该兼容", com.ecat.core.ConfigVersion.isCompatible("0.9.0"));
+        // 验证 ConfigVersion 常量：integrations.yml 文件格式版本戳，与 CLI/core 软件版本无关
+        assertEquals("文件格式版本戳应为 4.0", "4.0", com.ecat.core.ConfigVersion.getVersion());
     }
 }

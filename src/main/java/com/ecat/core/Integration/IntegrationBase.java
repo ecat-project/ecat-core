@@ -259,6 +259,10 @@ public abstract class IntegrationBase implements IntegrationLifecycle, RemovalHo
      * 显式带版本必须等于此值），也是后续格式迁移的门控基准。默认
      * {@value #DEFAULT_ENTRY_FORMAT_VERSION}；集成的 data 结构演进出新格式时
      * 重写本方法返回新版本，并配套实现 {@link #mergeEntries} 迁移旧条目。
+     * <p>
+     * 语义边界：本版本与 {@link com.ecat.core.ConfigVersion#CURRENT_VERSION}
+     * （integrations.yml 文件格式版本）、core 软件版本（jar manifest）互不相关，
+     * 三者数值巧合不代表可互用。
      *
      * @return "major.minor" 格式版本字符串
      */
