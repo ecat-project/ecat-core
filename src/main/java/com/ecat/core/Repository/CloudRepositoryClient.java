@@ -29,6 +29,8 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
+import lombok.Value;
+
 /**
  * 云端仓库客户端 - 连接 ECAT 云平台
  *
@@ -373,6 +375,63 @@ public class CloudRepositoryClient {
             }
 
             return targetFile;
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    /**
+     * 获取云端仓库 API 基址（构造时已归一化、无尾斜杠）。
+     *
+     * <p>供下载组件复用同一基址拼装 Maven 协议 URL，避免出现第二配置点。</p>
+     */
+    public String getCloudApiBaseUrl() {
+        return cloudApiBaseUrl;
+    }
+
+    /**
+     * 打开远端资源流（公开访问；非 200 抛 IOException，与 {@link #downloadPackage} 非 200 语义一致）。
+     *
+     * <p>Content-Length 须在连接关闭前读取，故与流一并经 {@link InputStreamWithLength} 返回；
+     * 调用方负责消费与关闭流。</p>
+     *
+     * @param fileUrl 资源完整 URL
+     * @return 流 + Content-Length 载体（长度未知为 -1）
+     * @throws IOException 网络异常或非 200 响应
+     */
+    public InputStreamWithLength openResourceStream(String fileUrl) throws IOException {
+        HttpURLConnection conn = createConnection(fileUrl);
+        int responseCode = conn.getResponseCode();
+        if (responseCode != 200) {
+            conn.disconnect();
+            throw new IOException("HTTP " + responseCode + "获取资源失败: " + conn.getResponseMessage());
+        }
+        return new InputStreamWithLength(conn.getInputStream(), conn.getContentLength());
+    }
+
+    /**
+     * 拉取文本资源（.sha256 校验和等小文本文件；UTF-8；非 200 抛 IOException）。
+     *
+     * @param fileUrl 资源完整 URL
+     * @return 文本内容（不含换行符）
+     * @throws IOException 网络异常或非 200 响应
+     */
+    public String fetchText(String fileUrl) throws IOException {
+        HttpURLConnection conn = createConnection(fileUrl);
+        try {
+            int responseCode = conn.getResponseCode();
+            if (responseCode != 200) {
+                throw new IOException("HTTP " + responseCode + "获取文本资源失败: " + conn.getResponseMessage());
+            }
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+                return sb.toString();
+            }
         } finally {
             conn.disconnect();
         }
@@ -726,5 +785,14 @@ public class CloudRepositoryClient {
 
         public java.util.Map<String, java.util.List<ReleaseInfo>> getReleases() { return releases; }
         public void setReleases(java.util.Map<String, java.util.List<ReleaseInfo>> releases) { this.releases = releases; }
+    }
+
+    /**
+     * 流 + Content-Length 载体：长度须在连接关闭前读取，故与流绑定返回。
+     */
+    @Value
+    public static class InputStreamWithLength {
+        InputStream stream;
+        int contentLength;
     }
 }
