@@ -75,7 +75,7 @@ public class OnAllExistEntriesLoadedTest {
                 .enabled(true)
                 .createTime(ZonedDateTime.now())
                 .updateTime(ZonedDateTime.now())
-                .version(1)
+                .version("4.0")
                 .build();
     }
 

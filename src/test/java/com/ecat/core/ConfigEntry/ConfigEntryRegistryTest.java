@@ -16,6 +16,7 @@
 
 package com.ecat.core.ConfigEntry;
 
+import com.ecat.core.ConfigFormatException;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Integration.IntegrationRegistry;
@@ -76,11 +77,14 @@ public class ConfigEntryRegistryTest {
             }
         };
 
-        // mock core + integrationRegistry：默认 getIntegrationRegistry 返回 null → notify 路径早退，
-        // 既有 CRUD 测试行为不变；需测 notify 的测试（如 enable 快照）单独 stub getIntegration 返回 stub 集成
+        // mock core + integrationRegistry：stub 集成链返回 stub 集成（entryFormatVersion 默认 "4.0"）
+        // → createEntry 盖戳正路与 notify 路径均有集成可用；需测「集成未注册」的测试单独覆写 getIntegration 返回 null
         coreMock = Mockito.mock(EcatCore.class);
         integrationRegistryMock = Mockito.mock(IntegrationRegistry.class);
         capturingIntegration = new CapturingIntegration();
+        Mockito.when(coreMock.getIntegrationRegistry()).thenReturn(integrationRegistryMock);
+        Mockito.when(integrationRegistryMock.getIntegration(Mockito.anyString()))
+                .thenReturn(capturingIntegration);
         registry = new ConfigEntryRegistry(coreMock, persistence);
     }
 
@@ -183,7 +187,128 @@ public class ConfigEntryRegistryTest {
         assertEquals("title 应该保持不变", "Test Entry", created.getTitle());
         assertNotNull("createTime 应该自动设置", created.getCreateTime());
         assertNotNull("updateTime 应该自动设置", created.getUpdateTime());
-        assertEquals("默认版本应该是 1", 1, created.getVersion());
+        assertEquals("未带版本创建应盖集成声明格式版本", "4.0", created.getVersion());
+    }
+
+    /**
+     * 盖戳正路+落盘带戳：未带版本的 entry 经 createEntry 后 version=集成声明值，
+     * 且持久化文件中 version 已是带引号字符串（盖戳先于 persistence.save）。
+     * 用真 YmlConfigEntryPersistence 验证落盘形态。
+     * BASE_DIR 是生产静态常量（.ecat-data 相对路径，无法注入临时目录）：以递归清理
+     * 先测前/后包裹代替——File.delete 对非空目录静默失败留残，deleteDirectory 先删子
+     * 后删目录消除该残留面。
+     */
+    @Test
+    public void createEntry_stampsDeclaredVersion_andPersistsStampedValue() throws IOException {
+        File groupDir = new File(".ecat-data/core/config_entries/com.ecat.integration");
+        if (groupDir.exists()) {
+            deleteDirectory(groupDir);
+        }
+
+        ConfigEntryRegistry realRegistry = new ConfigEntryRegistry(coreMock, new YmlConfigEntryPersistence());
+
+        ConfigEntry created = realRegistry.createEntry(new ConfigEntry.Builder()
+                .coordinate(COORDINATE_DEMO)
+                .uniqueId("demo_stamp_persist")
+                .title("stamp persist")
+                .build());
+
+        assertEquals("未带版本创建应盖声明格式版本", "4.0", created.getVersion());
+
+        File entryFile = new File(groupDir, "demo/" + created.getEntryId() + ".yml");
+        assertTrue("entry 文件应已落盘", entryFile.exists());
+        try {
+            String yml = new String(java.nio.file.Files.readAllBytes(entryFile.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            // 带引号字符串（snakeyaml 防 float 歧义，单/双引号风格均可）——裸 4.0 会被回读为 Double，必须拒绝
+            assertTrue("落盘 yml 的 version 应为带引号字符串（盖戳先于 save），实际内容:\n" + yml,
+                    yml.matches("(?s).*version:\\s*['\"]4\\.0['\"].*"));
+        } catch (java.io.IOException e) {
+            fail("读取落盘文件失败: " + e.getMessage());
+        } finally {
+            try {
+                deleteDirectory(groupDir);
+            } catch (IOException e) {
+                // 清理收尾失败不掩盖主断言结果（签名声明而实现不会真抛，与既有测试清理先例一致）
+            }
+        }
+    }
+
+    /** 拒收越界：显式版本≠声明（>或<声明同样拒收）→ ConfigFormatException，消息含两版本对照。 */
+    @Test
+    public void createEntry_rejectsVersionMismatch_aboveAndBelowDeclared() {
+        String[][] attempts = {{"5.0", "偏大"}, {"3.9", "偏小"}};
+        for (String[] attempt : attempts) {
+            try {
+                registry.createEntry(new ConfigEntry.Builder()
+                        .coordinate(COORDINATE_DEMO)
+                        .uniqueId("demo_mismatch_" + attempt[1])
+                        .title("mismatch")
+                        .version(attempt[0])
+                        .build());
+                fail("显式版本 " + attempt[0] + " ≠ 声明 4.0 应拒收（" + attempt[1] + "）");
+            } catch (ConfigFormatException e) {
+                assertTrue("异常消息应含传入版本 " + attempt[0],
+                        e.getMessage().contains(attempt[0]));
+                assertTrue("异常消息应含声明版本 4.0", e.getMessage().contains("4.0"));
+            }
+        }
+    }
+
+    /** 显式带版本但格式非法（缺 minor）→ requireWellFormed 拒收。 */
+    @Test
+    public void createEntry_rejectsMalformedExplicitVersion() {
+        try {
+            registry.createEntry(new ConfigEntry.Builder()
+                    .coordinate(COORDINATE_DEMO)
+                    .uniqueId("demo_malformed")
+                    .title("malformed")
+                    .version("4")
+                    .build());
+            fail("格式非法的显式版本应拒收");
+        } catch (ConfigFormatException e) {
+            assertTrue("异常应含实际值", e.getActual().contains("4"));
+        }
+    }
+
+    /** 集成未注册时 createEntry 显式失败（不存在「为未加载集成建 entry」的合法场景）。 */
+    @Test
+    public void createEntry_throwsWhenIntegrationNotRegistered() {
+        Mockito.when(integrationRegistryMock.getIntegration("com.ecat:ghost")).thenReturn(null);
+
+        try {
+            registry.createEntry(new ConfigEntry.Builder()
+                    .coordinate("com.ecat:ghost")
+                    .uniqueId("ghost_uid")
+                    .title("ghost")
+                    .build());
+            fail("集成未注册应抛 ConfigFormatException");
+        } catch (ConfigFormatException e) {
+            assertEquals("location 应为 coordinate", "com.ecat:ghost", e.getLocation());
+            assertEquals("actual 应点名集成未注册", "集成未注册", e.getActual());
+        }
+    }
+
+    /** 回归锁定：withReconfigure 与 setEnabled 均保持格式版本不变。 */
+    @Test
+    public void withReconfigureAndSetEnabled_preserveVersion() {
+        ConfigEntry created = registry.createEntry(new ConfigEntry.Builder()
+                .coordinate(COORDINATE_DEMO)
+                .uniqueId("demo_preserve")
+                .title("preserve")
+                .build());
+        assertEquals("创建后应为声明格式版本", "4.0", created.getVersion());
+        String entryId = created.getEntryId();
+
+        ConfigEntry reconfigured = registry.reconfigureEntry(entryId,
+                new ConfigEntry.Builder().title("Reconfigured").build());
+        assertEquals("reconfigure 后格式版本应不变", "4.0", reconfigured.getVersion());
+
+        ConfigEntry disabled = registry.setEnabled(entryId, false);
+        assertEquals("disable 后格式版本应不变", "4.0", disabled.getVersion());
+
+        ConfigEntry enabled = registry.setEnabled(entryId, true);
+        assertEquals("enable 后格式版本应不变", "4.0", enabled.getVersion());
     }
 
     @Test
@@ -297,7 +422,7 @@ public class ConfigEntryRegistryTest {
         assertEquals("title 应该更新", "Updated Title", updated.getTitle());
         assertEquals("data 应该更新", "value", updated.getData().get("key"));
         assertFalse("enabled 应该更新", updated.isEnabled());
-        assertEquals("版本号应该递增", 2, updated.getVersion());
+        assertEquals("格式版本应保持不变（不再自增）", "4.0", updated.getVersion());
     }
 
     @Test
@@ -520,7 +645,7 @@ public class ConfigEntryRegistryTest {
 
         assertNotNull("更新后的 entry 不应为 null", updated);
         assertTrue("应该被启用", updated.isEnabled());
-        assertEquals("版本号应该不变", 1, updated.getVersion());
+        assertEquals("格式版本应该不变", "4.0", updated.getVersion());
     }
 
     @Test

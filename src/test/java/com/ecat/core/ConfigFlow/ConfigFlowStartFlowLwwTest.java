@@ -18,6 +18,7 @@ package com.ecat.core.ConfigFlow;
 
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.EcatCore;
+import com.ecat.core.Integration.IntegrationBase;
 
 import org.junit.After;
 import org.junit.Before;
@@ -93,6 +94,16 @@ public class ConfigFlowStartFlowLwwTest {
         EcatCore.setInstance(core);
         service = new ConfigFlowService(core);
         core.getFlowRegistry().registerFlow(COORDINATE, new SnWizardFlow());
+        // createEntry 盖戳契约要求 coordinate 的集成已加载（取其 entryFormatVersion() 声明）：
+        // 注册最小 stub 集成（默认声明 "4.0"），createEntry 回调走 UnsupportedOperationException 警告路径即可
+        core.getIntegrationRegistry().register(COORDINATE, new StubIntegration());
+    }
+
+    /** 最小集成桩：只为盖戳契约提供 coordinate→声明版本 解析，不承载任何设备逻辑。 */
+    private static class StubIntegration extends IntegrationBase {
+        @Override public void onInit() { }
+        @Override public void onStart() { }
+        @Override public void onPause() { }
     }
 
     @After

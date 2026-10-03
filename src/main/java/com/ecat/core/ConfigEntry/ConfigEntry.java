@@ -81,9 +81,12 @@ public class ConfigEntry {
     private ZonedDateTime updateTime;
 
     /**
-     * 版本号 (修改时自动+1)
+     * 配置数据格式版本 ("major.minor"，如 "4.0")，表达 data 配置工程值结构的版本，非修改计数。
+     * <p>
+     * 变更唯二入口：创建时由 Registry 盖集成声明格式版本；格式迁移函数推进。
+     * withUpdate/withReconfigure/setEnabled 一律保持不变。
      */
-    private int version;
+    private String version;
 
     /**
      * 来源类型（记录 entry 的创建来源：USER/IMPORT_FLOW/MQTT/ZEROCONF/IGNORE）。
@@ -106,7 +109,8 @@ public class ConfigEntry {
         private boolean enabled = true;
         private ZonedDateTime createTime;
         private ZonedDateTime updateTime;
-        private int version = 1;
+        // 默认 null =「未带版本」，由 Registry.createEntry 盖集成声明的格式版本
+        private String version;
 
         private SourceType source = SourceType.USER;
 
@@ -155,7 +159,7 @@ public class ConfigEntry {
             return this;
         }
 
-        public Builder version(int version) {
+        public Builder version(String version) {
             this.version = version;
             return this;
         }
@@ -186,6 +190,8 @@ public class ConfigEntry {
 
     /**
      * 更新数据 (保留 entryId, coordinate, uniqueId)
+     * <p>
+     * 格式版本保持不变——版本不再随修改自增，仅由创建盖戳与迁移函数推进。
      *
      * @param newData 新的配置数据
      * @return 更新后的 ConfigEntry
@@ -201,15 +207,15 @@ public class ConfigEntry {
                 .enabled(newData.enabled)
                 .createTime(this.createTime)
                 .updateTime(DateTimeUtils.now())
-                .version(this.version + 1)
+                .version(this.version)
                 .source(this.source)
                 .build();
     }
 
     /**
-     * 重新配置 (不增加版本号)
+     * 重新配置 (保持格式版本不变)
      * <p>
-     * 用于 reconfigure flow，只更新数据和配置，不改变版本号。
+     * 用于 reconfigure flow，只更新数据和配置，不改变格式版本。
      *
      * @param newData 新的配置数据
      * @return 更新后的 ConfigEntry
@@ -225,7 +231,7 @@ public class ConfigEntry {
                 .enabled(newData.enabled)
                 .createTime(this.createTime)
                 .updateTime(DateTimeUtils.now())
-                .version(this.version)  // 保持版本号不变
+                .version(this.version)  // 保持格式版本不变
                 .source(this.source)
                 .build();
     }

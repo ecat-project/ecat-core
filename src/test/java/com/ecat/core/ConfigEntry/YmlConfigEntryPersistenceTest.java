@@ -16,6 +16,7 @@
 
 package com.ecat.core.ConfigEntry;
 
+import com.ecat.core.ConfigFormatException;
 import com.ecat.core.Utils.DateTimeUtils;
 import org.junit.After;
 import org.junit.Before;
@@ -56,17 +57,16 @@ public class YmlConfigEntryPersistenceTest {
         if (testDir != null && Files.exists(testDir)) {
             deleteDirectory(testDir.toFile());
         }
-        // 清理 .ecat-data 目录
-        File ecatDataDir = new File(".ecat-data/core/config_entries");
-        if (ecatDataDir.exists()) {
-            File[] files = ecatDataDir.listFiles();
-            if (files != null) {
-                for (File file : files) {
-                    if (file.getName().startsWith("test-id")) {
-                        file.delete();
-                    }
-                }
-            }
+        // 清理本测试类使用的 .ecat-data 分组目录（递归——文件实际落在
+        // {groupId}/{artifactId}/{entryId}.yml 布局中；残留的非 String version 文件
+        // 会让 loadAll 聚合 fail-closed，必须逐轮自愈清空）
+        File groupDir = new File(".ecat-data/core/config_entries/com.ecat.integration");
+        if (groupDir.exists()) {
+            deleteDirectory(groupDir);
+        }
+        File failClosedDir = new File(".ecat-data/core/config_entries/com.ecat.it");
+        if (failClosedDir.exists()) {
+            deleteDirectory(failClosedDir);
         }
     }
 
@@ -97,6 +97,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
+                .version("4.0")
                 .build();
 
         persistence.save(entry);
@@ -127,7 +128,7 @@ public class YmlConfigEntryPersistenceTest {
                 .title("Test Entry")
                 .data(data)
                 .enabled(false)
-                .version(2)
+                .version("4.0")
                 .build();
 
         persistence.save(entry);
@@ -154,12 +155,14 @@ public class YmlConfigEntryPersistenceTest {
                 .title("Test Entry")
                 .createTime(now)
                 .updateTime(now)
+                .version("4.0")
                 .build();
 
         persistence.save(entry);
 
-        // 清理
-        File file = new File(".ecat-data/core/config_entries/test-id-time.yml");
+        // 清理（文件实际落在 {groupId}/{artifactId}/ 布局中，须删真实路径——
+        // 历史上此处删的是根级路径，残留文件会让后续 loadAll 撞聚合 fail-closed）
+        File file = new File(".ecat-data/core/config_entries/com.ecat.integration/demo/test-id-time.yml");
         if (file.exists()) {
             file.delete();
         }
@@ -177,6 +180,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
+                .version("4.0")
                 .build();
 
         persistence.save(entry);
@@ -197,6 +201,7 @@ public class YmlConfigEntryPersistenceTest {
         assertEquals("coordinate 应该匹配", "com.ecat.integration:demo", loaded.getCoordinate());
         assertEquals("uniqueId 应该匹配", "demo_123", loaded.getUniqueId());
         assertEquals("title 应该匹配", "Test Entry", loaded.getTitle());
+        assertEquals("格式版本应为 String round-trip 保持", "4.0", loaded.getVersion());
 
         // 清理
         File dir = new File(".ecat-data/core/config_entries/com.ecat.integration/demo");
@@ -217,18 +222,18 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version(1)
+                .version("4.0")
                 .build();
 
         persistence.save(entry);
 
-        // 更新 entry
+        // 更新 entry（格式版本是文件级契约：update 重写文件后须 round-trip 保持）
         ConfigEntry updated = new ConfigEntry.Builder()
                 .entryId("test-id-update")
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Updated Title")
-                .version(2)
+                .version("4.0")
                 .build();
 
         persistence.update(updated);
@@ -242,7 +247,7 @@ public class YmlConfigEntryPersistenceTest {
 
         assertNotNull("应该找到 entry", loaded);
         assertEquals("title 应该更新", "Updated Title", loaded.getTitle());
-        assertEquals("版本号应该更新", 2, loaded.getVersion());
+        assertEquals("格式版本应 round-trip 保持", "4.0", loaded.getVersion());
 
         // 清理
         File dir = new File(".ecat-data/core/config_entries/com.ecat.integration/demo");
@@ -263,6 +268,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
+                .version("4.0")
                 .build();
 
         persistence.save(entry);
@@ -309,7 +315,7 @@ public class YmlConfigEntryPersistenceTest {
                 .enabled(true)
                 .createTime(createTime)
                 .updateTime(createTime)
-                .version(1)
+                .version("4.0")
                 .build();
 
         // 保存
@@ -328,7 +334,8 @@ public class YmlConfigEntryPersistenceTest {
         assertEquals("uniqueId 应该匹配", original.getUniqueId(), loaded.getUniqueId());
         assertEquals("title 应该匹配", original.getTitle(), loaded.getTitle());
         assertEquals("enabled 应该匹配", original.isEnabled(), loaded.isEnabled());
-        assertEquals("版本号应该匹配", original.getVersion(), loaded.getVersion());
+        assertEquals("格式版本应该匹配", "4.0", loaded.getVersion());
+        assertTrue("加载后的格式版本应为 String 类型", loaded.getVersion() instanceof String);
 
         // 验证 data (注意 YAML 可能会改变数字类型)
         assertNotNull("data 不应为 null", loaded.getData());
@@ -357,6 +364,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
+                .version("4.0")
                 .build();
 
         persistence.save(original);
@@ -387,6 +395,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_import")
                 .title("Imported")
+                .version("4.0")
                 .source(SourceType.IMPORT_FLOW)
                 .build();
 
@@ -421,6 +430,7 @@ public class YmlConfigEntryPersistenceTest {
                 .uniqueId(null)  // null uniqueId
                 .title(null)     // null title
                 .data(new HashMap<>())  // empty data
+                .version("4.0")
                 .build();
 
         persistence.save(entry);
@@ -441,6 +451,90 @@ public class YmlConfigEntryPersistenceTest {
         File dir = new File(".ecat-data/core/config_entries/com.ecat.integration/demo");
         if (dir.exists()) {
             try { deleteDirectory(dir); } catch (IOException e) { /* ignore */ }
+        }
+    }
+
+    // ==================== 格式版本 fail-closed 测试 ====================
+
+    /** 落一个原始 yml entry 文件（不做任何转义加工），body 为文件全部内容。 */
+    private File writeRawEntryFile(String artifactId, String entryId, String ymlBody) throws IOException {
+        File dir = new File(".ecat-data/core/config_entries/com.ecat.it/" + artifactId);
+        if (dir.exists()) {
+            deleteDirectory(dir);
+        }
+        dir.mkdirs();
+        File file = new File(dir, entryId + ".yml");
+        java.nio.file.Files.write(file.toPath(), ymlBody.getBytes("UTF-8"));
+        return file;
+    }
+
+    private static String entryYmlBody(String entryId, String versionLine) {
+        return "entryId: \"" + entryId + "\"\n"
+                + "coordinate: \"com.ecat.it:failclosed\"\n"
+                + "uniqueId: \"fc_" + entryId + "\"\n"
+                + "title: \"fail closed fixture\"\n"
+                + "data: {}\n"
+                + "stepInputs: {}\n"
+                + "enabled: true\n"
+                + "createTime: \"2026-10-01T10:00:00+08:00[Asia/Shanghai]\"\n"
+                + "updateTime: \"2026-10-01T10:00:00+08:00[Asia/Shanghai]\"\n"
+                + versionLine + "\n"
+                + "source: USER\n";
+    }
+
+    /** 旧计数器 int（yaml 裸 `version: 1`→Integer）必须 fail-closed 聚合抛出，不静默跳过。 */
+    @Test
+    public void loadAll_legacyIntVersionFailsClosed() throws IOException {
+        persistence = new YmlConfigEntryPersistence();
+        File offender = writeRawEntryFile("fc1", "fc-entry-1",
+                entryYmlBody("fc-entry-1", "version: 1"));
+
+        try {
+            persistence.loadAll();
+            fail("旧计数器 int 版本应聚合 fail-closed 抛出，而非静默跳过");
+        } catch (ConfigFormatException e) {
+            String message = e.getMessage();
+            assertTrue("消息应含 offender 文件绝对路径", message.contains(offender.getAbsolutePath()));
+            assertTrue("消息应含 coordinate 定位", message.contains("com.ecat.it:failclosed"));
+            assertTrue("消息应含 entryId", message.contains("fc-entry-1"));
+            assertTrue("actual 应携带类型:值（Integer:1）", e.getActual().contains("Integer:1"));
+        }
+    }
+
+    /** 聚合性：两个 offender 文件须在一条异常消息里同时点名（不给「修一个跑一次」的循环）。 */
+    @Test
+    public void loadAll_aggregatesAllVersionOffendersInOneThrow() throws IOException {
+        persistence = new YmlConfigEntryPersistence();
+        File offenderA = writeRawEntryFile("fc2", "fc-entry-a",
+                entryYmlBody("fc-entry-a", "version: 1"));
+        File offenderB = writeRawEntryFile("fc2b", "fc-entry-b",
+                entryYmlBody("fc-entry-b", "version: 7"));
+
+        try {
+            persistence.loadAll();
+            fail("两个 offender 应聚合为一次抛出");
+        } catch (ConfigFormatException e) {
+            String message = e.getMessage();
+            assertTrue("消息应同时点名第一个 offender 文件",
+                    message.contains(offenderA.getAbsolutePath()));
+            assertTrue("消息应同时点名第二个 offender 文件",
+                    message.contains(offenderB.getAbsolutePath()));
+            assertTrue("聚合清单应含 2 个文件计数", e.getActual().contains("共 2 个"));
+        }
+    }
+
+    /** 未加引号小数（yaml 裸 `version: 4.0`→Double）同样拒绝，actual 标明 Double 类型。 */
+    @Test
+    public void loadAll_unquotedDecimalVersionFails() throws IOException {
+        persistence = new YmlConfigEntryPersistence();
+        writeRawEntryFile("fc3", "fc-entry-decimal",
+                entryYmlBody("fc-entry-decimal", "version: 4.0"));
+
+        try {
+            persistence.loadAll();
+            fail("未加引号被解析为 Double 的 version 应拒绝");
+        } catch (ConfigFormatException e) {
+            assertTrue("actual 应含 Double 类型标注", e.getActual().contains("Double"));
         }
     }
 }

@@ -249,6 +249,23 @@ public abstract class IntegrationBase implements IntegrationLifecycle, RemovalHo
         return null;  // 默认无 flow
     }
 
+    /** entry 配置数据格式版本的默认声明值（与 4.0.0 格式重刻窗口同窗）。 */
+    public static final String DEFAULT_ENTRY_FORMAT_VERSION = "4.0";
+
+    /**
+     * 本集成声明的 entry 配置数据格式版本（"major.minor"）。
+     * <p>
+     * 是 ConfigEntryRegistry 创建 entry 时的盖戳基准（未带版本的 entry 盖此值；
+     * 显式带版本必须等于此值），也是后续格式迁移的门控基准。默认
+     * {@value #DEFAULT_ENTRY_FORMAT_VERSION}；集成的 data 结构演进出新格式时
+     * 重写本方法返回新版本，并配套实现 {@link #mergeEntries} 迁移旧条目。
+     *
+     * @return "major.minor" 格式版本字符串
+     */
+    public String entryFormatVersion() {
+        return DEFAULT_ENTRY_FORMAT_VERSION;
+    }
+
     /**
      * 合并/升级配置条目到当前版本格式
      * <p>

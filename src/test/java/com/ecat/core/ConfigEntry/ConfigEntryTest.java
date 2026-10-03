@@ -51,7 +51,7 @@ public class ConfigEntryTest {
         assertTrue("默认应该启用", entry.isEnabled());
         assertNotNull("data 不应为 null", entry.getData());
         assertTrue("data 应该为空", entry.getData().isEmpty());
-        assertEquals("默认版本应该是 1", 1, entry.getVersion());
+        assertNull("Builder 默认不设格式版本（null=「未带版本」，由 Registry 盖戳）", entry.getVersion());
     }
 
     @Test
@@ -67,7 +67,7 @@ public class ConfigEntryTest {
                 .title("Test Entry")
                 .data(data)
                 .enabled(false)
-                .version(2)
+                .version("4.0")
                 .build();
 
         assertNotNull("data 不应为 null", entry.getData());
@@ -75,7 +75,7 @@ public class ConfigEntryTest {
         assertEquals("value1", entry.getData().get("key1"));
         assertEquals(123, entry.getData().get("key2"));
         assertFalse("应该被禁用", entry.isEnabled());
-        assertEquals(2, entry.getVersion());
+        assertEquals("显式设置的格式版本应保持", "4.0", entry.getVersion());
     }
 
     @Test
@@ -123,7 +123,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version(1)
+                .version("4.0")
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -140,8 +140,8 @@ public class ConfigEntryTest {
         // 验证可变字段更新
         assertEquals("title 应该更新", "Updated Title", updated.getTitle());
 
-        // 验证版本号递增
-        assertEquals("版本号应该递增", 2, updated.getVersion());
+        // 验证格式版本保持（不再自增）
+        assertEquals("格式版本应保持不变", "4.0", updated.getVersion());
 
         // 验证时间戳
         assertNotNull("updateTime 不应为 null", updated.getUpdateTime());
@@ -158,7 +158,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .data(originalData)
-                .version(1)
+                .version("4.0")
                 .build();
 
         Map<String, Object> newData = new HashMap<>();
@@ -182,7 +182,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .enabled(true)
-                .version(1)
+                .version("4.0")
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -201,7 +201,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version(1)
+                .version("4.0")
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -223,7 +223,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .data(originalData)
-                .version(1)
+                .version("4.0")
                 .build();
 
         // 创建新的 empty map 而不是 null
@@ -241,13 +241,17 @@ public class ConfigEntryTest {
         assertTrue("data size 应该为 0", updated.getData().isEmpty());
     }
 
+    /**
+     * 格式版本不随修改自增：withUpdate 前后 version 相等，连续两次更新仍相等。
+     * 版本语义=配置数据格式版本，变更唯二入口是创建盖戳与迁移函数推进。
+     */
     @Test
-    public void testWithUpdate_VersionIncrement() {
+    public void testWithUpdate_VersionUnchanged() {
         ConfigEntry original = new ConfigEntry.Builder()
                 .entryId("test-id")
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
-                .version(1)
+                .version("4.0")
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -256,11 +260,11 @@ public class ConfigEntryTest {
 
         ConfigEntry updated = original.withUpdate(newData);
 
-        assertEquals("版本号应该从 1 递增到 2", 2, updated.getVersion());
+        assertEquals("withUpdate 后格式版本应保持不变", "4.0", updated.getVersion());
 
-        // 再次更新
+        // 再次更新仍保持
         ConfigEntry thirdUpdate = updated.withUpdate(newData);
-        assertEquals("版本号应该从 2 递增到 3", 3, thirdUpdate.getVersion());
+        assertEquals("连续两次更新格式版本仍应不变", "4.0", thirdUpdate.getVersion());
     }
 
     // ==================== Lombok @Data 测试 ====================

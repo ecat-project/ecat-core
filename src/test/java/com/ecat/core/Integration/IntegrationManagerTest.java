@@ -610,6 +610,7 @@ public class IntegrationManagerTest {
                 .entryId("entry-1")
                 .coordinate("com.test:stub")
                 .enabled(true)
+                .version("4.0")
                 .build();
         when(entryRegistry.listByCoordinate("com.test:stub"))
                 .thenReturn(Arrays.asList(testEntry));

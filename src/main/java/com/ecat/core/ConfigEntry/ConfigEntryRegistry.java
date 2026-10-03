@@ -17,6 +17,8 @@
 package com.ecat.core.ConfigEntry;
 
 import com.ecat.core.EcatCore;
+import com.ecat.core.FormatVersion;
+import com.ecat.core.ConfigFormatException;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.Bus.BusTopic;
@@ -163,10 +165,8 @@ public class ConfigEntryRegistry {
         }
         entry.setUpdateTime(now);
 
-        // 4. 默认启用
-        if (entry.getVersion() == 0) {
-            entry.setVersion(1);
-        }
+        // 4. 格式版本盖戳/校验（未带版本→盖集成声明格式版本；带版本→必须等于声明）
+        stampOrValidateVersion(entry);
 
         // 5. 持久化
         persistence.save(entry);
@@ -183,6 +183,47 @@ public class ConfigEntryRegistry {
                 entry.getEntryId(), entry.getUniqueId());
 
         return entry;
+    }
+
+    /**
+     * 格式版本盖戳/校验：未带版本→盖集成声明格式版本；显式带版本→必须等于声明，否则异常。
+     * <p>
+     * 落盘版本必须恒等于声明值（单一不变量）：偏大或偏小都拒绝——旧格式应走迁移，
+     * 新格式应先升级集成声明，运行时不猜测放行。在持久化与集成通知之前执行，
+     * 保证落盘文件与集成回调收到的 entry 均已带戳。
+     *
+     * @throws ConfigFormatException 集成未注册 / 显式版本格式非法 / 显式版本≠声明
+     */
+    private void stampOrValidateVersion(ConfigEntry entry) {
+        String declared = resolveDeclaredVersion(entry.getCoordinate());
+        if (entry.getVersion() == null) {
+            entry.setVersion(declared);
+            return;
+        }
+        FormatVersion.requireWellFormed(entry.getVersion(),
+                entry.getCoordinate() + "(entryId=" + entry.getEntryId() + ")");
+        if (FormatVersion.compare(entry.getVersion(), declared) != 0) {
+            throw new ConfigFormatException(
+                    entry.getCoordinate() + "(entryId=" + entry.getEntryId() + ")",
+                    declared, entry.getVersion());
+        }
+    }
+
+    /**
+     * 声明源：从已注册集成取其 entryFormatVersion() 声明。
+     * <p>
+     * 集成未注册时显式失败——不存在「为未加载集成建 entry」的合法场景
+     * （生产三入口的 coordinate 均指向集成自身）。
+     */
+    private String resolveDeclaredVersion(String coordinate) {
+        IntegrationRegistry registry = core == null ? null : core.getIntegrationRegistry();
+        IntegrationBase integration =
+                registry == null ? null : (IntegrationBase) registry.getIntegration(coordinate);
+        if (integration == null) {
+            throw new ConfigFormatException(coordinate,
+                    "已加载集成(取其 entryFormatVersion() 声明)", "集成未注册");
+        }
+        return integration.entryFormatVersion();
     }
 
     // ==================== IGNORE / UNIGNORE（req2 抑制 / req3 召回）====================

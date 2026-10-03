@@ -16,6 +16,8 @@
 
 package com.ecat.core.ConfigEntry;
 
+import com.ecat.core.ConfigFormatException;
+import com.ecat.core.FormatVersion;
 import com.ecat.core.Utils.DateTimeUtils;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
@@ -82,8 +84,17 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
 
         // 被跳过的 entry 文件（解析失败/空文件）：启动汇总点名用
         List<SkippedEntryFile> skipped = new ArrayList<>();
+        // 格式版本非法的文件专项收集：walk 结束后聚合 fail-closed 抛出（不与 skipped 混同——
+        // 版本非法必须中止启动而非静默缺额）
+        List<VersionOffence> versionOffences = new ArrayList<>();
         // 递归遍历所有子目录查找 yml 文件
-        loadEntriesFromDirectory(baseDir, allEntries, skipped);
+        loadEntriesFromDirectory(baseDir, allEntries, skipped, versionOffences);
+
+        // 格式版本非法聚合抛出：一次点名全部 offender（重刻遗漏一次显形，不给
+        // 「修一个跑一次」的循环）。本方法在 core 启动期执行，异常上浮即中止启动。
+        if (!versionOffences.isEmpty()) {
+            throw buildVersionOffenceException(versionOffences);
+        }
 
         log.info("Loaded {} config entries from {}", allEntries.size(), BASE_DIR);
         if (!skipped.isEmpty()) {
@@ -97,15 +108,42 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         return allEntries;
     }
 
+    /** 格式版本非法的文件（loadAll 专项收集，walk 结束后聚合抛出）。 */
+    private static final class VersionOffence {
+        final File file;
+        final ConfigFormatException cause;
+
+        VersionOffence(File file, ConfigFormatException cause) {
+            this.file = file;
+            this.cause = cause;
+        }
+    }
+
+    /**
+     * 聚合格式版本非法清单为单个异常：location=存储根目录，expected=当前声明格式，
+     * actual=逐文件清单（绝对路径 + 原 location + offender 实际值）。
+     */
+    private static ConfigFormatException buildVersionOffenceException(List<VersionOffence> offences) {
+        StringBuilder actual = new StringBuilder("共 " + offences.size() + " 个文件格式版本非法:\n");
+        for (VersionOffence offence : offences) {
+            actual.append("  ").append(offence.file.getAbsolutePath())
+                    .append(" → 位置=").append(offence.cause.getLocation())
+                    .append(",实际=").append(offence.cause.getActual()).append('\n');
+        }
+        return new ConfigFormatException(BASE_DIR, "4.0", actual.toString().trim());
+    }
+
     /**
      * 递归从目录加载所有 ConfigEntry
      *
-     * @param directory  目录
-     * @param allEntries 所有条目列表
-     * @param skipped    被跳过的损坏文件收集（解析失败/空文件），loadAll 汇总点名用
+     * @param directory       目录
+     * @param allEntries      所有条目列表
+     * @param skipped         被跳过的损坏文件收集（解析失败/空文件），loadAll 汇总点名用
+     * @param versionOffences 格式版本非法文件收集（不跳过、不中断 walk），loadAll 聚合抛出用
      */
     private void loadEntriesFromDirectory(File directory, List<ConfigEntry> allEntries,
-                                          List<SkippedEntryFile> skipped) {
+                                          List<SkippedEntryFile> skipped,
+                                          List<VersionOffence> versionOffences) {
         File[] files = directory.listFiles();
         if (files == null) {
             return;
@@ -114,7 +152,7 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         for (File file : files) {
             if (file.isDirectory()) {
                 // 递归遍历子目录
-                loadEntriesFromDirectory(file, allEntries, skipped);
+                loadEntriesFromDirectory(file, allEntries, skipped, versionOffences);
             } else if (file.getName().endsWith(".yml")) {
                 try (InputStream input = new FileInputStream(file)) {
                     Map<String, Object> data = yaml.load(input);
@@ -125,6 +163,10 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
                         log.warn("跳过空 entry 文件（无 entry 内容）: {}", file.getAbsolutePath());
                         skipped.add(new SkippedEntryFile(file));
                     }
+                } catch (ConfigFormatException e) {
+                    // 格式版本非法：专项收集（不落 skipped、不 return）——walk 继续收集其余 offender，
+                    // 结束后聚合抛出中止启动。若落进下方通用 catch 会吞成静默跳过，与 fail-closed 目标相反
+                    versionOffences.add(new VersionOffence(file, e));
                 } catch (Exception e) {
                     // 一行 WARN 带异常摘要（不带全栈：启动期多个坏文件时全栈刷屏；计数与清单由汇总行负责）
                     log.warn("跳过无法解析的 entry 文件: {} 原因: {}",
@@ -347,13 +389,8 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         builder.createTime(parseTime(map.get("createTime")));
         builder.updateTime(parseTime(map.get("updateTime")));
 
-        // 处理版本号
-        Object versionObj = map.get("version");
-        if (versionObj instanceof Integer) {
-            builder.version((Integer) versionObj);
-        } else if (versionObj instanceof String) {
-            builder.version(Integer.parseInt((String) versionObj));
-        }
+        // 处理格式版本（"major.minor" 字符串单路解析：缺失/非字符串/格式坏一律异常）
+        builder.version(parseFormatVersion(map.get("version"), describeLocation(map)));
 
         // 处理 source 字段（向后兼容：旧 yml 无 source → Builder 默认 USER）
         Object sourceObj = map.get("source");
@@ -369,6 +406,43 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         }
 
         return builder.build();
+    }
+
+    /**
+     * yml version 值单路解析：String 且 well-formed 才放行；其余一律异常
+     * （含旧计数器整数残留与未加引号被 snakeyaml 解析为数值的形态）。
+     * 「旧计数器残留」只是成因提示，不是放行理由——不设 legacy-int 特判分支。
+     *
+     * @param raw      yml 根级 version 键的原始值
+     * @param location 人读定位（coordinate+entryId）
+     * @return well-formed 的格式版本字符串
+     */
+    private static String parseFormatVersion(Object raw, String location) {
+        if (raw == null) {
+            throw new ConfigFormatException(location, "major.minor 字符串(如 \"4.0\")", "缺失");
+        }
+        if (!(raw instanceof String)) {
+            // 非 String 统一异常：旧计数器整数（yaml `version: 1`→Integer）与
+            // 未加引号小数（`version: 4.0`→Double）都落在这里，actual 携带类型:值
+            throw new ConfigFormatException(location, "major.minor 字符串(如 \"4.0\")",
+                    raw.getClass().getSimpleName() + ":" + raw + "(疑似旧计数器残留，或未加引号被解析为数值)");
+        }
+        FormatVersion.requireWellFormed((String) raw, location);
+        return (String) raw;
+    }
+
+    /**
+     * 从 yml map 取可读定位：coordinate+entryId 均可读时返回 "coordinate(entryId=...)"；
+     * 否则返回占位——具体文件路径由 loadAll 的聚合清单携带。
+     */
+    private static String describeLocation(Map<String, Object> map) {
+        Object coordinate = map.get("coordinate");
+        Object entryId = map.get("entryId");
+        if (coordinate instanceof String && !((String) coordinate).isEmpty()
+                && entryId instanceof String && !((String) entryId).isEmpty()) {
+            return coordinate + "(entryId=" + entryId + ")";
+        }
+        return "未知(以文件路径定位)";
     }
 
     /**
