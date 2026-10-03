@@ -20,6 +20,7 @@ import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
+import com.ecat.core.Version.CoreVersionsTestAccess;
 
 import org.junit.After;
 import org.junit.Before;
@@ -27,6 +28,7 @@ import org.junit.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -52,6 +54,7 @@ public class ConfigFlowServiceDuplicatePersistTest {
     private EcatCore core;
     private ConfigFlowService service;
     private ConfigEntry racingEntry;
+    private Supplier<String> savedVersionSource;
 
     /**
      * 确认屏首屏做真实排重（命中挂 config_summary，本 flow 自家约定形态）的 flow；
@@ -82,6 +85,9 @@ public class ConfigFlowServiceDuplicatePersistTest {
 
     @Before
     public void setUp() {
+        // init 的版本日志在单测环境(无 manifest)会 fail-fast:注入合成版本值,原缝值留待 @After 还原
+        savedVersionSource = CoreVersionsTestAccess.currentSource();
+        CoreVersionsTestAccess.injectSource(() -> "0.0.0-test");
         core = new EcatCore();
         core.init();
         EcatCore.setInstance(core);
@@ -104,6 +110,7 @@ public class ConfigFlowServiceDuplicatePersistTest {
             core.getEntryRegistry().removeEntry(racingEntry.getEntryId());
         }
         EcatCore.setInstance(null);
+        CoreVersionsTestAccess.injectSource(savedVersionSource);
     }
 
     @Test

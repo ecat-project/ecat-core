@@ -83,6 +83,7 @@
             </manifest>
             <manifestEntries>
               <Ecat-Artifact-Id>${project.artifactId}</Ecat-Artifact-Id>
+              <Implementation-Version>${project.version}</Implementation-Version>
             </manifestEntries>
           </archive>
           <descriptorRefs>

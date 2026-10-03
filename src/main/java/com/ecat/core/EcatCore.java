@@ -35,7 +35,10 @@ import com.ecat.core.Observability.SystemHealthService;
 import com.ecat.core.Shutdown.CoreShutdown;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
+import com.ecat.core.Utils.Log;
+import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.platform.PlatformInfo;
+import com.ecat.core.Version.CoreVersions;
 
 import lombok.Getter;
 
@@ -46,6 +49,8 @@ import lombok.Getter;
  * 
  */
 public class EcatCore {
+    private static final Log log = LogFactory.getLogger(EcatCore.class);
+
     private static EcatCore instance;
 
     /** shutdown 只跑一次：hook 与手工调用双入口时幂等（第二次直接返回）。 */
@@ -164,6 +169,9 @@ public class EcatCore {
         // boot 作用域（arch-review 25 号杠杆④）：main 线程 MDC 设 boot ULID，
         // 整段启动序列（init + loadIntegrations 的 entry 恢复）共用一个 id，可按代际 grep 分段。
         BootTraceContext.beginBoot();
+        // 版本真源=fat jar manifest 的 Implementation-Version,先于一切集成加载打出;
+        // 无 manifest(打包异常/非 assembly 产物)此处即 fail-fast,boot 死于集成加载之前
+        log.info("core 版本: {}(来源=jar manifest)", CoreVersions.current());
         platformInfo = PlatformInfo.getInstance();
         i18nProxy = new I18nProxy(Const.CORE_COORDINATE, EcatCore.class, EcatCore.class.getClassLoader());
         integrationRegistry = new IntegrationRegistry();

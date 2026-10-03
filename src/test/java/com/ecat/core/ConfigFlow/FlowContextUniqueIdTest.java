@@ -1,7 +1,10 @@
 package com.ecat.core.ConfigFlow;
 
+import java.util.function.Supplier;
+
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
 import com.ecat.core.EcatCore;
+import com.ecat.core.Version.CoreVersionsTestAccess;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -12,11 +15,16 @@ public class FlowContextUniqueIdTest {
 
     private FlowContext context;
     private EcatCore originalInstance;
+    private Supplier<String> savedVersionSource;
 
     @Before
     public void setUp() {
         // 保存原始 EcatCore 实例
         originalInstance = EcatCore.getInstance();
+        // 本类多处用例 boot 真实 core:init 的版本日志在单测环境(无 manifest)会 fail-fast,
+        // 注入合成版本值,原缝值留待 @After 还原
+        savedVersionSource = CoreVersionsTestAccess.currentSource();
+        CoreVersionsTestAccess.injectSource(() -> "0.0.0-test");
         context = new FlowContext("test-flow");
     }
 
@@ -24,6 +32,7 @@ public class FlowContextUniqueIdTest {
     public void tearDown() {
         // 恢复原始 EcatCore 实例
         EcatCore.setInstance(originalInstance);
+        CoreVersionsTestAccess.injectSource(savedVersionSource);
     }
 
     // ========== null core 跳过校验 ==========

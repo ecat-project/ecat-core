@@ -19,6 +19,7 @@ package com.ecat.core.ConfigFlow;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
+import com.ecat.core.Version.CoreVersionsTestAccess;
 
 import org.junit.After;
 import org.junit.Before;
@@ -27,6 +28,7 @@ import org.junit.Test;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -59,6 +61,7 @@ public class ConfigFlowStartFlowLwwTest {
 
     private EcatCore core;
     private ConfigFlowService service;
+    private Supplier<String> savedVersionSource;
 
     /**
      * SN 步尽早 setEntryUniqueId 占坑的最小 USER 向导（模拟设备集成向导形态）：
@@ -89,6 +92,9 @@ public class ConfigFlowStartFlowLwwTest {
 
     @Before
     public void setUp() {
+        // init 的版本日志在单测环境(无 manifest)会 fail-fast:注入合成版本值,原缝值留待 @After 还原
+        savedVersionSource = CoreVersionsTestAccess.currentSource();
+        CoreVersionsTestAccess.injectSource(() -> "0.0.0-test");
         core = new EcatCore();
         core.init();
         EcatCore.setInstance(core);
@@ -109,6 +115,7 @@ public class ConfigFlowStartFlowLwwTest {
     @After
     public void tearDown() {
         EcatCore.setInstance(null);
+        CoreVersionsTestAccess.injectSource(savedVersionSource);
     }
 
     /** 把 flow 推进到「已占坑 SN、停在确认步」的在途状态（模拟用户 abandon 前的向导）。 */
