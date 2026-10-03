@@ -21,9 +21,8 @@ import com.ecat.core.FormatVersion;
 import com.ecat.core.Utils.DateTimeUtils;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
-import org.yaml.snakeyaml.DumperOptions;
+import com.ecat.core.Utils.YamlAtomicFileWriter;
 import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.introspector.PropertyUtils;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -47,23 +46,18 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
 
     private final Yaml yaml;
 
+    /** entry yml 写盘共用件:save 经此获得 tmp+回读验证+原子 rename 写强度(裸截断写退役)。 */
+    private final YamlAtomicFileWriter yamlAtomicFileWriter = new YamlAtomicFileWriter();
+
     /**
      * 构造函数
      * <p>
      * 初始化 YAML 解析器并创建存储目录。
      */
     public YmlConfigEntryPersistence() {
-        DumperOptions options = new DumperOptions();
-        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
-        options.setPrettyFlow(true);
-        options.setIndent(2);
-
-        // 配置 PropertyUtils 以支持 Lombok 生成的方法
-        PropertyUtils propertyUtils = new PropertyUtils();
-        propertyUtils.setSkipMissingProperties(true);
-        propertyUtils.setAllowReadOnlyProperties(true);
-
-        this.yaml = new Yaml(options);
+        // 本类 Yaml 仅剩 loadAll 解析用途(dump 已委托 YamlAtomicFileWriter);原 DumperOptions/
+        // PropertyUtils 配置块随 dump 外迁退役——PropertyUtils 两项只影响 JavaBean dump 反射,对 Map 解析无作用
+        this.yaml = new Yaml();
 
         try {
             Files.createDirectories(Paths.get(BASE_DIR));
@@ -223,18 +217,15 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         File file = getFile(entry.getEntryId(), entry.getCoordinate());
         Map<String, Object> data = convertFromConfigEntry(entry);
 
-        // 确保目录存在
-        File parentDir = file.getParentFile();
-        if (!parentDir.exists()) {
-            parentDir.mkdirs();
-        }
-
-        try (Writer writer = new OutputStreamWriter(new FileOutputStream(file), "UTF-8")) {
-            yaml.dump(data, writer);
-            log.debug("Saved config entry: {} to {}", entry.getEntryId(), file.getAbsolutePath());
-        } catch (Exception e) {
+        try {
+            // 委托共用件:tmp+回读验证+原子 rename(共用件内含父目录创建,原手工 mkdirs 退役)。
+            // 写强度从「FileOutputStream 打开即截断」升级为原子替换;失败仍抛 RuntimeException,
+            // Registry 各写点(createEntry/updateEntry/reconfigureEntry/setEnabled)既有上浮路径零改动。
+            yamlAtomicFileWriter.write(data, file);
+        } catch (IOException e) {
             throw new RuntimeException("Failed to save config entry: " + entry.getEntryId(), e);
         }
+        log.debug("Saved config entry: {} to {}", entry.getEntryId(), file.getAbsolutePath());
     }
 
     @Override

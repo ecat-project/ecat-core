@@ -36,6 +36,7 @@ import com.ecat.core.Utils.JarScanException;
 import com.ecat.core.Utils.LoadJarResult;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
+import com.ecat.core.Utils.YamlAtomicFileWriter;
 import com.ecat.core.Utils.Mdc.MdcExecutorService;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
@@ -54,10 +55,8 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -104,6 +103,24 @@ public class IntegrationManager {
      * 独立锁对象而非 synchronized(this)：避免与本类其他 synchronized 区域（如有）互相影响。
      */
     private final Object configFileSync = new Object();
+
+    /**
+     * integrations.yml 写盘共用件(tmp+回读验证+原子 rename,实体与写强度契约见
+     * {@link YamlAtomicFileWriter})。字段初始化经虚工厂 {@link #newYamlAtomicFileWriter()}
+     * 调用——子类覆写在 super 构造期间即生效(注入 writer 无状态,不存在「未初始化子类
+     * 状态被读」的次序陷阱)。
+     */
+    private final YamlAtomicFileWriter configYamlWriter = newYamlAtomicFileWriter();
+
+    /**
+     * 共用件工厂测试缝(包级非 private,虚方法分派):IntegrationsYmlWindowsReplaceShapeRedTest
+     * 经子类覆写本工厂返回注入 Windows 替换形状的 writer。原「子类覆写
+     * moveAtomicallyWithRetry」的注入路径随原子写实体外迁 YamlAtomicFileWriter 而改为
+     * 工厂缝→writer 缝双虚分派,行为一致。
+     */
+    YamlAtomicFileWriter newYamlAtomicFileWriter() {
+        return new YamlAtomicFileWriter();
+    }
 
     // ==================== integrations.yml 读缓存（F6）+ jar 依赖扫描缓存（F4） ====================
 
@@ -2210,54 +2227,20 @@ public class IntegrationManager {
                 createEmptyConfigFile(configFile);
             }
 
-            // 原子替换写（修并发写竞态的持久损坏）：先写同目录临时文件，再 rename 覆盖目标。
-            // 原实现 new FileOutputStream(configFile) 打开即截断——两个并发写者按各自偏移
-            // 写在互相截断的文件上产生 NUL 稀疏洞（损坏留盘，波及后续所有读者）；读者在
-            // 「已截断、未写完」窗口还会读到半截 YAML。同文件系统 rename 是原子的：
-            // 任意时刻读者看到的要么是旧完整文件、要么是新完整文件。
-            // 调用方（saveIntegrationConfig）持锁期间串行写；tmp 唯一命名防残留互踩。
-            File tmpFile = null;
-            boolean written = false;
+            // 原子替换写(修并发写竞态的持久损坏)实体已外迁共用件 YamlAtomicFileWriter:
+            // tmp→dump→flush→回读验证→原子 rename(带重试/降级),写强度契约与迁移前逐字一致;
+            // 写-写互斥仍由本方法持有 configFileSync 承担(共用件无内置锁,锁语义零变化)。
+            boolean written;
             try {
-                File parent = configFile.getParentFile() != null
-                    ? configFile.getParentFile() : new File(".");
-                tmpFile = File.createTempFile(configFile.getName() + ".", ".tmp", parent);
-
-                try (FileOutputStream fos = new FileOutputStream(tmpFile);
-                     OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8")) {
-
-                    // 配置YAML输出格式为标准块格式
-                    DumperOptions options = new DumperOptions();
-                    options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
-                    options.setPrettyFlow(true);
-
-                    Yaml yaml = new Yaml(options);
-                    yaml.dump(config, writer);
-                    // close 前 flush（try-with-resources 的 close 亦会 flush）；不做 fsync——
-                    // 旧实现从不 fsync，本修复目标是并发原子性而非掉电持久性，rename 后掉电最坏
-                    // 情况与旧实现同级（保留旧文件或留下孤儿 tmp），不引入新的写延迟。
-                    writer.flush();
-                }
-
-                try {
-                    moveAtomicallyWithRetry(tmpFile, configFile);
-                    tmpFile = null; // move 成功，文件已不存在，跳过清理
-                    written = true;
-                } catch (AtomicMoveNotSupportedException e) {
-                    // 个别文件系统不支持原子 rename（FAT/部分网络盘）：退化为普通覆盖 move。
-                    // 锁内写者仍互斥；仅对锁外读者的窗口从原子降为「删除+重建」瞬态，记录告警。
-                    log.warn("文件系统不支持原子 rename，integrations.yml 降级为非原子替换: " + e.getMessage());
-                    Files.move(tmpFile.toPath(), configFile.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING);
-                    tmpFile = null;
-                    written = true;
-                }
+                // 经通配双转交予共用件(零拷贝,运行时对象与迁移前 yaml.dump(config) 逐字同一);
+                // T-2-4 落地后此处替换为带 version 戳的包装(本卡先保持原样)
+                @SuppressWarnings("unchecked")
+                Map<String, Object> docToWrite = (Map<String, Object>) (Map<?, ?>) config;
+                configYamlWriter.write(docToWrite, configFile);
+                written = true;
             } catch (IOException e) {
-                log.error("写入配置文件失败: " + e.getMessage());
-            } finally {
-                if (tmpFile != null && tmpFile.exists() && !tmpFile.delete()) {
-                    tmpFile.deleteOnExit();
-                }
+                log.error("写入配置文件失败: " + e.getMessage());   // 与迁移前行为等价:记日志不上抛
+                written = false;
             }
 
             // 写后主动换新缓存：内容取刚写入的 config（深拷贝防调用方后续改动回流），stat 取自替换后的文件。
@@ -2274,40 +2257,9 @@ public class IntegrationManager {
         }
     }
 
-    /**
-     * 原子替换替换写（tmp → target rename）：带 Windows 短暂占用重试。
-     *
-     * <p>POSIX 上 rename 覆盖已存在目标且原子；Windows（NTFS/Win2003 等部署目标）在目标文件被
-     * 其他句柄打开（并发读者 loadIntegrationsConfig）时 move 抛 IOException——Java NIO 打开文件
-     * 不带 FILE_SHARE_DELETE。读者存活毫秒级，故对 move 做有界重试（5 次 × 20ms）而非放弃
-     * （放弃=本次配置写入丢失，仅留错误日志）。重试穷尽仍失败由调用方 catch IOException 记日志，
-     * 旧文件完整保留（tmp+rename 的降级保证：不产生截断损坏）。
-     *
-     * <p>包级实例方法（非 static）是刻意留的测试缝：IntegrationsYmlWindowsReplaceShapeRedTest
-     * 覆写本方法注入「删除目标+重命名」的 Windows 非原子替换语义，在 Linux 上复现并锁死
-     * Windows 静默撕裂缺陷——勿改回 static。
-     */
-    void moveAtomicallyWithRetry(File tmpFile, File configFile) throws IOException {
-        IOException last = null;
-        for (int attempt = 0; attempt < 5; attempt++) {
-            try {
-                Files.move(tmpFile.toPath(), configFile.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                return;
-            } catch (AtomicMoveNotSupportedException notSupported) {
-                throw notSupported; // 能力缺失不是暂时态，交给调用方降级分支
-            } catch (IOException e) {
-                last = e;
-                try {
-                    Thread.sleep(20L);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException("integrations.yml 原子替换被中断", ie);
-                }
-            }
-        }
-        throw last;
-    }
+    // 测试缝已迁:原 moveAtomicallyWithRetry 实体及其测试缝随原子写外迁共用件
+    // YamlAtomicFileWriter(protected 缝+本类 newYamlAtomicFileWriter 工厂缝承接),
+    // 勿在此原位重刻,防考古误读。
 
     // 加载integrations/xx.yml单个集成的配置
     public Map<String, Object> loadConfig(String integrationName) {

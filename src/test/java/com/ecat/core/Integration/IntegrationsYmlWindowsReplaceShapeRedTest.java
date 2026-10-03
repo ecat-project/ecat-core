@@ -18,6 +18,7 @@ package com.ecat.core.Integration;
 
 import com.ecat.core.EcatCore;
 import com.ecat.core.State.StateManager;
+import com.ecat.core.Utils.YamlAtomicFileWriter;
 
 import org.junit.After;
 import org.junit.Before;
@@ -263,13 +264,14 @@ public class IntegrationsYmlWindowsReplaceShapeRedTest {
      * 停顿发生在写方 configFileSync 临界区内——与生产替换的位置一致，读者不受写锁保护
      * （锁自由读），恰是被测窗口。
      */
-    private static final class WindowsReplaceShapeManager extends IntegrationManager {
-        WindowsReplaceShapeManager(EcatCore core, IntegrationRegistry registry, StateManager stateManager) {
-            super(core, registry, stateManager);
-        }
-
+    /**
+     * Windows 替换形状 writer:注入形状自「IntegrationManager 子类覆写 moveAtomicallyWithRetry」
+     * 迁移为「YamlAtomicFileWriter 子类覆写 moveAtomicallyWithRetry」(缝随共用件迁至 Utils 包,
+     * 跨包子类化由 protected 缝承接);注入方法体逐字保留原实现。
+     */
+    private static final class WindowsReplaceShapeWriter extends YamlAtomicFileWriter {
         @Override
-        void moveAtomicallyWithRetry(java.io.File tmpFile, java.io.File configFile) throws java.io.IOException {
+        protected void moveAtomicallyWithRetry(java.io.File tmpFile, java.io.File configFile) throws java.io.IOException {
             Files.deleteIfExists(configFile.toPath());
             try {
                 Thread.sleep(ABSENT_WINDOW_MS);
@@ -278,6 +280,18 @@ public class IntegrationsYmlWindowsReplaceShapeRedTest {
                 throw new java.io.IOException("Windows 形状替换被中断", e);
             }
             Files.move(tmpFile.toPath(), configFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /** 注入路径:经工厂缝返回注入形状 writer(双虚分派:工厂→writer.moveAtomicallyWithRetry)。 */
+    private static final class WindowsReplaceShapeManager extends IntegrationManager {
+        WindowsReplaceShapeManager(EcatCore core, IntegrationRegistry registry, StateManager stateManager) {
+            super(core, registry, stateManager);
+        }
+
+        @Override
+        YamlAtomicFileWriter newYamlAtomicFileWriter() {
+            return new WindowsReplaceShapeWriter();
         }
     }
 
