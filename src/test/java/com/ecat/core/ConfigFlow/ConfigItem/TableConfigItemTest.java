@@ -118,4 +118,15 @@ public class TableConfigItemTest {
         Object r = t.validate(Arrays.asList(row(null, null)));
         assertTrue("关闭增删后行内字段错误照常上报", r instanceof Map);
     }
+
+    @Test
+    public void validate_emptyStringInput_returnsTypeError() {
+        // 非必填 table 字段收到 ""（API 畸形提交）：应照常报类型错误——空串放行语义
+        // （bug-record-20261001-230645）只作用于 validators 层，各类型 validateType 行为不变，
+        // 且 super 返回错误后不得走到 List 强转（否则畸形输入从类型错误劣化为 ClassCastException）。
+        TableConfigItem t = ConfigItemBuilder.table("points", false, rowSchema());
+        Object result = t.validate("");
+        assertNotNull("table 字段空串应报类型错误", result);
+        assertTrue("错误信息应为列表类型错误", String.valueOf(result).contains("列表"));
+    }
 }

@@ -213,6 +213,15 @@ public abstract class AbstractConfigItem<T> {
             return typeError;
         }
 
+        // 非必填 + 完全空串（长度 0，不 trim）：前端对空文本框提交的是 "" 而非省略键/null，
+        // 空串语义=未填，与 null 同等放行，不进 validators——否则描述「可不填」的文本字段
+        // 留空提交会撞上 minLength 校验（bug-record-20261001-230645）。
+        // 放在类型检查之后：boolean/table/schema 等类型收到 "" 仍按各自的类型错误处理，行为不变；
+        // !required 显式限定：required+"" 已在上方按缺失拦截，此处永不放行（堵 20260724 空 sn 口子不回潮）。
+        if (!required && "".equals(value)) {
+            return null;
+        }
+
         // 执行验证器
         for (ConstraintValidator<?> validator : validators) {
             @SuppressWarnings("unchecked")
