@@ -100,6 +100,31 @@
           </execution>
         </executions>
       </plugin>
+      <!-- 门禁最小集:requireJavaVersion + dependencyConvergence(2 规则)。
+           ecat-core 无 parent,显式声明;japicmp 不挂——core↔集成兼容由 requires_core 门执法,
+           core 自身 API 破坏由下游集成的编译期红暴露;
+           convergence 的 scope 口径与 ecat-project 4.0.0 逐字一致(实装定稿:
+           收窄法 excludedScopes=[test],provided 纳入执法) -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.6.3</version>
+        <executions>
+          <execution>
+            <id>enforce-build-gates</id>
+            <goals><goal>enforce</goal></goals>
+            <phase>validate</phase>
+            <configuration>
+              <rules>
+                <requireJavaVersion><version>[1.8,)</version></requireJavaVersion>
+                <dependencyConvergence>
+                  <excludedScopes><scope>test</scope></excludedScopes>
+                </dependencyConvergence>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
   <!-- 项目许可证声明 -->
