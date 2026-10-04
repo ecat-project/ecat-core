@@ -48,10 +48,21 @@ public class CloudRepositoryClient {
     private final int readTimeout;
 
     /**
-     * 默认构造函数 - 使用默认云端仓库地址
+     * 默认构造函数 - 云端地址读 ECAT_CLOUD_API_URL 环境变量，未设落生产默认。
+     *
+     * <p>env 覆盖属部署面配置（e2e 容器 lab 车道经 env-file 显性注入切换云端地址）；
+     * 未设时与原硬编码行为逐字节一致，生产/宿主 dev 零影响。</p>
      */
     public CloudRepositoryClient() {
-        this(DEFAULT_CLOUD_API_URL);
+        this(resolveCloudApiUrl(System.getenv("ECAT_CLOUD_API_URL")));
+    }
+
+    /**
+     * env 覆盖解析（包级静态 = 单测两态断言的注入缝，System.getenv 进程内不可桩）。
+     * env 设值原样透传；空串等同显性错配，不在此兜底，沿用 String 构造既有语义。
+     */
+    static String resolveCloudApiUrl(String envValue) {
+        return envValue != null ? envValue : DEFAULT_CLOUD_API_URL;
     }
 
     /**

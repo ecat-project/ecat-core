@@ -214,6 +214,41 @@ public class CloudRepositoryClientTest {
         }
     }
 
+    // ========== env 覆盖测试(ECAT_CLOUD_API_URL,部署面切换云端地址) ==========
+
+    @Test
+    public void testResolveApiUrl_EnvUnset_KeepsProductionAddressByteForByte() {
+        // 无 env = 逐字节回落原生产地址(生产行为零变的门禁断言)
+        assertEquals("https://mvn.ecat.bellyking.top",
+                CloudRepositoryClient.resolveCloudApiUrl(null));
+        assertEquals("回落值必须是既有 DEFAULT_CLOUD_API_URL 常量",
+                CloudRepositoryClient.DEFAULT_CLOUD_API_URL,
+                CloudRepositoryClient.resolveCloudApiUrl(null));
+    }
+
+    @Test
+    public void testResolveApiUrl_EnvSet_OverridesDefault() {
+        // env 设值 = 原样透传(e2e 容器 lab 车道注入 lab 地址的场景)
+        assertEquals("http://cloud-lab:19210",
+                CloudRepositoryClient.resolveCloudApiUrl("http://cloud-lab:19210"));
+    }
+
+    @Test
+    public void testDefaultConstructor_ReflectsEnvDerivedAddress() {
+        // 默认构造 = 以 env 推导地址显式构造,证明默认构造读取的正是 ECAT_CLOUD_API_URL
+        // (两态皆可断言:本进程 env 未设时即生产默认地址,逐字节等于原硬编码值)
+        String envValue = System.getenv("ECAT_CLOUD_API_URL");
+        CloudRepositoryClient expected = new CloudRepositoryClient(
+                envValue != null ? envValue : CloudRepositoryClient.DEFAULT_CLOUD_API_URL);
+        assertEquals(expected.getCloudApiBaseUrl(),
+                new CloudRepositoryClient().getCloudApiBaseUrl());
+        if (envValue == null) {
+            assertEquals("无 env 时默认构造必须落原生产地址",
+                    "https://mvn.ecat.bellyking.top",
+                    new CloudRepositoryClient().getCloudApiBaseUrl());
+        }
+    }
+
     // ========== 边界条件测试 ==========
 
     @Test(expected = IOException.class)
