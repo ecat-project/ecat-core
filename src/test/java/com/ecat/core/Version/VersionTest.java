@@ -147,22 +147,6 @@ public class VersionTest {
         assertTrue(v1.compareTo(v2) > 0);  // alpha > 1 (数字 < 字母)
     }
 
-    // ========== Version.isCompatibleWith() 测试 ==========
-
-    @Test
-    public void testIsCompatibleWith_SameMajor() {
-        Version v1 = Version.parse("1.2.0");
-        Version v2 = Version.parse("1.9.9");
-        assertTrue(v1.isCompatibleWith(v2));
-    }
-
-    @Test
-    public void testIsCompatibleWith_DifferentMajor() {
-        Version v1 = Version.parse("1.2.0");
-        Version v2 = Version.parse("2.0.0");
-        assertFalse(v1.isCompatibleWith(v2));
-    }
-
     // ========== Version.isInRange() 测试 ==========
 
     @Test

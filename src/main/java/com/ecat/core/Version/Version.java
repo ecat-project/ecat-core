@@ -244,20 +244,6 @@ public class Version implements Comparable<Version> {
     }
 
     /**
-     * 兼容性检查
-     *
-     * 规则：
-     * - 相同主版本号：兼容
-     * - 主版本号不同：不兼容
-     *
-     * @param other 要比较的版本
-     * @return 如果兼容返回true
-     */
-    public boolean isCompatibleWith(Version other) {
-        return this.major == other.major;
-    }
-
-    /**
      * 检查是否在指定版本范围内
      *
      * @param minVersion 最小版本（包含）
