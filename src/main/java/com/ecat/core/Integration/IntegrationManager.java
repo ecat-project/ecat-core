@@ -34,9 +34,11 @@ import com.ecat.core.Utils.LoadJarUtils;
 import com.ecat.core.Utils.MavenDependencyParser;
 import com.ecat.core.Utils.CustomClassLoader;
 import com.ecat.core.Utils.EcatClassLoader;
+import com.ecat.core.Utils.IntegrationConfigParseException;
 import com.ecat.core.Utils.JarDependencyLoader;
 import com.ecat.core.Utils.JarScanException;
 import com.ecat.core.Utils.LoadJarResult;
+import com.ecat.core.Utils.LoadOrderResult;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.YamlAtomicFileWriter;
@@ -598,7 +600,7 @@ public class IntegrationManager {
      *
      * @param coordinate 集成坐标
      */
-    private void unloadIntegration(String coordinate) {
+    public void unloadIntegration(String coordinate) {
         try {
             IntegrationBase integration = integrationRegistry.getIntegration(coordinate);
             if (integration != null) {
@@ -942,89 +944,22 @@ public class IntegrationManager {
         Map<String, List<String>> dependencyMap = new HashMap<>();
         List<IntegrationInfo> integrationInfoList = new ArrayList<>();
 
-        for (Map.Entry<String, Object> entry : itgs.entrySet()) {
-            // key 现在是 groupId:artifactId 格式
-            String key = entry.getKey();
-            Object value = entry.getValue();
-            if (value instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> integrationConfig = (Map<String, Object>) value;
+        // 启动期扫描区（jar 缺失/扫描失败/解析失败三分级点账隔离）抽取为独立方法：隔离分级必须可单测
+        collectIntegrationInfos(itgs, dependencyMap, integrationInfoList, tracker);
 
-                boolean enabled = (boolean) integrationConfig.get("enabled");
-                if (enabled) {
-                    // 不再从配置读取 className，改为从 JAR 扫描获取
-                    String groupId = (String) integrationConfig.get("groupId");
-                    String artifactId = (String) integrationConfig.get("artifactId");
-                    String version = (String) integrationConfig.get("version");
-
-                    String localRepoPath = System.getProperty("user.home") + "/.m2/repository";
-                    String jarPath = localRepoPath + "/" + groupId.replace('.', '/') + "/" + artifactId + "/" + version + "/" + artifactId + "-" + version + ".jar";
-                    File jarFile = new File(jarPath);
-
-                    if (!jarFile.exists()) {
-                        log.error("JAR 文件不存在: " + jarPath);
-                        continue;
-                    }
-
-                    // 扫描 JAR 获取入口类 className
-                    String className;
-                    try {
-                        className = JarDependencyLoader.scanIntegrationEntryClass(jarFile);
-                    } catch (JarScanException e) {
-                        log.error("扫描 JAR 入口类失败 [" + key + "]: " + e.getMessage());
-                        // 打印详细错误信息到控制台
-                        System.err.println(e.getMessage());
-                        // core 退出运行
-                        throw new RuntimeException("集成扫描失败，core 无法继续运行", e);
-                    }
-
-                    // 读取JAR包中的部分集成信息（已包含dependencies和webPlatform）
-                    IntegrationInfo info = JarDependencyLoader.readPartialIntegrationInfoFromJar(jarFile);
-
-                    // 用主配置信息完善对象（关键业务字段由主配置决定）
-                    info.setArtifactId(artifactId);
-                    info.setDepended(false); // 主配置控制是否为被依赖项
-                    info.setEnabled(enabled);
-                    info.setClassName(className);
-                    info.setGroupId(groupId);
-                    info.setVersion(version);
-
-                    // 输出依赖信息（用于调试）
-                    if (log.isDebugEnabled()) {
-                        StringBuilder depInfo = new StringBuilder();
-                        depInfo.append("集成依赖信息 [").append(artifactId).append("]: ");
-                        depInfo.append("groupId=").append(groupId).append(", ");
-                        depInfo.append("version=").append(version).append(", ");
-                        depInfo.append("dependencies=[");
-                        if (info.getDependencyInfoList() != null && !info.getDependencyInfoList().isEmpty()) {
-                            for (com.ecat.core.Integration.DependencyInfo dep : info.getDependencyInfoList()) {
-                                depInfo.append(dep.toShortString()).append(", ");
-                            }
-                        } else {
-                            depInfo.append("空");
-                        }
-                        depInfo.append("]");
-                        log.debug(depInfo.toString());
-                    }
-
-                    // 添加到依赖映射（使用 getCoordinate() 作为唯一键）
-                    // 从 dependencyInfoList 提取 coordinate 列表
-                    List<String> depCoordinates = new ArrayList<>();
-                    if (info.getDependencyInfoList() != null) {
-                        for (com.ecat.core.Integration.DependencyInfo dep : info.getDependencyInfoList()) {
-                            depCoordinates.add(dep.getCoordinate());
-                        }
-                    }
-                    dependencyMap.put(info.getCoordinate(), depCoordinates);
-                    integrationInfoList.add(info);
-                }
-            }
-        }
         List<IntegrationInfo> loadOrder;
-        try{
-            loadOrder = JarDependencyLoader.getLoadOrder(integrationInfoList, dependencyMap);
-        }
-        catch (IllegalStateException e){
+        try {
+            LoadOrderResult orderResult = JarDependencyLoader.getLoadOrder(integrationInfoList, dependencyMap);
+            // 分级④：依赖缺失/未启用的传递闭包隔离点账。blocked 坐标不入 loadOrder → 不进加载循环，
+            // updateLoadedIntegrationsState 不触碰其 yml 态——「被依赖方禁用导致依赖方悬空」成为
+            // 可见的合法运行态，启动报告为当次真相，yml state 保持上次已知值
+            for (Map.Entry<String, String> blocked : orderResult.getBlockedCoordinates().entrySet()) {
+                tracker.recordFailure(blocked.getKey(), StartupLoadTracker.STAGE_DEP_MISSING);
+                log.error("集成 " + blocked.getKey() + " 本轮不加载: " + blocked.getValue());
+            }
+            loadOrder = orderResult.getLoadOrder();
+        } catch (IllegalStateException e) {
+            // 环依赖=全局配置结构矛盾，杀 boot 保留
             throw new RuntimeException(e.getMessage());
         }
 
@@ -1047,7 +982,7 @@ public class IntegrationManager {
                     try {
                         loadSingleIntegration(info, loadOrder, tracker);
                     } catch (Exception e) {
-                        tracker.recordFailure(info.getCoordinate(), "load");
+                        tracker.recordFailure(info.getCoordinate(), StartupLoadTracker.STAGE_LOAD);
                         log.error("集成 " + info.getArtifactId() + " 加载失败: " + e.getMessage(), e);
                     }
                 });
@@ -1106,6 +1041,114 @@ public class IntegrationManager {
         } catch (InterruptedException e) {
             log.error("等待集成加载完成被中断", e);
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * 启动期扫描区（原 loadIntegrations 内联块整体迁移，行为面=迁移+三处分级改造）。
+     *
+     * <p>两级分级立法的单坐标侧：jar 缺失 / 入口类扫描失败 / ecat-config.yml 解析失败
+     * 一律点账隔离（tracker 记账 + log.error + 该坐标不入列），boot 照常完成——单坐标的
+     * 坏 jar 只证明自己坏，不证明全局配置坏。点账键=yml 键（groupId:artifactId 形态，
+     * 与既有日志口径一致；此时 info 尚未构建，失败即无 info）。
+     *
+     * <p>包内可见实例方法：同包单测直驱（隔离分级的可测性是抽取动机）。
+     *
+     * @param itgs integrations.yml 的 integrations: 节点值
+     * @param dependencyMap 出参：坐标 → 声明依赖坐标列表
+     * @param integrationInfoList 出参：扫描成功的集成信息（依赖闭包计算/加载序的输入）
+     * @param tracker 启动健康报告追踪器（失败分级点账）
+     */
+    void collectIntegrationInfos(Map<String, Object> itgs, Map<String, List<String>> dependencyMap,
+            List<IntegrationInfo> integrationInfoList, StartupLoadTracker tracker) {
+        for (Map.Entry<String, Object> entry : itgs.entrySet()) {
+            // key 现在是 groupId:artifactId 格式
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            if (value instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> integrationConfig = (Map<String, Object>) value;
+
+                boolean enabled = (boolean) integrationConfig.get("enabled");
+                if (enabled) {
+                    // 不再从配置读取 className，改为从 JAR 扫描获取
+                    String groupId = (String) integrationConfig.get("groupId");
+                    String artifactId = (String) integrationConfig.get("artifactId");
+                    String version = (String) integrationConfig.get("version");
+
+                    String localRepoPath = System.getProperty("user.home") + "/.m2/repository";
+                    String jarPath = localRepoPath + "/" + groupId.replace('.', '/') + "/" + artifactId + "/" + version + "/" + artifactId + "-" + version + ".jar";
+                    File jarFile = new File(jarPath);
+
+                    if (!jarFile.exists()) {
+                        // 分级①jar 缺失：补点账（现状静默 continue 的另一半不对称在此收口）
+                        tracker.recordFailure(key, StartupLoadTracker.STAGE_JAR_MISSING);
+                        log.error("JAR 文件不存在: " + jarPath);
+                        continue;
+                    }
+
+                    // 扫描 JAR 获取入口类 className
+                    String className;
+                    try {
+                        className = JarDependencyLoader.scanIntegrationEntryClass(jarFile);
+                    } catch (JarScanException e) {
+                        // 分级②扫描失败：从 System.err+RuntimeException 杀 boot 降级为坐标隔离——
+                        // 入口类扫不出的 jar 无法安全加载，拒载该集成即可，不支持杀全部
+                        tracker.recordFailure(key, StartupLoadTracker.STAGE_SCAN_FAIL);
+                        log.error("扫描 JAR 入口类失败 [" + key + "]: " + e.getMessage());
+                        continue;
+                    }
+
+                    // 读取JAR包中的部分集成信息（已包含dependencies和webPlatform）
+                    IntegrationInfo info;
+                    try {
+                        info = JarDependencyLoader.readPartialIntegrationInfoFromJar(jarFile);
+                    } catch (IntegrationConfigParseException e) {
+                        // 分级③解析失败：明确异常显形（jarPath+原因链），隔离点账，
+                        // 坏 jar 不以「无依赖无 requires_core」默认形态混入加载序
+                        tracker.recordFailure(key, StartupLoadTracker.STAGE_PARSE_FAIL);
+                        log.error("解析 ecat-config.yml 失败 [" + key + "]: " + e.getMessage());
+                        continue;
+                    }
+
+                    // 用主配置信息完善对象（关键业务字段由主配置决定）
+                    info.setArtifactId(artifactId);
+                    info.setDepended(false); // 主配置控制是否为被依赖项
+                    info.setEnabled(enabled);
+                    info.setClassName(className);
+                    info.setGroupId(groupId);
+                    info.setVersion(version);
+
+                    // 输出依赖信息（用于调试）
+                    if (log.isDebugEnabled()) {
+                        StringBuilder depInfo = new StringBuilder();
+                        depInfo.append("集成依赖信息 [").append(artifactId).append("]: ");
+                        depInfo.append("groupId=").append(groupId).append(", ");
+                        depInfo.append("version=").append(version).append(", ");
+                        depInfo.append("dependencies=[");
+                        if (info.getDependencyInfoList() != null && !info.getDependencyInfoList().isEmpty()) {
+                            for (com.ecat.core.Integration.DependencyInfo dep : info.getDependencyInfoList()) {
+                                depInfo.append(dep.toShortString()).append(", ");
+                            }
+                        } else {
+                            depInfo.append("空");
+                        }
+                        depInfo.append("]");
+                        log.debug(depInfo.toString());
+                    }
+
+                    // 添加到依赖映射（使用 getCoordinate() 作为唯一键）
+                    // 从 dependencyInfoList 提取 coordinate 列表
+                    List<String> depCoordinates = new ArrayList<>();
+                    if (info.getDependencyInfoList() != null) {
+                        for (com.ecat.core.Integration.DependencyInfo dep : info.getDependencyInfoList()) {
+                            depCoordinates.add(dep.getCoordinate());
+                        }
+                    }
+                    dependencyMap.put(info.getCoordinate(), depCoordinates);
+                    integrationInfoList.add(info);
+                }
+            }
         }
     }
 

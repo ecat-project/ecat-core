@@ -45,6 +45,17 @@ import com.ecat.core.Observability.StartupReportHolder;
  */
 class StartupLoadTracker {
 
+    /**
+     * 启动期失败分类词汇表（recordFailure 第二参）。单坐标失败一律隔离点账、boot 照常完成；
+     * 杀 boot 仅保留给全局态损坏（integrations.yml 损坏 / 环依赖）。
+     */
+    public static final String STAGE_LOAD          = "load";           // 通用加载失败
+    public static final String STAGE_REQUIRES_CORE = "requires-core";  // requires_core 门失败
+    public static final String STAGE_JAR_MISSING   = "jar-missing";    // jar 文件不存在
+    public static final String STAGE_SCAN_FAIL     = "scan-fail";      // 入口类扫描失败
+    public static final String STAGE_PARSE_FAIL    = "parse-fail";     // ecat-config.yml 解析失败
+    public static final String STAGE_DEP_MISSING   = "dep-missing";    // 依赖缺失/未启用闭包隔离
+
     /** 每坐标耗时槽位：[0]=生命周期加载（onLoad→onStart），[1]=entry 恢复（mergeEntries+createEntry 循环+onAllExistEntriesLoaded） */
     private static final int SLOT_LIFECYCLE = 0;
     private static final int SLOT_ENTRY_RESTORE = 1;
@@ -70,7 +81,7 @@ class StartupLoadTracker {
         entriesRestored.incrementAndGet();
     }
 
-    /** 记录一次启动期失败（stage：load / entry:{entryId} / onAllExistEntriesLoaded） */
+    /** 记录一次启动期失败（stage：优先用上方分类词汇表常量；另有 entry:{entryId} / onAllExistEntriesLoaded / entry-restore:* 既有字面量） */
     void recordFailure(String coordinate, String stage) {
         failures.add(coordinate + ":" + stage);
     }

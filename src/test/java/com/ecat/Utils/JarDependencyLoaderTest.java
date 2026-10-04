@@ -4,19 +4,29 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 
 import org.junit.Test;
 
+import com.ecat.core.Integration.GateStubIntegration;
 import com.ecat.core.Integration.IntegrationInfo;
+import com.ecat.core.Utils.IntegrationConfigParseException;
 import com.ecat.core.Utils.JarDependencyLoader;
 import com.ecat.core.Utils.JarScanException;
+import com.ecat.core.Utils.LoadOrderResult;
 import com.ecat.core.Integration.IntegrationSubInfo.WebPlatformSupport;
 
 public class JarDependencyLoaderTest {
@@ -39,7 +49,8 @@ public class JarDependencyLoaderTest {
         dependencyMap.put("groupE:e", Collections.emptyList());
 
         // 调用方法，测试kahn算法
-        List<IntegrationInfo> loadOrder = JarDependencyLoader.getLoadOrder(integrationInfoList, dependencyMap);
+        LoadOrderResult result = JarDependencyLoader.getLoadOrder(integrationInfoList, dependencyMap);
+        List<IntegrationInfo> loadOrder = result.getLoadOrder();
 
         // 断言结果不为空
         assertNotNull(loadOrder);
@@ -116,12 +127,77 @@ public class JarDependencyLoaderTest {
         dependencyMap.put("com.ecat:module-b", Collections.emptyList());
 
         // 不应抛出 NPE
-        List<IntegrationInfo> loadOrder = JarDependencyLoader.getLoadOrder(
+        LoadOrderResult result = JarDependencyLoader.getLoadOrder(
             integrationInfoList, dependencyMap
         );
+        List<IntegrationInfo> loadOrder = result.getLoadOrder();
 
         assertNotNull("loadOrder 不应为 null", loadOrder);
         assertEquals("应返回所有集成", 2, loadOrder.size());
+    }
+
+    // ========== 解析失败显形测试（兜底已死） ==========
+
+    /**
+     * 夹具 jar 内嵌合法入口类 + 截断/非 YAML 的 ecat-config.yml → 直调
+     * readPartialIntegrationInfoFromJar 必抛 IntegrationConfigParseException
+     * （负向：旧 catch-all 吞异常返默认实例、printStackTrace 形态已死）。
+     */
+    @Test
+    public void testParseFailCorruptYml_throwsWithJarPathAndCause() throws Exception {
+        File testDir = new File("target", ".ecat-jdl-parse-fail");
+        deleteRecursively(testDir);
+        assertTrue("测试目录创建失败: " + testDir, testDir.mkdirs() || testDir.exists());
+        File jarFile = new File(testDir, "corrupt-1.0.0.jar");
+        try (JarOutputStream jarOut = new JarOutputStream(new FileOutputStream(jarFile))) {
+            // 未闭合 flow 序列：snakeyaml 解析必炸（截断/非 YAML 形态）
+            jarOut.putNextEntry(new JarEntry("ecat-config.yml"));
+            jarOut.write("requires_core: \"^1.0.0\"\ndependencies: [\"com.ecat:broken\""
+                .getBytes(StandardCharsets.UTF_8));
+            jarOut.closeEntry();
+            copyEntryClass(jarOut);
+        }
+
+        try {
+            IntegrationConfigParseException ex = assertThrows(IntegrationConfigParseException.class,
+                () -> JarDependencyLoader.readPartialIntegrationInfoFromJar(jarFile));
+            assertEquals("getJarFilePath=夹具路径", jarFile.getPath(), ex.getJarFilePath());
+            assertNotNull("原因链保留（原始解析异常）", ex.getCause());
+            assertTrue("message 含 jarPath 便于定位", ex.getMessage().contains(jarFile.getPath()));
+        } finally {
+            deleteRecursively(testDir);
+        }
+    }
+
+    /** GateStubIntegration.class 经资源流拷入夹具 jar（顶层类，扫描器跳含 $ 条目故嵌套类不可用） */
+    private static void copyEntryClass(JarOutputStream jarOut) throws IOException {
+        Class<?> stub = GateStubIntegration.class;
+        String entryName = stub.getName().replace('.', '/') + ".class";
+        try (InputStream in = stub.getResourceAsStream("/" + entryName)) {
+            assertNotNull("GateStubIntegration.class 须在 test-classes（先行 mvnd test-compile）", in);
+            jarOut.putNextEntry(new JarEntry(entryName));
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) > 0) {
+                jarOut.write(buffer, 0, read);
+            }
+            jarOut.closeEntry();
+        }
+    }
+
+    private static void deleteRecursively(File file) {
+        if (file == null || !file.exists()) {
+            return;
+        }
+        File[] children = file.listFiles();
+        if (children != null) {
+            for (File child : children) {
+                deleteRecursively(child);
+            }
+        }
+        if (!file.delete()) {
+            file.deleteOnExit();
+        }
     }
 
     // ========== requires_core 测试 ==========

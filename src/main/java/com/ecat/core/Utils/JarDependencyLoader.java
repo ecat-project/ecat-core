@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -51,9 +52,11 @@ public class JarDependencyLoader {
 
     static private Log log = LogFactory.getLogger(JarDependencyLoader.class);
 
-    // 读取ecat-config.yml并返回部分填充的IntegrationInfo（仅包含配置文件能提供的字段）
+    // 读取ecat-config.yml并返回部分填充的IntegrationInfo（仅包含配置文件能提供的字段）。
+    // 解析期任何异常包装为 IntegrationConfigParseException 上抛（坏 jar 显形，不返默认实例）；
+    // 无配置文件/流不可开两早退分支保留=「jar 无配置文件」的合法形态（此后由 requires_core 门拒绝）
     @SuppressWarnings("unchecked")
-    public static IntegrationInfo readPartialIntegrationInfoFromJar(File jarFile) {
+    public static IntegrationInfo readPartialIntegrationInfoFromJar(File jarFile) throws IntegrationConfigParseException {
         IntegrationInfo partialInfo = new IntegrationInfo(
             null,  // artifactId（由主配置填充）
             false, // isDepended（由主配置填充）
@@ -154,21 +157,77 @@ public class JarDependencyLoader {
             // 注意：className 不从 ecat-config.yml 读取，由 IntegrationManager 通过扫描 JAR 获取
             return partialInfo;
         } catch (Exception e) {
-            e.printStackTrace();
-            return partialInfo; // 异常时返回初始默认对象
+            // 解析期异常不再吞：包装 jarPath+原因链上抛——boot 扫描区隔离点账，运行时
+            // 热加载路经既有 catch/throws 传导回滚；printStackTrace 旁路消亡，
+            // 坏 jar 不以「无依赖无 requires_core」默认形态混入加载序
+            throw new IntegrationConfigParseException(jarFile.getPath(), e);
         }
     }
 
-    // TODO: 目前没有处理被依赖组件未加载或缺失情况下，依赖其的组件的异常处理（不再加载还是停止运行报错？）
-    public static List<IntegrationInfo> getLoadOrder(List<IntegrationInfo> integrationInfoList, Map<String, List<String>> dependencyMap) {
+    // 缺依赖处置（原 TODO 的答案，立法定稿）：依赖坐标缺失/未启用时，依赖方及其传递
+    // 闭包整体隔离（blocked），不杀 boot 也不静默半载——「被依赖方禁用导致依赖方悬空」
+    // 是合法运行态，隔离点账后 boot 照常完成，启动报告可见。环依赖仍属全局配置结构
+    // 矛盾，保留 IllegalStateException 杀 boot。
+    public static LoadOrderResult getLoadOrder(List<IntegrationInfo> integrationInfoList, Map<String, List<String>> dependencyMap) {
         // Log log = LogFactory.getLogger(JarDependencyLoader.class);
+
+        // ===== blocked 闭包计算（缺失坐标及其传递闭包前置排除在图外，永不入队，
+        // 下方防御分支在新流程中成为纯防御） =====
+
+        // 已声明坐标集（一次遍历）
+        Map<String, IntegrationInfo> declaredCoordinates = new HashMap<>();
+        for (IntegrationInfo info : integrationInfoList) {
+            declaredCoordinates.put(info.getCoordinate(), info);
+        }
+
+        // 反向边表：to → 依赖 to 的坐标们（缺失坐标也入表，作为闭包传播源标记）
+        Map<String, List<String>> dependentsOf = new HashMap<>();
+        for (Map.Entry<String, List<String>> entry : dependencyMap.entrySet()) {
+            for (String to : entry.getValue()) {
+                dependentsOf.computeIfAbsent(to, k -> new ArrayList<>()).add(entry.getKey());
+            }
+        }
+
+        // 种子：声明的依赖不在已声明坐标中 → 依赖方入 blocked（LinkedHashMap 保序，先到先记）
+        Map<String, String> blocked = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : dependencyMap.entrySet()) {
+            List<String> missing = new ArrayList<>();
+            for (String to : entry.getValue()) {
+                if (!declaredCoordinates.containsKey(to)) {
+                    missing.add(to);
+                }
+            }
+            if (!missing.isEmpty()) {
+                blocked.put(entry.getKey(), "缺少依赖 " + missing);
+            }
+        }
+
+        // BFS 传播：被隔离坐标的依赖方连锁隔离（种子原因优先于传播原因）
+        Queue<String> propagation = new LinkedList<>(blocked.keySet());
+        while (!propagation.isEmpty()) {
+            String isolated = propagation.poll();
+            for (String dependent : dependentsOf.getOrDefault(isolated, Collections.<String>emptyList())) {
+                if (!blocked.containsKey(dependent)) {
+                    blocked.put(dependent, "依赖 " + isolated + "(因依赖缺失被隔离)");
+                    propagation.offer(dependent);
+                }
+            }
+        }
+
+        // ===== 非 blocked 集上的既有拓扑（原逻辑作用于过滤后集合；闭包性质保证
+        // 非 blocked 坐标的每个声明依赖必在本集合内） =====
 
         // 构建图的邻接表和入度表（使用 coordinate 作为唯一键）
         Map<String, List<String>> graph = new HashMap<>();
         Map<String, Integer> inDegree = new HashMap<>();
         Map<String, IntegrationInfo> coordinateToInfo = new HashMap<>();
+        List<IntegrationInfo> nonBlockedList = new ArrayList<>();
 
         for (IntegrationInfo info : integrationInfoList) {
+            if (blocked.containsKey(info.getCoordinate())) {
+                continue;   // 被隔离坐标不入图：既不参与排序也不出现在环清单（它们不是环）
+            }
+            nonBlockedList.add(info);
             String coordinate = info.getCoordinate();
             graph.put(coordinate, new ArrayList<>());
             inDegree.put(coordinate, 0);
@@ -179,10 +238,14 @@ public class JarDependencyLoader {
         if (log.isDebugEnabled()) {
             log.debug("getLoadOrder - coordinateToInfo keys: " + coordinateToInfo.keySet());
             log.debug("getLoadOrder - dependencyMap keys: " + dependencyMap.keySet());
+            log.debug("getLoadOrder - blocked coordinates: " + blocked.keySet());
         }
 
         for (Map.Entry<String, List<String>> entry : dependencyMap.entrySet()) {
             String from = entry.getKey();
+            if (!coordinateToInfo.containsKey(from)) {
+                continue;   // 被隔离坐标的边不进图
+            }
             for (String to : entry.getValue()) {
                 graph.get(from).add(to);
                 inDegree.put(to, inDegree.getOrDefault(to, 0) + 1);
@@ -238,8 +301,8 @@ public class JarDependencyLoader {
             }
         }
 
-        // 检测是否存在环路
-        if (loadOrder.size() != integrationInfoList.size()) {
+        // 检测是否存在环路（blocked 坐标不入清单——它们不是环）
+        if (loadOrder.size() != nonBlockedList.size()) {
             List<String> loopNodes = new ArrayList<>();
             for (Map.Entry<String, Integer> entry : inDegree.entrySet()) {
                 if (entry.getValue() > 0) {
@@ -252,7 +315,7 @@ public class JarDependencyLoader {
         // 反转列表以实现从底层依赖开始输出
         Collections.reverse(loadOrder);
 
-        return loadOrder;
+        return new LoadOrderResult(loadOrder, blocked);
     }
 
     // ==================== JAR 扫描功能 ====================
