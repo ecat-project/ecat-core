@@ -198,12 +198,6 @@ public class CloudRepositoryClientTest {
         client.getDependencies("integration-modbus", "1.2.0");
     }
 
-    @Test(expected = IOException.class)
-    public void testDownloadPackage_InvalidUrl() throws IOException {
-        CloudRepositoryClient client = new CloudRepositoryClient("http://" + INVALID_HOST);
-        client.downloadPackage("integration-modbus", "1.2.0");
-    }
-
     // ========== URL 构建测试 ==========
 
     @Test

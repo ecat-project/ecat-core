@@ -4,11 +4,6 @@ import org.junit.Assume;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
@@ -23,21 +18,23 @@ import static org.junit.Assert.assertTrue;
  *    普通 {@code mvn test} 根本不执行本类；
  * ② 即便被 {@code -Dtest=} 显式点名，未注入演练系统属性时 {@link Assume} 全部短路跳过。</p>
  *
- * <p>演练期由 runbook（T-4-5 设计 §5.4 S6）注入真实服务地址与期望值；
- * expected sha256 从服务端 DB 取出经系统属性传入，期望值不由被测输出反推。</p>
+ * <p>演练期由 runbook（T-4-5 设计 §5.4 S6）注入真实服务地址与期望值。</p>
  *
  * <pre>
  * mvn test -Dtest=CloudRepositoryClientLiveIT \
  *   -Decat.drill.url=https://mvn.ecat.bellyking.top \
  *   -Decat.drill.group=com.ecat -Decat.drill.artifact=ruoyi \
- *   -Decat.drill.version=5.99.0-drill1 \
- *   -Decat.drill.jar.sha256=&lt;S4 取出的 jar_sha256&gt;
+ *   -Decat.drill.version=5.99.0-drill1
  * </pre>
  *
  * <p>参数分组（S6 拆参数裁定）：batch/dependencies 用注册仓坐标
- * {@code com.ecat:ruoyi}；search/download 走 {@code com.ecat:ruoyi-admin}
+ * {@code com.ecat:ruoyi}；search 走 {@code com.ecat:ruoyi-admin}
  * （子模块行 artifact-first 服务）。本类只定义单一 A 属性，
- * runbook 按 -Dtest 方法过滤分两组注入（零代码改动）。</p>
+ * runbook 按 -Dtest 方法过滤分组注入（零代码改动）。</p>
+ *
+ * <p>下载腿（download_matches_sha256）已随 downloadPackage 旧入口同生同灭删除
+ * （T-1-8 删除窗,D21 孤儿清零后旧入口无消费者）；jar 下载完整性由
+ * ArtifactDownloadService（staging+sha256 门）承担，活体演练腿归其测试面。</p>
  *
  * @author coffee
  * @version 1.0.0
@@ -52,8 +49,6 @@ public class CloudRepositoryClientLiveIT {
     private static final String A = System.getProperty("ecat.drill.artifact");
     /** 演练版本，例 5.99.0-drill1 */
     private static final String V = System.getProperty("ecat.drill.version");
-    /** 期望 jar sha256（runbook 从服务端 DB 取出注入） */
-    private static final String JAR_SHA256 = System.getProperty("ecat.drill.jar.sha256");
 
     private static void assumeDrillConfigured() {
         Assume.assumeTrue("未提供 -Decat.drill.url，活体用例短路跳过（常规构建零影响）",
@@ -97,42 +92,5 @@ public class CloudRepositoryClientLiveIT {
         assertNotNull("dependencies 应 200 且 DependencyGraph 非 null", graph);
         // 依赖非空档断言（有 ecat-config.yml 的仓）由 runbook 对该仓另行 HTTP 断言，
         // 本用例只锁「可解析」语义——ruoyi 无配置文件，依赖列表为空是合法形态
-    }
-
-    @Test
-    public void download_matches_sha256() throws IOException {
-        assumeDrillConfigured();
-        Assume.assumeTrue("未提供 -Decat.drill.jar.sha256，下载腿短路跳过",
-                JAR_SHA256 != null && !JAR_SHA256.trim().isEmpty());
-        CloudRepositoryClient client = new CloudRepositoryClient(URL);
-
-        Path jar = client.downloadPackage(G + ":" + A, V);
-
-        assertNotNull("下载应返回落盘路径", jar);
-        assertTrue("下载文件应存在: " + jar, Files.exists(jar));
-        assertEquals("下载字节 sha256 应与服务端 DB 哈希逐字节一致",
-                JAR_SHA256.toLowerCase(), sha256OfFile(jar));
-    }
-
-    private static String sha256OfFile(Path file) throws IOException {
-        MessageDigest digest;
-        try {
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            // JLS 规定 JVM 必须提供 SHA-256,缺席属运行环境违约,响亮失败不静默
-            throw new IllegalStateException("JVM 必须提供 SHA-256 算法", e);
-        }
-        try (InputStream in = Files.newInputStream(file)) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                digest.update(buffer, 0, read);
-            }
-        }
-        StringBuilder hex = new StringBuilder();
-        for (byte b : digest.digest()) {
-            hex.append(String.format("%02x", b));
-        }
-        return hex.toString();
     }
 }

@@ -943,4 +943,63 @@ public class IntegrationManagerTest {
         assertTrue("原有的 saimosen dependent 不能丢失",
             after.get("com.ecat:integration-serial").contains("com.ecat:integration-saimosen"));
     }
+
+    // ========== isIntegrationPresent 存在性显式查询（yml 登记面语义,§3.1 四态表） ==========
+
+    /**
+     * yml 根构造:当前版本戳 + integrations 节点,落盘即被测读链的真实输入。
+     */
+    private Map<String, Object> presenceRoot(Map<String, Object> integrations) {
+        Map<String, Object> root = new HashMap<>();
+        root.put("version", ConfigVersion.CURRENT_VERSION);
+        root.put("integrations", integrations);
+        return root;
+    }
+
+    /**
+     * 四态表:有键无 _deleted=true / 有键 _deleted=true=false / 无键=false / 值非 Map=false。
+     * registry 全程空实例——「未加载但已登记」与「已加载」在 yml 登记面上同判,存在性与活实例面解耦。
+     */
+    @Test
+    public void isIntegrationPresent_FourStateTable() throws Exception {
+        Map<String, Object> live = new HashMap<>();
+        live.put("enabled", true);
+        Map<String, Object> deleted = new HashMap<>();
+        deleted.put("enabled", false);
+        deleted.put("_deleted", true);
+        Map<String, Object> integrations = new HashMap<>();
+        integrations.put("test:live", live);
+        integrations.put("test:deleted", deleted);
+        writeIntegrationsYml(presenceRoot(integrations));
+
+        assertTrue("有键无 _deleted=已登记(未加载也判已装)", integrationManager.isIntegrationPresent("test:live"));
+        assertFalse("_deleted=true=逻辑删除待清理,不存在", integrationManager.isIntegrationPresent("test:deleted"));
+        assertFalse("无键=未装", integrationManager.isIntegrationPresent("test:absent"));
+
+        Map<String, Object> badIntegrations = new HashMap<>();
+        badIntegrations.put("test:bad", "not-a-map");
+        writeIntegrationsYml(presenceRoot(badIntegrations));
+        assertFalse("值非 Map 的坏条目不构成已装(不掩盖不抛,坏形态归分级显形面)",
+                integrationManager.isIntegrationPresent("test:bad"));
+    }
+
+    /**
+     * 判重回归:addIntegration 对已存在坐标(yml 有效登记盘面)仍返回「集成已存在」——
+     * 复合判据改存在性 API 后的运行时等价锁。
+     */
+    @Test
+    public void addIntegrationDuplicateCoordinateStillRejected() throws Exception {
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("enabled", true);
+        Map<String, Object> integrations = new HashMap<>();
+        integrations.put("test:dup", entry);
+        writeIntegrationsYml(presenceRoot(integrations));
+
+        Map<String, Object> config = new HashMap<>();
+        config.put("groupId", "test");
+        config.put("artifactId", "dup");
+
+        IntegrationStatus result = integrationManager.addIntegration("test:dup", config);
+        assertEquals("已存在坐标重复防护语义不变", "集成已存在", result.getMessage());
+    }
 }

@@ -23,9 +23,6 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -320,68 +317,6 @@ public class CloudRepositoryClient {
     }
 
     /**
-     * 下载 JAR 包到本地 Maven 仓库（Maven 协议，公开访问）
-     *
-     * @param coordinate Maven 坐标格式 "groupId:artifactId" 或仅 "artifactId"
-     * @param version 版本号
-     * @return 下载的文件路径
-     * @throws IOException 网络或IO异常
-     */
-    public Path downloadPackage(String coordinate, String version) throws IOException {
-        // 解析坐标获取 groupId 和 artifactId
-        String[] parts = coordinate.split(":");
-        String groupId;
-        String artifactId;
-
-        if (parts.length == 2) {
-            groupId = parts[0];
-            artifactId = parts[1];
-        } else if (parts.length == 1) {
-            // 仅 artifactId：先获取包信息来确定 groupId
-            PackageInfo info = getPackageInfo(coordinate);
-            groupId = info.getGroupId();
-            artifactId = info.getArtifactId();
-        } else {
-            throw new IOException("Invalid coordinate format: " + coordinate);
-        }
-
-        // Maven 协议路径（使用实际的 groupId）
-        String url = cloudApiBaseUrl + "/repository/public/"
-                   + groupId.replace('.', '/') + "/"
-                   + artifactId + "/" + version + "/" + artifactId + "-" + version + ".jar";
-
-        // 本地存储路径：~/.m2/repository/{groupId_path}/{artifactId}/{version}/
-        Path localRepo = Paths.get(System.getProperty("user.home"), ".m2", "repository",
-                                   groupId.replace('.', '/'),
-                                   artifactId, version);
-        Files.createDirectories(localRepo);
-
-        Path targetFile = localRepo.resolve(artifactId + "-" + version + ".jar");
-
-        // 下载文件（Java 8 方式）
-        HttpURLConnection conn = createConnection(url);
-        try {
-            int responseCode = conn.getResponseCode();
-            if (responseCode != 200) {
-                throw new IOException("HTTP " + responseCode + "下载失败: " + conn.getResponseMessage());
-            }
-
-            try (InputStream in = conn.getInputStream();
-                 OutputStream out = Files.newOutputStream(targetFile)) {
-                byte[] buffer = new byte[8192];
-                int len;
-                while ((len = in.read(buffer)) > 0) {
-                    out.write(buffer, 0, len);
-                }
-            }
-
-            return targetFile;
-        } finally {
-            conn.disconnect();
-        }
-    }
-
-    /**
      * 获取云端仓库 API 基址（构造时已归一化、无尾斜杠）。
      *
      * <p>供下载组件复用同一基址拼装 Maven 协议 URL，避免出现第二配置点。</p>
@@ -391,7 +326,7 @@ public class CloudRepositoryClient {
     }
 
     /**
-     * 打开远端资源流（公开访问；非 200 抛 IOException，与 {@link #downloadPackage} 非 200 语义一致）。
+     * 打开远端资源流（公开访问；非 200 抛 IOException）。
      *
      * <p>Content-Length 须在连接关闭前读取，故与流一并经 {@link InputStreamWithLength} 返回；
      * 调用方负责消费与关闭流。</p>

@@ -1239,10 +1239,32 @@ public class IntegrationManager {
     // ========== 状态管理方法 ==========
 
     /**
+     * 集成安装存在性显式查询:yml 登记面(含禁用/停载),_deleted=true 视为不存在。
+     * 安装链判重的唯一真相源——禁止以 getIntegrationStatus().getMessage() 的文案串
+     * 做存在性推断(哨兵串判据已废除,文案是展示语义不是查询契约)。
+     *
+     * @param coordinate 集成坐标 (groupId:artifactId)
+     * @return true=yml 有该坐标的有效登记(未标记删除)
+     */
+    public boolean isIntegrationPresent(String coordinate) {
+        Map<String, Map<String, Object>> config = loadIntegrationsConfig();
+        Map<String, Object> integrations = config.getOrDefault("integrations", new HashMap<>());
+        Object entry = integrations.get(coordinate);
+        if (!(entry instanceof Map)) {
+            return false;
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> item = (Map<String, Object>) entry;
+        Boolean deleted = (Boolean) item.get("_deleted");
+        return deleted == null || !deleted;
+    }
+
+    /**
      * 获取集成状态
      *
      * @param coordinate 集成坐标 (groupId:artifactId)
      * @return 集成状态信息
+     *         存在性判定用 isIntegrationPresent;message 文案(含「集成不存在」)是展示语义,禁止当判据
      */
     @SuppressWarnings("unchecked")
     public IntegrationStatus getIntegrationStatus(String coordinate) {
@@ -1390,10 +1412,10 @@ public class IntegrationManager {
     public IntegrationStatus addIntegration(String coordinate, Map<String, Object> config) {
         log.info("新增集成: {}", coordinate);
 
-        // 1. 检查是否已存在
+        // 1. 检查是否已存在 = yml 有效登记(存在性)——原复合式(状态非 STOPPED || message 非哨兵串)
+        // 的两半在 yml 无登记时恒 false、有登记时第二半恒真,⟺ 存在性查询,无信息损失
         IntegrationStatus existingStatus = getIntegrationStatus(coordinate);
-        if (existingStatus.getState() != IntegrationState.STOPPED ||
-            !("集成不存在".equals(existingStatus.getMessage()))) {
+        if (isIntegrationPresent(coordinate)) {
             return IntegrationStatus.builder()
                 .coordinate(coordinate)
                 .state(existingStatus.getState())
