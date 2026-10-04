@@ -31,7 +31,7 @@ DEPLOY_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ---- 可配置项（环境变量覆盖）----
 JAVA_BIN="${JAVA_BIN:-java}"                              # 默认取 PATH；可指向随包 JRE（如解包的 Zulu 8）
-ECAT_JAR="${ECAT_JAR:-${DEPLOY_ROOT}/ecat-core-3.0.0.jar}" # 部署根下的 fat jar
+ECAT_JAR="${ECAT_JAR:-${DEPLOY_ROOT}/ecat-core-4.0.0.jar}" # 部署根下的 fat jar
 LOG_DIR="${LOG_DIR:-${DEPLOY_ROOT}/logs}"                 # logback 经 -DLOG_DIR 识别（不传则相对 cwd 的 logs/）
 PID_FILE="${PID_FILE:-${DEPLOY_ROOT}/ecat-core.pid}"
 
