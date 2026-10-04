@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import lombok.Value;
 
@@ -438,6 +439,51 @@ public class CloudRepositoryClient {
     }
 
     /**
+     * 上报全量清单并获取云端升级计划(resolve 端点,POST {base}/api/packages/resolve)。
+     *
+     * <p>与 batchQueryPackages 的 POST 同形态(fastjson2 序列化请求体+readResponse 解析);
+     * 限流(429)单列:抛 IOException 且消息含 Retry-After 头值(响应头可读时),
+     * 调用方据之提示稍后重试;其余非 200 走既有 readResponse 错误体路径,不静默回退
+     * 本地求解(升级计划计算留平台,回退=绕过平台计算)。</p>
+     *
+     * @param request 全量清单请求(core_version+packages[],坐标去重后全量)
+     * @return 云端计算结果(upgrades/resolution_map/errors;errors 非空=计划不可执行,
+     *         由调用方显式失败,本方法只做透传)
+     * @throws IOException 网络异常/HTTP 非 200(429 含 Retry-After)
+     */
+    public ResolveResponse resolveInventory(ResolveRequest request) throws IOException {
+        String url = cloudApiBaseUrl + "/api/packages/resolve";
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            conn.setConnectTimeout(connectTimeout);
+            conn.setReadTimeout(readTimeout);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setDoOutput(true);
+
+            String jsonBody = JSON.toJSONString(request);
+            try (OutputStream out = conn.getOutputStream()) {
+                byte[] input = jsonBody.getBytes("UTF-8");
+                out.write(input, 0, input.length);
+            }
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode == 429) {
+                String retryAfter = conn.getHeaderField("Retry-After");
+                throw new IOException("HTTP 429 服务限流: URL=" + url
+                        + (retryAfter != null ? " Retry-After=" + retryAfter : ""));
+            }
+
+            String response = readResponse(conn, url);
+            return JSON.parseObject(response, ResolveResponse.class,
+                    JSONReader.Feature.SupportSmartMatch);
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    /**
      * 通用 GET 请求（Java 8 兼容，无需认证）
      *
      * @param url 请求URL
@@ -794,5 +840,162 @@ public class CloudRepositoryClient {
     public static class InputStreamWithLength {
         InputStream stream;
         int contentLength;
+    }
+
+    // ==================== resolve 端点 DTO 族(wire 同构,snake_case) ====================
+
+    /**
+     * resolve 请求:客户端全量清单(所有已装集成坐标版本+core 版本)。
+     * packages 为空数组合法=空机自举(云端据此返回空计划或首装闭包)。
+     */
+    @Value
+    public static class ResolveRequest {
+        @JSONField(name = "core_version")
+        String coreVersion;
+
+        @JSONField(name = "packages")
+        List<ResolvePackageEntry> packages;
+    }
+
+    /** resolve 请求条目:单坐标现装版本 */
+    @Value
+    public static class ResolvePackageEntry {
+        @JSONField(name = "group_id")
+        String groupId;
+
+        @JSONField(name = "artifact_id")
+        String artifactId;
+
+        @JSONField(name = "version")
+        String version;
+    }
+
+    /**
+     * resolve 响应:云端计算产物。upgrades[] 即升级清单 manifest 内容体
+     * (客户端壳自套);errors 非空=计划不可执行(8 类业务错误全量透出,
+     * HTTP 恒 200,显式失败在调用方)。
+     */
+    @Value
+    public static class ResolveResponse {
+        @JSONField(name = "computed_at")
+        String computedAt;
+
+        @JSONField(name = "core_version")
+        String coreVersion;
+
+        @JSONField(name = "upgrades")
+        List<ResolveUpgradeItem> upgrades;
+
+        @JSONField(name = "resolution_map")
+        List<ResolveResolutionEntry> resolutionMap;
+
+        @JSONField(name = "errors")
+        List<ResolveError> errors;
+    }
+
+    /** 升级项:单升级坐标的全量 wire 形态(manifest 内容体原值) */
+    @Value
+    public static class ResolveUpgradeItem {
+        @JSONField(name = "group_id")
+        String groupId;
+
+        @JSONField(name = "artifact_id")
+        String artifactId;
+
+        /** 设备现装版本;null=新装坐标 */
+        @JSONField(name = "installed_version")
+        String installedVersion;
+
+        @JSONField(name = "target_version")
+        String targetVersion;
+
+        @JSONField(name = "requires_core")
+        String requiresCore;
+
+        @JSONField(name = "files")
+        List<ResolveFileEntry> files;
+
+        /** DB 约定块透传原值(five-key map 形;键缺失=[]) */
+        @JSONField(name = "db_conventions")
+        List<Map<String, Object>> dbConventions;
+
+        @JSONField(name = "resolved_dependencies")
+        List<ResolveDependency> resolvedDependencies;
+    }
+
+    /** 发布产物文件条目:kind=jar|pom,sha256 与构建产物一致 */
+    @Value
+    public static class ResolveFileEntry {
+        @JSONField(name = "kind")
+        String kind;
+
+        @JSONField(name = "group_id")
+        String groupId;
+
+        @JSONField(name = "artifact_id")
+        String artifactId;
+
+        @JSONField(name = "version")
+        String version;
+
+        @JSONField(name = "filename")
+        String filename;
+
+        @JSONField(name = "sha256")
+        String sha256;
+    }
+
+    /** 直接依赖终态解析条目 */
+    @Value
+    public static class ResolveDependency {
+        @JSONField(name = "group_id")
+        String groupId;
+
+        @JSONField(name = "artifact_id")
+        String artifactId;
+
+        @JSONField(name = "version")
+        String version;
+
+        @JSONField(name = "constraint")
+        String constraint;
+    }
+
+    /** 闭包全域终态条目:source=installed(保持已装)|resolved(闭包解析目标) */
+    @Value
+    public static class ResolveResolutionEntry {
+        @JSONField(name = "group_id")
+        String groupId;
+
+        @JSONField(name = "artifact_id")
+        String artifactId;
+
+        @JSONField(name = "version")
+        String version;
+
+        @JSONField(name = "source")
+        String source;
+    }
+
+    /** 业务错误条目(8 类,§6.2 词表;HTTP 恒 200,错误走此清单) */
+    @Value
+    public static class ResolveError {
+        @JSONField(name = "type")
+        String type;
+
+        @JSONField(name = "group_id")
+        String groupId;
+
+        @JSONField(name = "artifact_id")
+        String artifactId;
+
+        @JSONField(name = "detail")
+        String detail;
+
+        @JSONField(name = "cause_coordinate")
+        String causeCoordinate;
+
+        @JSONField(name = "sources")
+        List<String> sources;
     }
 }
