@@ -70,6 +70,21 @@
           <encoding>UTF-8</encoding>
         </configuration>
       </plugin>
+      <!-- surefire 显式声明(本仓无 parent,默认 includes 生效面):默认永不收集 *IT 类,
+           CloudRepositoryClientLiveIT(Assume 门控,未注入演练参数即短路跳过)零收集、
+           零 skip 计数=测试面静默缩水(2026-10-04 surefire 默认 includes 漏 *IT 事故同族)。
+           显式收编 *IT 后常规构建计 skipped,显式 -Dtest=<ClassName>+演练参数才真跑 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>2.22.2</version>
+        <configuration>
+          <includes>
+            <include>**/*Test.java</include>
+            <include>**/*IT.java</include>
+          </includes>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-assembly-plugin</artifactId>

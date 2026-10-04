@@ -1236,6 +1236,21 @@ public class IntegrationManager {
         return systemRestarter;
     }
 
+    /**
+     * 重启器替身注入缝（测试专用）。
+     *
+     * <p>真实 SystemRestarter 调度的是延迟线程后 System.exit(0)——在 surefire fork 内
+     * 被触发会直接杀死 fork（执行队列截断、漏跑类不报错，2026-10-04 core-api 全量首跑
+     * 事故根因）。测试经本缝注入记录型替身（重写 scheduleRestart 只记参数、不派生
+     * 线程），把重启链与 fork 隔离；生产装配固定走构造器内 new SystemRestarter()，
+     * 不得调用本方法。</p>
+     *
+     * @param systemRestarter 替身重启器
+     */
+    public void setSystemRestarter(SystemRestarter systemRestarter) {
+        this.systemRestarter = systemRestarter;
+    }
+
     // ========== 状态管理方法 ==========
 
     /**
