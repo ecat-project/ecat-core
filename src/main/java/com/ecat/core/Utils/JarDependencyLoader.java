@@ -66,7 +66,7 @@ public class JarDependencyLoader {
             null,  // groupId（由主配置填充）
             null,  // version（由主配置填充）
             new WebPlatformSupport(), // webPlatform（由配置文件填充默认值）
-            null  // requiresCore（由配置文件填充，默认 "^1.0.0"）
+            null  // requiresCore（由配置文件填充；缺失保持 null，由加载门拒绝）
         );
 
         try {
@@ -93,7 +93,7 @@ public class JarDependencyLoader {
                 if (requiresCore != null) {
                     partialInfo.setRequiresCore(requiresCore);
                 }
-                // 注意：如果配置文件中没有 requires_core，构造函数中已设置默认值 "^1.0.0"
+                // 注意：配置文件中没有 requires_core 时保持 null，由加载门拒绝加载（缺失=异常配置显形）
 
                 // 填充依赖信息（配置文件存在时覆盖默认值）
                 // 阶段1新增：支持读取版本约束

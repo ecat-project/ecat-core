@@ -203,16 +203,17 @@ public class JarDependencyLoaderTest {
     // ========== requires_core 测试 ==========
 
     /**
-     * 测试：IntegrationInfo 构造函数正确设置 requiresCore 默认值
+     * 测试：IntegrationInfo 构造函数对缺失 requiresCore 保持 null 透传（无默认兜底，
+     * 缺失=异常配置，由加载门以缺失形态拒绝加载）
      */
     @Test
-    public void testIntegrationInfo_RequiresCore_DefaultValue() {
+    public void testIntegrationInfo_RequiresCore_MissingStaysNull() {
         IntegrationInfo info = new IntegrationInfo(
             "test-artifact", false, null, true, "TestClass", "com.ecat", "1.0.0",
-            new WebPlatformSupport(), null  // requiresCore 传入 null
+            new WebPlatformSupport(), null  // requiresCore 缺失
         );
 
-        assertEquals("requiresCore 默认值应为 '^1.0.0'", "^1.0.0", info.getRequiresCore());
+        assertNull("缺失 requires_core 应保持 null 透传（由加载门拒绝）", info.getRequiresCore());
     }
 
     /**

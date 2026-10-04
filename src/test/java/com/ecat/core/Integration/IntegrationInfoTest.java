@@ -22,11 +22,11 @@ public class IntegrationInfoTest {
         IntegrationInfo info = new IntegrationInfo(
             "test-artifact", false, null, true, "TestClass",
             "com.ecat", "1.0.0", new com.ecat.core.Integration.IntegrationSubInfo.WebPlatformSupport(),
-            "^1.0.0"  // requiresCore 默认值
+            "^1.0.0"  // requiresCore 显式值（构造实参非 null，默认值机制无关本用例）
         );
 
         assertNull("dependencyInfoList 应为 null", info.getDependencyInfoList());
-        assertEquals("requiresCore 应为默认值", "^1.0.0", info.getRequiresCore());
+        assertEquals("requiresCore 应为显式值", "^1.0.0", info.getRequiresCore());
     }
 
     /**

@@ -30,6 +30,10 @@ import com.ecat.core.Observability.StartupReportHolder;
 import com.ecat.core.Task.GuardedExecutor;
 import com.ecat.core.Task.NamedThreadFactory;
 import com.ecat.core.State.StateManager;
+import com.ecat.core.Version.CoreVersionMismatchException;
+import com.ecat.core.Version.CoreVersions;
+import com.ecat.core.Version.Version;
+import com.ecat.core.Version.VersionRange;
 import com.ecat.core.Utils.LoadJarUtils;
 import com.ecat.core.Utils.MavenDependencyParser;
 import com.ecat.core.Utils.CustomClassLoader;
@@ -339,6 +343,40 @@ public class IntegrationManager {
     // ==================== 运行时单集成加载（enable/add 共用）====================
 
     /**
+     * requires_core 加载门：检查集成声明的 core 版本约束是否被当前 core 版本满足。
+     * 任何不满足/缺失/无法解析形态都以 CoreVersionMismatchException 拒绝——版本契约
+     * fail-closed，解析兜底与默认约束兜底均为禁区。
+     *
+     * <p>包级静态纯函数（无 IO 无状态）：测试直接驱动，actual 版本由调用方传入，
+     * 生产调用点传 {@link CoreVersions#current()}。
+     *
+     * @param info              集成信息（requiresCore 来自 ecat-config.yml，经 JarDependencyLoader 解析）
+     * @param actualCoreVersion 当前 core 版本（CoreVersions.current()，非 null）
+     * @throws CoreVersionMismatchException 不满足/缺失/解析失败三种形态，message 自带三要素与修复指引；放行=正常返回
+     */
+    static void enforceRequiresCore(IntegrationInfo info, String actualCoreVersion) {
+        String constraint = info.getRequiresCore();
+        if (constraint == null) {
+            throw new CoreVersionMismatchException(info.getCoordinate(), null, actualCoreVersion,
+                "集成 " + info.getCoordinate() + " 未声明 requires_core(缺失=null)——拒绝加载;"
+                    + "修复=在 ecat-config.yml 显式声明 requires_core");
+        }
+        try {
+            VersionRange range = VersionRange.parse(constraint);
+            if (!range.satisfies(Version.parse(actualCoreVersion))) {
+                throw new CoreVersionMismatchException(info.getCoordinate(), constraint, actualCoreVersion,
+                    "集成 " + info.getCoordinate() + " 的 requires_core(" + constraint
+                        + ") 与当前 core 版本(" + actualCoreVersion + ")不满足——拒绝加载;"
+                        + "修复=升级 core 或刷集成 requires_core(重刻期=归一清单动作)");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new CoreVersionMismatchException(info.getCoordinate(), constraint, actualCoreVersion,
+                "集成 " + info.getCoordinate() + " 的 requires_core 约束无法解析: " + constraint
+                    + "(core=" + actualCoreVersion + ")——拒绝加载;修复=修正约束语法", e);
+        }
+    }
+
+    /**
      * 运行时加载单个集成（单参数便捷重载）。
      *
      * <p>应用场景：enableIntegration 启用一个「启动时 disabled、从未加载」的集成时，
@@ -374,6 +412,8 @@ public class IntegrationManager {
      */
     private IntegrationBase loadSingleIntegration(IntegrationInfo info, List<IntegrationInfo> loadOrder,
                                                   StartupLoadTracker tracker) throws Exception {
+        // requires_core 门：任何 ClassLoader/实例化动作之前执法（三入口咽喉一次插门全覆盖）
+        enforceRequiresCore(info, CoreVersions.current());
         long startNanos = System.nanoTime();
         LoadJarResult checkService = instantiateIntegration(info, loadOrder);
         IntegrationBase integration = checkService.getIntegration();
@@ -981,6 +1021,11 @@ public class IntegrationManager {
                     // 启动期容忍单个集成加载失败（仅记日志，不中断其他集成加载）。
                     try {
                         loadSingleIntegration(info, loadOrder, tracker);
+                    } catch (CoreVersionMismatchException e) {
+                        // 版本门失败：单坐标隔离点账。message 三要素已自足，堆栈无诊断增量，
+                        // 失败明细经 startup-report 行 failures 列表可见
+                        tracker.recordFailure(info.getCoordinate(), StartupLoadTracker.STAGE_REQUIRES_CORE);
+                        log.error("集成 " + info.getArtifactId() + " 加载失败(版本门): " + e.getMessage());
                     } catch (Exception e) {
                         tracker.recordFailure(info.getCoordinate(), StartupLoadTracker.STAGE_LOAD);
                         log.error("集成 " + info.getArtifactId() + " 加载失败: " + e.getMessage(), e);

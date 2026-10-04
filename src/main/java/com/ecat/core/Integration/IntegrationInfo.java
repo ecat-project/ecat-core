@@ -70,7 +70,7 @@ public class IntegrationInfo {
     /**
      * 对 ECAT Core 主程序的版本要求
      * 从 ecat-config.yml 的 requires_core 字段读取
-     * 默认值为 "^1.0.0"
+     * 缺失时保持 null，由加载门（IntegrationManager 门禁）拒绝加载——缺失=异常配置应显形，不默认兜底
      */
     @Getter
     @Setter
@@ -185,7 +185,7 @@ public class IntegrationInfo {
         this.groupId = groupId;
         this.version = version;
         this.webPlatform = webPlatform != null ? webPlatform : new WebPlatformSupport();
-        this.requiresCore = requiresCore != null ? requiresCore : "^1.0.0";  // 默认值
+        this.requiresCore = requiresCore;
     }
 
     @Override

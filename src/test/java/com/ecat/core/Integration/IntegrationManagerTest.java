@@ -5,6 +5,7 @@ import com.ecat.core.ConfigVersion;
 import com.ecat.core.EcatCore;
 import com.ecat.core.State.AttributeStatus;
 import com.ecat.core.State.StateManager;
+import com.ecat.core.Version.CoreVersionsTestAccess;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.ConfigEntry.ConfigEntry;
 import com.ecat.core.ConfigEntry.ConfigEntryRegistry;
@@ -56,6 +57,7 @@ public class IntegrationManagerTest {
     private IntegrationManager integrationManager;
     
     private AutoCloseable mockitoCloseable;
+    private java.util.function.Supplier<String> savedVersionSource;
     private File testConfigDir;
     private String testIntegrationName = "unitTest";
     private String testConfigPath;
@@ -64,26 +66,34 @@ public class IntegrationManagerTest {
     public void setUp() throws Exception {
         // 初始化Mockito
         mockitoCloseable = MockitoAnnotations.openMocks(this);
-        
+
+        // core 版本缝注值：requires_core 门经 CoreVersions.current() 取 actual，
+        // 单测从 classes/ 加载无 manifest（CoreVersionsTestAccess 受控注入，@After 严格还原）
+        savedVersionSource = CoreVersionsTestAccess.currentSource();
+        CoreVersionsTestAccess.injectSource(() -> "4.0.0");
+
         // 创建测试目录和文件
         testConfigDir = new File("target",".ecat-test");
         testConfigPath = testConfigDir.getAbsolutePath() + "/integrations/" + testIntegrationName + ".yml";
         new File(testConfigDir + "/integrations").mkdirs();
-        
+
         // 设置类加载器模拟
         when(restartClassLoader.getURLs()).thenReturn(new URL[0]);
-        
+
         // 初始化IntegrationManager
         integrationManager = new IntegrationManager(core, integrationRegistry, stateManager);
         setPrivateField(integrationManager, "INTEGRATIONS_CONFIG_PATH", testConfigDir + "/core/integrations.yml");
         setPrivateField(integrationManager, "INTEGRATION_ITEM_PATH", testConfigDir + "/integrations/%s.yml");
     }
-    
+
     @After
     public void tearDown() throws Exception {
         // 清理模拟
         mockitoCloseable.close();
-        
+
+        // 还原 core 版本缝，防污染同 JVM 后续用例
+        CoreVersionsTestAccess.injectSource(savedVersionSource);
+
         // 清理测试文件
         deleteRecursively(testConfigDir);
     }
@@ -866,7 +876,7 @@ public class IntegrationManagerTest {
 
         IntegrationInfo info = new IntegrationInfo(
             "integration-stub", false, null, true,
-            "com.test.Stub", "com.test", "1.0.0", null, null);
+            "com.test.Stub", "com.test", "1.0.0", null, "*");
 
         IntegrationBase result = (IntegrationBase) invokePrivateMethod(manager, "loadSingleIntegration", info);
 
@@ -892,7 +902,7 @@ public class IntegrationManagerTest {
         };
         IntegrationInfo info = new IntegrationInfo(
             "integration-stub", false, null, true,
-            "com.test.Stub", "com.test", "1.0.0", null, null);
+            "com.test.Stub", "com.test", "1.0.0", null, "*");
         try {
             invokePrivateMethod(manager, "loadSingleIntegration", info);
             fail("loadSingleIntegration 应向上抛出实例化异常");

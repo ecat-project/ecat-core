@@ -97,7 +97,7 @@ public class VersionSolverTest {
         // 验证：module-b 无版本约束，应该可以正常使用
         assertNotNull("moduleB 不应为 null", moduleB);
         assertEquals("module-b 版本应为 1.0.0", "1.0.0", moduleB.getVersion());
-        assertEquals("module-b 的 requiresCore 应为默认值", "^1.0.0", moduleB.getRequiresCore());
+        assertEquals("module-b 的 requiresCore 应为显式值", "^1.0.0", moduleB.getRequiresCore());
     }
 
     // ========== 场景2：约束满足 ==========
@@ -302,18 +302,13 @@ public class VersionSolverTest {
     // ========== requires_core 约束测试 ==========
 
     /**
-     * 测试：requires_core 默认值为 ^1.0.0
+     * 测试：requires_core 缺失保持 null 透传（无默认兜底，缺失=异常配置，由加载门拒绝）
      */
     @Test
-    public void testRequiresCore_DefaultValue() {
+    public void testRequiresCore_MissingStaysNull() {
         IntegrationInfo info = createTestIntegration("test-module", "1.0.0", null);
 
-        assertEquals("requiresCore 默认值应为 ^1.0.0", "^1.0.0", info.getRequiresCore());
-
-        // 验证默认约束能正确解析
-        VersionRange defaultRange = VersionRange.parse(info.getRequiresCore());
-        assertNotNull("默认约束应能解析", defaultRange);
-        assertEquals("默认约束应为 ^1.0.0", "^1.0.0", defaultRange.toString());
+        assertNull("缺失 requires_core 应保持 null 透传（由加载门拒绝）", info.getRequiresCore());
     }
 
     /**
