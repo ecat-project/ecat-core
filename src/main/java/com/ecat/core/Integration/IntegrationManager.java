@@ -1223,6 +1223,15 @@ public class IntegrationManager {
         return restartClassLoader;
     }
 
+    /**
+     * 装载器注册表单源取用点:安装链 lib 冲突检测件(core-api 组合根装配)经此读取
+     * 已加载 jar 名册(LoadJarUtils.listLoadedJarFileNames 只读查询),数据不外泄
+     * loader 对象。与本类 getEcatClassLoader 同型只读访问器。
+     */
+    public LoadJarUtils getLoadJarUtils() {
+        return loadJarUtils;
+    }
+
     public SystemRestarter getSystemRestarter() {
         return systemRestarter;
     }

@@ -22,9 +22,13 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
@@ -219,6 +223,54 @@ public class LoadJarUtils {
 
     public URLClassLoader getEcatDependentClassLoader() {
         return myClassLoaderCenter.get(ECAT_DEPENDENT_CLASSLOADER_KEY);
+    }
+
+    /**
+     * 枚举当前全部已加载 jar 的文件基名(去重,不含 .jar 后缀)。数据源=myClassLoaderCenter
+     * 全部注册 loader 的 getURLs() 及其 parent 链上 URLClassLoader 的 getURLs(),提取 URL 中
+     * 最内层 .jar 文件名。只读,无副作用;身份派生(artifact/version 切分)不在此实现——
+     * 规则唯一归消费方 LibConflictDetector(T-1-6),本方法只供名册。
+     *
+     * <p>取值面=全部活 loader 并集(共享两层+叶子/中间 child,D39 候选①拍板值):
+     * 误报方向=降级入队(安全),漏报=0;共享集成与 common 同 loader 的重复注册按
+     * loader 实例身份去重,不重复遍历。</p>
+     */
+    public Set<String> listLoadedJarFileNames() {
+        Set<String> names = new LinkedHashSet<>();
+        Set<URLClassLoader> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (URLClassLoader loader : myClassLoaderCenter.values()) {
+            ClassLoader current = loader;
+            while (current instanceof URLClassLoader) {
+                if (!visited.add((URLClassLoader) current)) {
+                    break; // 同一 loader 实例(共享集成复用/祖先交汇)已遍历,父链必同,剪枝
+                }
+                collectJarBaseNames(((URLClassLoader) current).getURLs(), names);
+                current = ((URLClassLoader) current).getParent();
+            }
+        }
+        return names;
+    }
+
+    /**
+     * 逐 URL 提取最内层 .jar 文件基名,以 .jar 结尾者剥后缀。嵌套 jar: URL 以 "!/"
+     * 结尾、目录 URL 以 "/" 结尾——先剥尾部分隔符再取最后一个 / 之后的段(设计 §4.4
+     * 原文「最后一个 / 之后」对 "…jar!/" 形态会截出空段,实测坐实后按意图修正)。
+     */
+    private void collectJarBaseNames(URL[] urls, Set<String> names) {
+        for (URL url : urls) {
+            String trimmed = url.toExternalForm();
+            while (trimmed.endsWith("!") || trimmed.endsWith("/")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 1);
+            }
+            String segment = trimmed.substring(trimmed.lastIndexOf('/') + 1);
+            int bang = segment.indexOf('!');
+            if (bang >= 0) {
+                segment = segment.substring(0, bang);
+            }
+            if (segment.endsWith(".jar")) {
+                names.add(segment.substring(0, segment.length() - ".jar".length()));
+            }
+        }
     }
 
     // private Map<String, Class<?>> loadClassesFromJar(String jarPath, CustomClassLoader classLoader) throws Exception {
