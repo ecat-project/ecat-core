@@ -102,7 +102,7 @@ public class YamlAtomicFileWriter {
                 writer.flush();
             }
 
-            // 步骤④:回读验证(吸收 TransactionalConfigWriter 的写前验证语义,backup/rollback 不吸收):
+            // 步骤④:回读验证(沿承自早期原子写设计的写前验证语义,backup/rollback 不吸收):
             // dump 成功不等于内容可 round-trip(未来 dump 配置演化可能产出解析不了的输出),
             // 放行一个解析不了的文件到 rename 等于把损坏盖到旧完整文件上。
             requireParseableMap(tmpFile);
