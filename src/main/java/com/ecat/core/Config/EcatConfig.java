@@ -70,4 +70,26 @@ public final class EcatConfig {
             throw new IllegalArgumentException("ecat.commtrace.rx-attrib-window-ms 配置非法: " + raw, e);
         }
     }
+
+    /**
+     * 升级/安装快照保留个数：{@code ecat.upgrade.backup.retention}，未配置 3。
+     * 台账清理按快照创建时间降序保留前 N 个，其余目录树删除（剪除名单记入最新台账）。
+     * 严格模式同 {@link #guardedTimeoutMs()}：非正整数非法（0 个保留=失去全部回滚能力，
+     * 不是合法运行形态）。
+     */
+    public static int upgradeBackupRetention() {
+        String raw = System.getProperty("ecat.upgrade.backup.retention");
+        if (raw == null) {
+            return 3;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value <= 0) {
+                throw new IllegalArgumentException("必须为正整数, 实际: " + raw);
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("ecat.upgrade.backup.retention 配置非法: " + raw, e);
+        }
+    }
 }
