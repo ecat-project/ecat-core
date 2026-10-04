@@ -35,6 +35,7 @@ import com.ecat.core.Observability.SystemHealthService;
 import com.ecat.core.Shutdown.CoreShutdown;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Task.TaskManager;
+import com.ecat.core.Upgrade.UpgradeOrchestrator;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.platform.PlatformInfo;
@@ -104,6 +105,10 @@ public class EcatCore {
      */
     @Getter
     private ConfigFlowService configFlowService;
+
+    /** boot 升级状态机(D22):变更收敛到重启后单一窗口;消费面=T-1-9/core-api */
+    @Getter
+    private UpgradeOrchestrator upgradeOrchestrator;
 
     /**
      * 平台信息（OS、架构、JavaCPP classifier）
@@ -196,6 +201,11 @@ public class EcatCore {
         
         // 注册 core 日志缓冲区
         LogManager.getInstance().registerIntegration(Const.CORE_COORDINATE, null);
+
+        // 升级窗口(D22):重启后单一变更窗,loadIntegrations 之前的程序面提交在此完成;
+        // 无队列=零开销直通,与无编排器时代启动路径无观测差异
+        this.upgradeOrchestrator = new UpgradeOrchestrator(this);
+        this.upgradeOrchestrator.runPreLoadPhase();
     }
 
     public void load(){
@@ -226,7 +236,10 @@ public class EcatCore {
         EcatCore.setInstance(core);
         // 例如，加载配置文件、注册服务等
         core.load();
-        
+
+        // 升级窗口判定段(D22):load 完成后逐 flyway 域宿主核验→COMPLETE/回滚/LOADING_FAILED
+        core.getUpgradeOrchestrator().runPostLoadPhase();
+
         System.out.println("EcatCore initialized successfully.");
 
         // 添加关闭钩子，确保优雅退出（具名：ThreadNamingArchTest 规则 3 立法，
