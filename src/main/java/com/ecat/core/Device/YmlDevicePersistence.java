@@ -117,7 +117,14 @@ public class YmlDevicePersistence implements DevicePersistence {
             parentDir.mkdirs();
         }
         try (Writer writer = new OutputStreamWriter(new FileOutputStream(file), "UTF-8")) {
-            yaml.dump(data, writer);
+            // snakeyaml 的 Yaml 实例非线程安全（Representer 的 representedObjects 是跨 dump
+            // 共享的 IdentityHashMap，DumperOptions 的锚计数器同为共享可变状态）：本类持单实例
+            // 服务全部设备写，无同步并发 dump 会使线程间 Node 树交叉复用，落盘交错锚定义与
+            // 悬空别名（文件不可解析）或直接抛出序列化异常。dump 串行化消除该竞态；
+            // 设备 yml 单文件写为微秒级低频事件，串行排队无感。
+            synchronized (yaml) {
+                yaml.dump(data, writer);
+            }
             log.debug("Saved device record: {} to {}", record.getId(), file.getAbsolutePath());
         } catch (Exception e) {
             throw new RuntimeException("Failed to save device record: " + record.getId(), e);
