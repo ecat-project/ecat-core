@@ -55,20 +55,11 @@ public class QueuePlanTest {
 
     // ==================== 装载与契约键位 ====================
 
-    /** 双文件成对装载:wire 键位逐字段对齐队列写入器契约;db_conventions 保留原始键集 */
+    /** 双文件成对装载:wire 键位逐字段对齐队列写入器契约 */
     @Test
     public void loadPairedFiles_wireFieldsAligned() throws IOException {
-        JSONObject manifest = validManifest();
-        JSONObject block = new JSONObject(new LinkedHashMap<String, Object>());
-        block.put("domain", "adm");
-        block.put("engine", "pg");
-        block.put("mechanism", "flyway");
-        block.put("historyTable", "flyway_schema_history_adm");
-        block.put("dumpPolicy", "full");
-        List<Map<String, Object>> blocks = new ArrayList<>();
-        blocks.add(block);
-        manifest.getJSONArray("items").getJSONObject(0).put("db_conventions", blocks);
-        writeBytes(planDir.resolve("manifest.json"), manifest.toJSONString().getBytes(StandardCharsets.UTF_8));
+        writeBytes(planDir.resolve("manifest.json"),
+                validManifest().toJSONString().getBytes(StandardCharsets.UTF_8));
         writeStateFile(planDir, "PENDING", "2026-10-01T08:30:00Z");
 
         QueuePlan plan = QueuePlan.load(planDir);
@@ -88,9 +79,30 @@ public class QueuePlanTest {
         assertEquals("^4.0.0", item.getRequiresCore());
         assertEquals(1, item.getFiles().size());
         assertEquals("aabbcc", item.getFiles().get(0).getSha256());
-        assertEquals(1, item.getDbConventions().size());
-        assertEquals("flyway_schema_history_adm",
-                item.getDbConventions().get(0).get("historyTable"));
+    }
+
+    /**
+     * 旧清单容忍:已退役的 db_conventions 键(空数组/带块两形态)装载零报错、
+     * 不进模型——过渡期旧清单仍在盘,解析器必须未知键忽略(禁报错)。
+     */
+    @Test
+    public void loadToleratesLegacyDbConventionsKey() throws IOException {
+        JSONObject legacy = validManifest();
+        JSONObject block = new JSONObject(new LinkedHashMap<String, Object>());
+        block.put("domain", "adm");
+        block.put("engine", "pg");
+        block.put("mechanism", "flyway");
+        block.put("historyTable", "flyway_schema_history_adm");
+        block.put("dumpPolicy", "full");
+        List<Object> blocks = new ArrayList<>();
+        blocks.add(block);
+        legacy.getJSONArray("items").getJSONObject(0).put("db_conventions", blocks);
+        writeBytes(planDir.resolve("manifest.json"), legacy.toJSONString().getBytes(StandardCharsets.UTF_8));
+        writeStateFile(planDir, "PENDING", "2026-10-01T08:30:00Z");
+
+        QueuePlan plan = QueuePlan.load(planDir);
+        assertEquals("带遗留 db_conventions 块的旧清单照常装载",
+                "com.ecat:app", plan.getManifest().getItems().get(0).getCoordinate());
     }
 
     /** manifest 缺必填键/缺 files/type 非 UPGRADE → 解析期 UpgradeStateException(残缺请求不进管道) */
@@ -173,17 +185,22 @@ public class QueuePlanTest {
         }
     }
 
-    /** db 子标记增量合并重写;读回视图与落盘一致 */
+    /** db 子标记读取容差:前代在盘 state.yml 的 db 块照常读出(写入面已退役,读取不撕裂) */
     @Test
-    public void dbMarkers_mergeIncrementallyAndPersist() throws IOException {
+    public void dbMarkers_legacyStateYmlStillReadable() throws IOException {
         writeBytes(planDir.resolve("manifest.json"),
                 validManifest().toJSONString().getBytes(StandardCharsets.UTF_8));
-        writeStateFile(planDir, "DB_UPGRADING", "2026-10-01T08:30:00Z");
-        QueuePlan plan = QueuePlan.load(planDir);
-
-        plan.markDbDomain("adm", "PENDING");
-        plan.markDbDomain("media", "PENDING");
-        plan.markDbDomain("adm", "DONE");
+        Map<String, Object> legacyState = new LinkedHashMap<>();
+        legacyState.put("schemaVersion", 1);
+        legacyState.put("planId", "plan-id-1");
+        legacyState.put("state", PlanState.DB_UPGRADING.name());
+        legacyState.put("enqueuedAt", "2026-10-01T08:30:00Z");
+        legacyState.put("attempts", 0);
+        Map<String, Object> db = new LinkedHashMap<>();
+        db.put("adm", "DONE");
+        db.put("media", "PENDING");
+        legacyState.put("db", db);
+        new YamlAtomicFileWriter().write(legacyState, planDir.resolve("state.yml").toFile());
 
         QueuePlan reloaded = QueuePlan.load(planDir);
         assertEquals("DONE", reloaded.getDbMarkers().get("adm"));
@@ -222,9 +239,9 @@ public class QueuePlanTest {
         assertTrue(reloaded.getError().contains("保守回滚"));
     }
 
-    /** 快照成立标志(快照 manifest.json 在)与 dump DONE 域过滤 */
+    /** 快照成立标志(快照 manifest.json 在) */
     @Test
-    public void snapshotFacets_establishedFlagAndDumpedDomains() throws IOException {
+    public void snapshotFacets_establishedFlag() throws IOException {
         writeBytes(planDir.resolve("manifest.json"),
                 validManifest().toJSONString().getBytes(StandardCharsets.UTF_8));
         writeStateFile(planDir, "LOADING", "2026-10-01T08:30:00Z");
@@ -232,23 +249,12 @@ public class QueuePlanTest {
         Path snapshotRoot = temp.newFolder("backups").toPath();
 
         assertFalse("无快照目录=未成立", plan.isSnapshotEstablished(snapshotRoot));
-        assertTrue("无 dump-state=零 dump 域", plan.dumpedDomains(snapshotRoot).isEmpty());
 
-        Path snapDb = snapshotRoot.resolve("plan-id-1").resolve("db");
-        Files.createDirectories(snapDb);
+        Files.createDirectories(snapshotRoot.resolve("plan-id-1"));
         Files.write(snapshotRoot.resolve("plan-id-1").resolve("manifest.json"),
                 "{\"planId\":\"plan-id-1\"}".getBytes(StandardCharsets.UTF_8));
-        Map<String, Object> dumpState = new LinkedHashMap<>();
-        Map<String, Object> dump = new LinkedHashMap<>();
-        dump.put("adm", "DONE");
-        dump.put("media", "PENDING");
-        dumpState.put("dump", dump);
-        new YamlAtomicFileWriter().write(dumpState, snapDb.resolve("dump-state.yml").toFile());
 
         assertTrue("快照 manifest.json 在=成立", plan.isSnapshotEstablished(snapshotRoot));
-        List<String> done = plan.dumpedDomains(snapshotRoot);
-        assertEquals(1, done.size());
-        assertEquals("adm", done.get(0));
     }
 
     // ==================== 夹具 ====================
@@ -273,6 +279,7 @@ public class QueuePlanTest {
         item.put("target_version", "2.0.0");
         item.put("requires_core", "^4.0.0");
         item.put("files", new ArrayList<>(Arrays.asList(file)));
+        // db_conventions 已退役:夹具保留该遗留键=全部装载用例持续演练「未知键忽略」容忍面
         item.put("db_conventions", new ArrayList<>());
         manifest.put("items", new ArrayList<>(Arrays.asList(item)));
         return manifest;

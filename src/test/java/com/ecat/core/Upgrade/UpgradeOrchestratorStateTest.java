@@ -14,6 +14,9 @@ import com.ecat.core.Upgrade.QueuePlan.PlanState;
 import com.ecat.core.Utils.YamlAtomicFileWriter;
 import com.ecat.core.Version.CoreVersionsTestAccess;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -33,7 +36,6 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -61,8 +63,8 @@ import static org.mockito.Mockito.when;
 /**
  * UpgradeOrchestrator 状态机单测:崩溃注入/回滚/多任务串行/人工入口(§7 用例矩阵)。
  *
- * <p>技法:临时 queueRoot/backups/installations 注入;真实 BackupService(夹具核程序缝+
- * dump 桩)+ spy(可验证回滚调用面);IntegrationManager mock(内存配置仓+真实 yml 文件
+ * <p>技法:临时 queueRoot/backups/installations 注入;真实 BackupService(夹具核程序缝)
+ * + spy(可验证回滚调用面);IntegrationManager mock(内存配置仓+真实 yml 文件
  * 双写同步,终盘 yml 对账有据);崩溃注入=盘面真实推进到中点后改写 state 词(或撕裂文件),
  * 重建编排器实例重放——单测内的「重启」=新实例+同盘面,确定性零真实进程杀;全同步零 sleep。
  * 夹具 jar 用 JarOutputStream 现刻(user.home 重定向 ~/.m2,一次成型保 sha 稳定),
@@ -99,7 +101,6 @@ public class UpgradeOrchestratorStateTest {
     /** integrations.yml 内存权威仓(mock 读=深拷贝,写=落仓+真实 yml 文件同步) */
     private Map<String, Map<String, Object>> configStore;
     private InstallationLedgerStore ledgerStore;
-    private RecordingDumpExecutor dumpExecutor;
     private BackupService backupService;
     private UpgradeOrchestrator orchestrator;
 
@@ -147,9 +148,10 @@ public class UpgradeOrchestratorStateTest {
         }).when(managerMock).updateIntegrationsConfig(any());
 
         ledgerStore = new InstallationLedgerStore(installationsRoot, snapshotRoot, Clock.systemUTC());
-        dumpExecutor = new RecordingDumpExecutor();
+        // 默认无 BackupHook 参与者(注册表空集);钩子形态用例在用例内注入参与者
+        when(registryMock.getAllCoordinates()).thenReturn(new LinkedHashSet<>());
         backupService = spy(new BackupService(snapshotRoot, integrationsYml, configEntriesRoot,
-                integrationsItemDir, dumpExecutor, ledgerStore) {
+                integrationsItemDir, registryMock, ledgerStore) {
             @Override
             protected Path coreProgramLocation() {
                 return coreProgramFixture;
@@ -376,44 +378,34 @@ public class UpgradeOrchestratorStateTest {
         assertEquals("yml 恢复为快照值", "1.0.0", readYmlEntry(COORD).get("version"));
     }
 
-    // ==================== T3 B4 失败回滚逐字节一致 ====================
+    // ==================== B2 备份钩子失败=窗口中止(零变更段) ====================
 
-    /** db 域宿主未加载:B4b 判 FAILED→确定性回滚;三面==快照;恢复恰对该域;余队 CANCELLED */
+    /** BackupHook 参与者 backup 抛出:B2 中止→FAILED(零变更段,无回滚动作);账本 FAILED;程序面零动 */
     @Test
-    public void dbHostMissing_deterministicRollback_threeFacesByteIdentical() throws IOException {
-        JSONObject item = validUpgradeItem();
-        item.put("db_conventions", new ArrayList<>(Arrays.asList(flywayBlock("adm"))));
-        enqueuePlan("plan-a", "2026-10-01T08:30:00Z", item);
+    public void backupHookFailure_abortsWindow_planFailed_zeroProgramFaceChange() throws IOException {
+        IntegrationBase hookParticipant = mock(IntegrationBase.class,
+                Mockito.withSettings().extraInterfaces(BackupHook.class));
+        Mockito.doThrow(new IllegalStateException("钩子备份失败")).when((BackupHook) hookParticipant).backup();
+        when(registryMock.getAllCoordinates()).thenReturn(new LinkedHashSet<>(Collections.singletonList(COORD)));
+        when(registryMock.getIntegration(COORD)).thenReturn(hookParticipant);
+
+        enqueuePlan("plan-a", "2026-10-01T08:30:00Z", validUpgradeItem());
         enqueuePlan("plan-b", "2026-10-01T08:31:00Z", validUpgradeItem());
-        Path entryFile = writeEntryFile(configEntriesRoot.resolve("entry-1"), "key: before\n");
-        writeItemFile(integrationsItemDir, "app", "enabled: true\n");
-        // registry 空=B4b 宿主未加载
 
         rebuildOrchestrator().runPreLoadPhase();
-        rebuildOrchestrator().runPostLoadPhase();
 
-        assertEquals(PlanState.ROLLED_BACK, loadPlan("plan-a").getState());
-        assertEquals(PlanState.CANCELLED, loadPlan("plan-b").getState());
-        assertEquals(InstallationLedgerStore.PlanResult.ROLLED_BACK,
-                ledgerStore.read("plan-a").get().getResult());
-        // 恰对 dump=DONE 的域恢复
-        assertEquals(Arrays.asList("adm"), dumpExecutor.restoredDomains);
-        // 三面逐字节==快照
-        try {
-            assertArrayEquals("yml 面逐字节还原",
-                    Files.readAllBytes(snapshotRoot.resolve("plan-a").resolve("config").resolve("integrations.yml")),
-                    Files.readAllBytes(integrationsYml));
-            assertTrue("config_entries 面还原",
-                    Arrays.equals(Files.readAllBytes(snapshotRoot.resolve("plan-a")
-                                    .resolve("config").resolve("config_entries").resolve("entry-1")),
-                            Files.readAllBytes(entryFile)));
-            assertTrue("integrations 单件树还原",
-                    Arrays.equals(Files.readAllBytes(snapshotRoot.resolve("plan-a")
-                                    .resolve("config").resolve("integrations").resolve("app.yml")),
-                            Files.readAllBytes(integrationsItemDir.resolve("app.yml"))));
-        } catch (IOException e) {
-            throw e;
-        }
+        assertEquals("backup 失败=窗口中止,零变更段直 FAILED", PlanState.FAILED, loadPlan("plan-a").getState());
+        assertTrue("失败原因应含 B2 备份语义: " + loadPlan("plan-a").getError(),
+                loadPlan("plan-a").getError().contains("B2 备份失败"));
+        assertEquals("首败停队:余队 PENDING 冻结", PlanState.PENDING, loadPlan("plan-b").getState());
+        assertEquals("账本 backup 步 FAILED 且记参与者",
+                InstallationLedgerStore.StepState.FAILED,
+                stepOfLedger("plan-a", "backup:" + COORD).getState());
+        assertEquals("台账 FAILED(真终态,零变更段无回滚义务)",
+                InstallationLedgerStore.PlanResult.FAILED, ledgerStore.read("plan-a").get().getResult());
+        assertEquals("程序面零动:yml 仍旧值", "1.0.0", readYmlEntry(COORD).get("version"));
+        verify(backupService, never()).restoreProgramFace(anyString());
+        Mockito.verify((BackupHook) hookParticipant, never()).restore();
     }
 
     // ==================== T6 LOADING_FAILED 语义(D24) ====================
@@ -430,7 +422,7 @@ public class UpgradeOrchestratorStateTest {
         assertEquals("attempts=1(重试可观察)", 1, loadPlan("plan-a").getAttempts());
         assertTrue("失败原因应指认坐标+人读通道", loadPlan("plan-a").getError().contains(COORD));
         verify(backupService, never()).restoreProgramFace(anyString());
-        verify(backupService, never()).restoreDbDomains(anyString(), any());
+        verify(backupService, never()).restoreBackups(anyString());
         // 接缝钉死:LOADING_FAILED 非真终态,台账 RUNNING+recordStep,禁 finish
         assertEquals("台账必须保持 RUNNING(finish-once+保留期双陷阱)",
                 InstallationLedgerStore.PlanResult.RUNNING,
@@ -789,16 +781,6 @@ public class UpgradeOrchestratorStateTest {
         return item;
     }
 
-    private JSONObject flywayBlock(String domain) {
-        JSONObject block = new JSONObject(new LinkedHashMap<>());
-        block.put("domain", domain);
-        block.put("engine", "pg");
-        block.put("mechanism", "flyway");
-        block.put("historyTable", "flyway_schema_history_" + domain);
-        block.put("dumpPolicy", "full");
-        return block;
-    }
-
     private JSONObject baseItem(String groupId, String artifactId,
                                 String installedVersion, String targetVersion) {
         JSONObject item = new JSONObject(new LinkedHashMap<>());
@@ -808,7 +790,6 @@ public class UpgradeOrchestratorStateTest {
         item.put("target_version", targetVersion);
         item.put("requires_core", "*");
         item.put("files", new ArrayList<>());
-        item.put("db_conventions", new ArrayList<>());
         return item;
     }
 
@@ -951,19 +932,13 @@ public class UpgradeOrchestratorStateTest {
         Files.write(rootDir.resolve(name + ".yml"), content.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** dump 桩:dump 写标志文件+restore 记域名(真 pg_dump 不进单测;域恢复调用面可断言) */
-    private static class RecordingDumpExecutor extends DbDumpExecutor {
-        final List<String> restoredDomains = new ArrayList<>();
-
-        @Override
-        public void dump(String domain, DbDumpSpec block, Path outDir) throws IOException {
-            Files.createDirectories(outDir);
-            Files.write(outDir.resolve("dump.pgdump"), ("DUMP:" + domain).getBytes(StandardCharsets.UTF_8));
+    /** 台账步骤按名取用(不存在=AssertionError,断言目标显形) */
+    private InstallationLedgerStore.Step stepOfLedger(String planId, String name) {
+        for (InstallationLedgerStore.Step step : ledgerStore.read(planId).get().getSteps()) {
+            if (step.getName().equals(name)) {
+                return step;
+            }
         }
-
-        @Override
-        public void restore(String domain, DbDumpSpec block, Path dumpDir) throws IOException {
-            restoredDomains.add(domain);
-        }
+        throw new AssertionError("步骤不存在: " + name);
     }
 }

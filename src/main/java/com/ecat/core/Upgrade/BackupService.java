@@ -19,9 +19,10 @@ package com.ecat.core.Upgrade;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.TypeReference;
 import com.ecat.core.EcatCore;
+import com.ecat.core.Integration.IntegrationBase;
+import com.ecat.core.Integration.IntegrationRegistry;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
-import com.ecat.core.Utils.YamlAtomicFileWriter;
 import lombok.Value;
 import org.yaml.snakeyaml.Yaml;
 
@@ -39,28 +40,41 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 /**
- * 四件套快照到 {@code .ecat-data/backups/{planId}/} 的唯一入口,与快照对称的恢复面。
+ * 快照到 {@code .ecat-data/backups/{planId}/} 的唯一入口,与快照对称的恢复面,
+ * 兼升级窗 BackupHook 广播面(时机归平台,数据/路径/方式全归实现者)。
  *
- * <p>四件套:①jar 集(integrations.yml 全坐标,enabled 不限——回滚要恢复完整上次
- * 已知世界;Maven 布局按版本分目录永不覆盖,硬链接所指 inode 在升级中不被改写,硬
- * 链接安全;跨文件系统回退整拷)②core 程序文件 ③配置树(integrations.yml 字节+
- * config_entries/ 整树+integrations/*.yml 整树)④DB dump(仅升级路径,范围=调用方
- * 按 manifest db_conventions 传入的域块)。</p>
+ * <p>快照三件套:①jar 集(integrations.yml 全坐标,enabled 不限——回滚要恢复完整
+ * 上次已知世界;Maven 布局按版本分目录永不覆盖,硬链接所指 inode 在升级中不被改写,
+ * 硬链接安全;跨文件系统回退整拷)②core 程序文件 ③配置树(integrations.yml 字节+
+ * config_entries/ 整树+integrations/*.yml 整树)。升级窗另在快照前广播
+ * {@link BackupHook#backup()}:遍历集成注册表取 {@code instanceof BackupHook} 参与者,
+ * 逐个同步调用(带超时),账本按 {@code backup:<坐标>} 记参与者与结果;实现者自捕获
+ * 自己的数据(Android BackupAgent 同构的两事件形态),core 零数据库知识。</p>
  *
  * <p>不变量:①manifest.json 最后写(它是「快照成立」标志,先写内容后写清单;无
  * manifest 的快照目录=未成立,恢复面拒绝);②manifest 各条目 sha256 在写入时计算,
  * 恢复前逐条对账(篡改检出执法面——拒绝用坏快照回滚);③任何一件失败→已写内容
- * 清理+抛异常(无半快照)。</p>
+ * 清理+抛异常(无半快照),backup 钩子失败=窗口中止(Velero {@code on-error: Fail}
+ * 语义)。</p>
  *
  * <p>捕获面=恢复面对称:restoreProgramFace 三面全还原(integrations.yml 字节/
  * config_entries/ 整树/integrations/*.yml 整树)——升级窗 entry 迁移会持久化改写
  * 配置树,只还原 yml 会留「旧 jar+新格式 entry」混合态;快照未捕获的面(安装路径
  * 快照只有 yml)恢复时跳过(未捕获=无可还原)。首次安装形态(absent 标记)随安装
  * 路径现状交接:快照落 {@code integrations.yml.absent} 标记,还原按标记删除 yml
- * 回到「无 yml」,不覆盖坏字节。</p>
+ * 回到「无 yml」,不覆盖坏字节。备份面恢复({@link #restoreBackups})账本驱动:
+ * 只派发给 {@code backup:<坐标>} 步 DONE 的参与者——窗口可能在备份阶段中止,盲广播
+ * 会让未备份者从空槽恢复=数据事故。</p>
  *
  * @author coffee
  */
@@ -70,7 +84,20 @@ public class BackupService {
 
     static final String MANIFEST_FILE = "manifest.json";
     static final String ADDED_FILES_JSON = "added-files.json";
-    static final String DUMP_STATE_FILE = "dump-state.yml";
+
+    /** 备份参与者步骤名前缀(账本步骤形态 {@code backup:<坐标>};restore 派发的账本依据) */
+    static final String BACKUP_STEP_PREFIX = "backup:";
+    /** 恢复参与者步骤名前缀(与 backup 前缀对称,账本可见派发面) */
+    static final String RESTORE_STEP_PREFIX = "restore:";
+
+    /**
+     * 单参与者 backup/restore 同步调用的超时(秒)。取值依据:钩子=实现者本地
+     * IO(宿主全库 pg_dump、介质目录拷贝等),边缘机全库导出为秒到分钟级;
+     * 120s 是单参与者的宽硬顶——真卡死(网络卷挂死/锁死锁)不让停机窗无限挂,
+     * 超时即窗口中止走回滚分支。批量派发逐个计时,总窗时长随参与者数线性,
+     * 停机窗预算由发车纪律人工把控,不在此放大单参与者上限。
+     */
+    static final int BACKUP_HOOK_TIMEOUT_SECONDS = 120;
 
     /** 安装新增文件清单条目(wire 键位与安装路径 added-files.json 契约一致) */
     @Value
@@ -85,24 +112,35 @@ public class BackupService {
     private final Path integrationsYml;
     private final Path configEntriesRoot;
     private final Path integrationsItemDir;
-    private final DbDumpExecutor dumpExecutor;
+    private final IntegrationRegistry integrationRegistry;
     private final InstallationLedgerStore ledgerStore;
+    /** 派发超时(秒):生产=常量;测试缝注入小值使超时形态确定性可测(不 sleep 等 120s) */
+    private final int hookTimeoutSeconds;
 
     public BackupService(Path snapshotRoot, Path integrationsYml, Path configEntriesRoot,
-                         Path integrationsItemDir, DbDumpExecutor dumpExecutor,
+                         Path integrationsItemDir, IntegrationRegistry integrationRegistry,
                          InstallationLedgerStore ledgerStore) {
+        this(snapshotRoot, integrationsYml, configEntriesRoot, integrationsItemDir,
+                integrationRegistry, ledgerStore, BACKUP_HOOK_TIMEOUT_SECONDS);
+    }
+
+    /** 全参构造:超时秒数可注入=测试缝(单测注入 1s 构造超时形态,确定性) */
+    BackupService(Path snapshotRoot, Path integrationsYml, Path configEntriesRoot,
+                  Path integrationsItemDir, IntegrationRegistry integrationRegistry,
+                  InstallationLedgerStore ledgerStore, int hookTimeoutSeconds) {
         this.snapshotRoot = snapshotRoot;
         this.integrationsYml = integrationsYml;
         this.configEntriesRoot = configEntriesRoot;
         this.integrationsItemDir = integrationsItemDir;
-        this.dumpExecutor = dumpExecutor;
+        this.integrationRegistry = integrationRegistry;
         this.ledgerStore = ledgerStore;
+        this.hookTimeoutSeconds = hookTimeoutSeconds;
     }
 
     /**
-     * 轻量安装快照(安装路径:配置树三面全捕+新增文件清单;无 jar 集/
-     * core 程序/DB dump——带 DB 约定者已降级入队,安装路径无 DB 落库)。首装形态:
-     * integrations.yml 不存在→落 absent 标记(此时无配置树可捕,还原=删 yml 回「无 yml」)。
+     * 轻量安装快照(安装路径:配置树三面全捕+新增文件清单;无 jar 集/core 程序——
+     * 安装路径不进升级窗,无备份广播)。首装形态:integrations.yml 不存在→落
+     * absent 标记(此时无配置树可捕,还原=删 yml 回「无 yml」)。
      *
      * @return 快照目录({@code snapshotRoot/{planId}}),台账 snapshotPath 载体
      */
@@ -141,16 +179,19 @@ public class BackupService {
     }
 
     /**
-     * 全量升级快照(四件套,升级编排器变更窗第一步)。DB 范围=调用方按 manifest
-     * db_conventions 传入的域块;每域 dump 完成=写 dump-state.yml 子标记
-     * (dump.{domain}=DONE,「本域 dump 子标记先于本域迁移」不变式的记号面)。
+     * 全量升级快照(升级编排器变更窗第一步)。时序=窗口协议:先广播
+     * {@link BackupHook#backup()}(失败=窗口中止,不迁移不开快照成立标志),
+     * 再快照 core 自己的三件套(jars/程序/配置)。参与者在册与结果进账本
+     * ({@code backup:<坐标>} 步),恢复面据其账本驱动派发。
      *
      * @return 快照目录
      */
-    public Path snapshotForUpgrade(String planId, List<DbDumpSpec> dbConventions) {
+    public Path snapshotForUpgrade(String planId) {
         Path planDir = snapshotRoot.resolve(planId);
         try {
             Files.createDirectories(planDir);
+
+            dispatchBackupHooks(planId);
 
             ledgerStore.recordStep(planId, "snapshot-jars", InstallationLedgerStore.StepState.PENDING, null);
             snapshotJars(planDir);
@@ -163,20 +204,6 @@ public class BackupService {
             ledgerStore.recordStep(planId, "snapshot-config", InstallationLedgerStore.StepState.PENDING, null);
             snapshotConfigTree(planDir);
             ledgerStore.recordStep(planId, "snapshot-config", InstallationLedgerStore.StepState.DONE, null);
-
-            if (dbConventions != null) {
-                Path dbDir = planDir.resolve("db");
-                Files.createDirectories(dbDir);
-                for (DbDumpSpec block : dbConventions) {
-                    String stepName = "snapshot-db:" + block.getDomain();
-                    ledgerStore.recordStep(planId, stepName, InstallationLedgerStore.StepState.PENDING, null);
-                    Path domainDir = dbDir.resolve(block.getDomain());
-                    Files.createDirectories(domainDir);
-                    dumpExecutor.dump(block.getDomain(), block, domainDir);
-                    recordDumpStateMarker(planDir, block.getDomain());
-                    ledgerStore.recordStep(planId, stepName, InstallationLedgerStore.StepState.DONE, null);
-                }
-            }
 
             ledgerStore.recordStep(planId, "snapshot-manifest", InstallationLedgerStore.StepState.PENDING, null);
             writeManifest(planDir);
@@ -195,7 +222,7 @@ public class BackupService {
     /**
      * 程序面恢复(三面全还原):manifest 逐条 sha256 对账(任一篡改→IllegalStateException,
      * 拒绝用坏快照回滚)→ integrations.yml 字节还原(absent 标记=删除 yml)+config_entries/
-     * 整树还原+integrations/*.yml 整树还原。DB 面不在本方法(数据面恢复走 restoreDbDomains)。
+     * 整树还原+integrations/*.yml 整树还原。备份面恢复不在本方法(走 restoreBackups)。
      */
     public void restoreProgramFace(String planId) throws IOException {
         Path planDir = snapshotRoot.resolve(planId);
@@ -209,28 +236,31 @@ public class BackupService {
         }
 
         if (hasPrefix(snapshotPaths, "config/config_entries/")) {
-            DbDumpExecutor.deleteRecursively(configEntriesRoot);
+            SnapshotFiles.deleteRecursively(configEntriesRoot);
             copyTree(planDir.resolve("config/config_entries"), configEntriesRoot);
         }
         if (hasPrefix(snapshotPaths, "config/integrations/")) {
-            DbDumpExecutor.deleteRecursively(integrationsItemDir);
+            SnapshotFiles.deleteRecursively(integrationsItemDir);
             copyTree(planDir.resolve("config/integrations"), integrationsItemDir);
         }
     }
 
     /**
-     * 数据面恢复:manifest 全量对账后逐域 dumpExecutor.restore。域集=调用方按
-     * 「dump 子标记=DONE」过滤后传入(本方法不读状态机标记,职责单面)。
+     * 备份面恢复:账本驱动——只派发给账本中 {@code backup:<坐标>} 步 DONE 的参与者
+     * (硬规则:盲广播会让未备份者从空槽恢复=数据事故),restore 结果对称记
+     * {@code restore:<坐标>} 步。backup 成功者已从注册表消失(窗口中卸载等异常形态)
+     * =显式拒绝不静默跳过——数据恢复面缺参与者必须显形。
      */
-    public void restoreDbDomains(String planId, List<DbDumpSpec> domains) throws IOException {
-        Path planDir = snapshotRoot.resolve(planId);
-        verifyManifest(planDir);
-        for (DbDumpSpec block : domains) {
-            Path domainDir = planDir.resolve("db").resolve(block.getDomain());
-            if (!Files.isDirectory(domainDir)) {
-                throw new IllegalStateException("无 dump 产物可恢复(域 " + block.getDomain() + "): " + domainDir);
+    public void restoreBackups(String planId) throws IOException {
+        verifyManifest(snapshotRoot.resolve(planId));
+        for (InstallationLedgerStore.Step step : doneBackupSteps(planId)) {
+            String coordinate = step.getName().substring(BACKUP_STEP_PREFIX.length());
+            IntegrationBase participant = integrationRegistry.getIntegration(coordinate);
+            if (!(participant instanceof BackupHook)) {
+                throw new IllegalStateException("backup 成功参与者不可恢复(注册表无该坐标或其"
+                        + "不再实现 BackupHook): " + coordinate + " - " + planId);
             }
-            dumpExecutor.restore(block.getDomain(), block, domainDir);
+            recordHookStep(planId, RESTORE_STEP_PREFIX + coordinate, (BackupHook) participant, false);
         }
     }
 
@@ -250,6 +280,93 @@ public class BackupService {
                     strOf(item.get("sha256"), ADDED_FILES_JSON + " sha256")));
         }
         return result;
+    }
+
+    // ==================== BackupHook 广播 ====================
+
+    /**
+     * B2 广播:遍历集成注册表(坐标排序=派发顺序确定性,账本时间线可读),
+     * {@code instanceof BackupHook} 参与者逐个同步调用 backup()(带超时);
+     * 不实现=明示不需要备份(缺席语义合法)。任一失败/超时=窗口中止
+     * (异常上抛由调用方转 FAILED,半快照由 snapshotForUpgrade 清理)。
+     */
+    private void dispatchBackupHooks(String planId) {
+        for (String coordinate : new TreeSet<>(integrationRegistry.getAllCoordinates())) {
+            IntegrationBase participant = integrationRegistry.getIntegration(coordinate);
+            if (!(participant instanceof BackupHook)) {
+                continue;
+            }
+            recordHookStep(planId, BACKUP_STEP_PREFIX + coordinate, (BackupHook) participant, true);
+        }
+    }
+
+    /** 单参与者钩子调用+账本步骤记录(PENDING→DONE;失败/超时记 FAILED 后原样上抛) */
+    private void recordHookStep(String planId, String stepName, BackupHook hook, boolean backupPhase) {
+        ledgerStore.recordStep(planId, stepName, InstallationLedgerStore.StepState.PENDING, null);
+        try {
+            callHookWithTimeout(hook, backupPhase);
+        } catch (RuntimeException e) {
+            ledgerStore.recordStep(planId, stepName, InstallationLedgerStore.StepState.FAILED, e.getMessage());
+            throw e;
+        }
+        ledgerStore.recordStep(planId, stepName, InstallationLedgerStore.StepState.DONE, null);
+    }
+
+    /**
+     * 同步调用带超时:钩子在单线程执行器中跑,本线程 {@code Future.get(超时)} 等待;
+     * 超时=cancel(true)(中断钩子线程,静默/解冻类实现的内部等待靠中断退出)+
+     * 异常上抛。执行器随调用创建销毁——升级窗是罕见路径,不为它常驻线程。
+     */
+    private void callHookWithTimeout(BackupHook hook, boolean backupPhase) {
+        String phase = backupPhase ? "backup" : "restore";
+        ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "upgrade-" + phase + "-hook");
+            thread.setDaemon(true);
+            return thread;
+        });
+        try {
+            Future<Object> future = executor.submit(() -> {
+                if (backupPhase) {
+                    hook.backup();
+                } else {
+                    hook.restore();
+                }
+                return null;
+            });
+            future.get(hookTimeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            throw new IllegalStateException("BackupHook " + phase + "() 超时("
+                    + hookTimeoutSeconds + "s),升级窗口中止: " + hook.getClass().getName(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("BackupHook " + phase + "() 等待被中断,升级窗口中止", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;   // 钩子自抛异常原样上抛(不换型不失真)
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new IllegalStateException("BackupHook " + phase + "() 抛非运行时异常: "
+                    + cause, cause);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    /** 账本中 {@code backup:<坐标>} 步 DONE 的参与者名单(按账本记录序=派发序) */
+    private List<InstallationLedgerStore.Step> doneBackupSteps(String planId) {
+        InstallationLedgerStore.Ledger ledger = ledgerStore.read(planId)
+                .orElseThrow(() -> new IllegalStateException("无台账记录,备份面恢复不可达: " + planId));
+        List<InstallationLedgerStore.Step> done = new ArrayList<>();
+        for (InstallationLedgerStore.Step step : ledger.getSteps()) {
+            if (step.getName().startsWith(BACKUP_STEP_PREFIX)
+                    && step.getState() == InstallationLedgerStore.StepState.DONE) {
+                done.add(step);
+            }
+        }
+        return done;
     }
 
     // ==================== 快照各面 ====================
@@ -372,7 +489,7 @@ public class BackupService {
                 }
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("path", relative);
-                entry.put("sha256", DbDumpExecutor.sha256Hex(file));
+                entry.put("sha256", SnapshotFiles.sha256Hex(file));
                 files.add(entry);
             }
         }
@@ -400,7 +517,7 @@ public class BackupService {
             requireContainedPath(relative);
             Path snapshotFile = planDir.resolve(relative);
             if (!Files.isRegularFile(snapshotFile)
-                    || !expected.equals(DbDumpExecutor.sha256Hex(snapshotFile))) {
+                    || !expected.equals(SnapshotFiles.sha256Hex(snapshotFile))) {
                 throw new IllegalStateException("快照校验失败: " + relative + "(" + planDir + ")");
             }
         }
@@ -469,23 +586,6 @@ public class BackupService {
         }
     }
 
-    /** dump-state.yml 子标记:dump.{domain}=DONE(增量合并重写;升级编排器以「本域 dump 先于本域迁移」读它) */
-    private void recordDumpStateMarker(Path planDir, String domain) throws IOException {
-        Path stateFile = planDir.resolve("db").resolve(DUMP_STATE_FILE);
-        Map<String, Object> doc = new LinkedHashMap<>();
-        Map<String, Object> dump = new LinkedHashMap<>();
-        if (Files.isRegularFile(stateFile)) {
-            Map<String, Object> existing = new Yaml().load(
-                    new String(Files.readAllBytes(stateFile), StandardCharsets.UTF_8));
-            if (existing != null && existing.get("dump") instanceof Map) {
-                dump.putAll((Map<String, Object>) existing.get("dump"));
-            }
-        }
-        dump.put(domain, "DONE");
-        doc.put("dump", dump);
-        new YamlAtomicFileWriter().write(doc, stateFile.toFile());
-    }
-
     private boolean hasPrefix(Set<String> paths, String prefix) {
         for (String path : paths) {
             if (path.startsWith(prefix)) {
@@ -504,7 +604,7 @@ public class BackupService {
 
     private void cleanupQuietly(Path planDir, String planId) {
         try {
-            DbDumpExecutor.deleteRecursively(planDir);
+            SnapshotFiles.deleteRecursively(planDir);
         } catch (IOException cleanupFailure) {
             log.error("快照清理失败(留有残目录): " + planId + " - " + cleanupFailure.getMessage());
         }

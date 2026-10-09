@@ -127,9 +127,6 @@ public class UpgradeOrchestrator {
     private static final Set<PlanState> HALTING_STATES = new HashSet<>(Arrays.asList(
             PlanState.FAILED, PlanState.ROLLBACK_FAILED));
 
-    /** flyway 机制词(T-5-6 词表;legacy-schema 域=纪元登记不自迁移,零标记) */
-    private static final String MECHANISM_FLYWAY = "flyway";
-
     private final EcatCore core;
     private final Path queueRoot;
     private final Path snapshotRoot;
@@ -178,7 +175,8 @@ public class UpgradeOrchestrator {
             this.ledgerStore = new InstallationLedgerStore(
                     Paths.get(".ecat-data", "installations"), snapshotRoot, Clock.systemUTC());
             this.backupService = new BackupService(snapshotRoot, integrationsYml,
-                    configEntriesRoot, integrationsItemDir, new DbDumpExecutor(), this.ledgerStore);
+                    configEntriesRoot, integrationsItemDir, core.getIntegrationRegistry(),
+                    this.ledgerStore);
         }
     }
 
@@ -353,9 +351,9 @@ public class UpgradeOrchestrator {
             clearHalfSnapshot(plan.getPlanId());   // BACKING_UP 重做:先清半快照(§3.3)
         }
         try {
-            backupService.snapshotForUpgrade(plan.getPlanId(), dumpSpecsOf(plan));
+            backupService.snapshotForUpgrade(plan.getPlanId());
         } catch (RuntimeException e) {
-            String reason = "B2 备份/dump 失败(零变更段,无回滚动作): " + e.getMessage();
+            String reason = "B2 备份失败(零变更段,无回滚动作): " + e.getMessage();
             plan.recordError(reason);
             recordStepQuiet(plan.getPlanId(), "snapshot", StepState.FAILED, reason);
             finishIfRunningQuiet(plan.getPlanId(), PlanResult.FAILED);
@@ -386,9 +384,9 @@ public class UpgradeOrchestrator {
         }
         // 上一步标记必查(不变量②):声称已提交则 yml 必已是新值——账实冲突=保守回滚,不猜续推
         verifyCommittedFace(plan);
-        markFlywayDomainsPending(plan);
         plan.stateTransition(PlanState.LOADING);
         // 链止于此:apply 窗=唯一 load 窗,判定归 runPostLoadPhase
+        // (DB_UPGRADING 态保留=状态机词表 wire 兼容;域级子标记随 db: 块退役不再写)
     }
 
     /** B3 提交标记核验:逐 item yml version==target;不符=提交声称与盘面冲突 */
@@ -442,16 +440,14 @@ public class UpgradeOrchestrator {
             if (item.getFiles().isEmpty()) {
                 // 零验通道(写侧已提交契约「重启窗按 manifest 复验语义零验」,修订轮 7 补读侧):
                 // 门①降级条目 files=[] 无 jar 可复验——跳过 jar 复验面(sha256/依赖扫描)直入装载链;
-                // 坐标守卫/前提一致性/requires_core/db 约定不属 jar 复验面,照验
+                // 坐标守卫/前提一致性/requires_core 不属 jar 复验面,照验
                 // (requires_core 复验是 C1 版本门纵深+态 3 修复续推的判定依据,不豁免)。
                 // jar 实缺在 B5 装载显形(LOADING_FAILED,零自动回滚),不在 B1 捏造拒绝。
                 failures.addAll(verifyRequiresCore(item));
-                failures.addAll(verifyDbConventions(item));
                 continue;
             }
             failures.addAll(verifyFiles(item));
             failures.addAll(verifyRequiresCore(item));
-            failures.addAll(verifyDbConventions(item));
             failures.addAll(verifyDependencies(item, planCoordinates, itgs));
         }
         return failures;
@@ -500,72 +496,6 @@ public class UpgradeOrchestrator {
             failures.add(item.getCoordinate() + " requires_core 无法解析: " + constraint);
         }
         return failures;
-    }
-
-    /** db_conventions 复验:逐块键集合恰等+字段规则(T-5-6 校验器规则 2~6,客户端纵深门) */
-    private List<String> verifyDbConventions(Item item) {
-        List<String> failures = new ArrayList<>();
-        for (Map<String, Object> block : item.getDbConventions()) {
-            String problem = validateDbBlock(block);
-            if (problem != null) {
-                failures.add(item.getCoordinate() + " db 约定块非法: " + problem);
-            }
-        }
-        return failures;
-    }
-
-    /**
-     * T-5-6 校验器规则 2~6(顺序执行,首错即返):键集合恰等按 mechanism 分派→
-     * domain 词形→engine/mechanism 词域→historyTable 派生或 legacyVersion 词形→
-     * dumpPolicy 四值语法。null=全过。
-     */
-    private static String validateDbBlock(Map<String, Object> block) {
-        String mechanism = QueuePlan.conventionField(block, "mechanism");
-        Set<String> expectedKeys;
-        if (MECHANISM_FLYWAY.equals(mechanism)) {
-            expectedKeys = new HashSet<>(Arrays.asList(
-                    "domain", "engine", "mechanism", "historyTable", "dumpPolicy"));
-        } else if ("legacy-schema".equals(mechanism)) {
-            expectedKeys = new HashSet<>(Arrays.asList(
-                    "domain", "engine", "mechanism", "legacyVersion", "dumpPolicy"));
-        } else {
-            return "mechanism 非法(" + mechanism + "),合法值域={flyway,legacy-schema}";
-        }
-        if (!block.keySet().equals(expectedKeys)) {
-            return "键集合不恰等(现=" + block.keySet() + " 期望=" + expectedKeys + ")";
-        }
-        String domain = QueuePlan.conventionField(block, "domain");
-        if (domain == null || !domain.matches("^[a-z][a-z0-9-]*$")) {
-            return "domain 词形非法: " + domain;
-        }
-        String engine = QueuePlan.conventionField(block, "engine");
-        if (!"pg".equals(engine) && !"sqlite".equals(engine)) {
-            return "engine 非法(" + engine + "),合法值域={pg,sqlite}";
-        }
-        if (MECHANISM_FLYWAY.equals(mechanism)) {
-            String historyTable = QueuePlan.conventionField(block, "historyTable");
-            if (!("flyway_schema_history_" + domain).equals(historyTable)) {
-                return "historyTable 与 domain 派生不一致: " + historyTable;
-            }
-        } else {
-            String legacyVersion = QueuePlan.conventionField(block, "legacyVersion");
-            if (legacyVersion == null || !legacyVersion.matches("^[0-9]+$")) {
-                return "legacyVersion 词形非法: " + legacyVersion;
-            }
-        }
-        String dumpPolicy = QueuePlan.conventionField(block, "dumpPolicy");
-        if (dumpPolicy == null) {
-            return "dumpPolicy 缺失";
-        }
-        if ("full".equals(dumpPolicy) || "schema".equals(dumpPolicy) || "file-copy".equals(dumpPolicy)) {
-            return null;
-        }
-        if (dumpPolicy.startsWith("table-family:")) {
-            String families = dumpPolicy.substring("table-family:".length());
-            return families.matches("[A-Za-z0-9_*.?]+(,[A-Za-z0-9_*.?]+)*")
-                    ? null : "dumpPolicy 清单词形非法: " + dumpPolicy;
-        }
-        return "dumpPolicy 非法(" + dumpPolicy + "),合法=full|schema|file-copy|table-family:清单";
     }
 
     /** 依赖齐全:读目标 jar 声明依赖,逐个验「yml enabled 或 manifest items 覆盖」 */
@@ -653,38 +583,12 @@ public class UpgradeOrchestrator {
         }
     }
 
-    // ==================== B4a/B4b DB 子标记 ====================
-
-    private void markFlywayDomainsPending(QueuePlan plan) {
-        for (Item item : plan.getManifest().getItems()) {
-            for (Map<String, Object> block : item.getDbConventions()) {
-                if (MECHANISM_FLYWAY.equals(QueuePlan.conventionField(block, "mechanism"))) {
-                    plan.markDbDomain(QueuePlan.conventionField(block, "domain"), "PENDING");
-                }
-            }
-        }
-    }
-
     // ==================== B5 判定+B6 ====================
 
     private void judgeAfterLoad(QueuePlan plan) {
-        // B4b:逐 flyway 域宿主 registry 直查(宿主=携带该 db 块的 manifest item 坐标)
-        List<String> missingDbHosts = new ArrayList<>();
-        for (Item item : plan.getManifest().getItems()) {
-            for (Map<String, Object> block : item.getDbConventions()) {
-                if (!MECHANISM_FLYWAY.equals(QueuePlan.conventionField(block, "mechanism"))) {
-                    continue;
-                }
-                String domain = QueuePlan.conventionField(block, "domain");
-                if (isCoordinateLoaded(item.getCoordinate())) {
-                    plan.markDbDomain(domain, "DONE");
-                } else {
-                    plan.markDbDomain(domain, "FAILED");
-                    missingDbHosts.add(item.getCoordinate() + "(域 " + domain + ")");
-                }
-            }
-        }
-        // B5 判定(registry 直查权威;enabled=false 目标豁免加载要求=合法停用终态)
+        // B5 判定(registry 直查权威;enabled=false 目标豁免加载要求=合法停用终态)。
+        // 数据迁移不再由本窗判定(db: 块已退役,迁移由装载注册点机制自然执行),
+        // 本判定只认目标坐标装载成败。
         List<String> missingTargets = new ArrayList<>();
         Map<String, Map<String, Object>> itgs = integrationsOf(
                 core.getIntegrationManager().loadIntegrationsConfig());
@@ -697,17 +601,8 @@ public class UpgradeOrchestrator {
                 missingTargets.add(item.getCoordinate());
             }
         }
-        boolean allDbDone = plan.getDbMarkers().values().stream().allMatch("DONE"::equals);
-        if (missingTargets.isEmpty() && missingDbHosts.isEmpty() && allDbDone) {
+        if (missingTargets.isEmpty()) {
             completePlan(plan);
-            return;
-        }
-        if (!missingDbHosts.isEmpty()) {
-            // 确定性触发回滚:数据面可能已变,恢复 dump 保一致(boot 窗内无业务写入,代价有界)
-            String reason = "B4b 域宿主未加载,迁移未完成: " + String.join(", ", missingDbHosts);
-            plan.recordError(reason);
-            log.error("[升级编排] " + reason + " —— 确定性回滚到升级前");
-            rollbackInternal(plan, true);
             return;
         }
         loadingFailed(plan, missingTargets);
@@ -746,9 +641,9 @@ public class UpgradeOrchestrator {
     // ==================== 回滚(自动触发与人工入口同一执行体) ====================
 
     /**
-     * 回滚执行体:程序面三面还原→已 dump 域数据面还原→三面逐字节验证→ROLLED_BACK。
-     * 任一步失败→ROLLBACK_FAILED(最高级错误:停机报告,不再自动尝试)。
-     * 恢复后需重启生效——运行中实例不因回滚自动卸载。
+     * 回滚执行体:备份面还原(账本驱动,只到 backup 成功者)→程序面三面还原→
+     * 三面逐字节验证→ROLLED_BACK。任一步失败→ROLLBACK_FAILED(最高级错误:
+     * 停机报告,不再自动尝试)。恢复后需重启生效——运行中实例不因回滚自动卸载。
      */
     private RollbackOutcome rollbackInternal(QueuePlan plan, boolean cancelRest) {
         String planId = plan.getPlanId();
@@ -756,14 +651,8 @@ public class UpgradeOrchestrator {
             plan.stateTransition(PlanState.ROLLING_BACK);
         }
         try {
+            backupService.restoreBackups(planId);
             backupService.restoreProgramFace(planId);
-            List<String> dumpDone = plan.dumpedDomains(snapshotRoot);
-            if (!dumpDone.isEmpty()) {
-                List<DbDumpSpec> specs = dumpSpecsOf(plan).stream()
-                        .filter(spec -> dumpDone.contains(spec.getDomain()))
-                        .collect(Collectors.toList());
-                backupService.restoreDbDomains(planId, specs);
-            }
             verifyRestoredFaces(planId);
             finishIfRunningQuiet(planId, PlanResult.ROLLED_BACK);
             plan.recordError(null);
@@ -1216,25 +1105,6 @@ public class UpgradeOrchestrator {
 
     // ==================== 落盘映射辅助 ====================
 
-    private List<DbDumpSpec> dumpSpecsOf(QueuePlan plan) {
-        List<DbDumpSpec> specs = new ArrayList<>();
-        for (Item item : plan.itemsOrEmpty()) {
-            for (Map<String, Object> block : item.getDbConventions()) {
-                specs.add(DbDumpSpec.builder()
-                        .domain(QueuePlan.conventionField(block, "domain"))
-                        .engine(QueuePlan.conventionField(block, "engine"))
-                        .mechanism(QueuePlan.conventionField(block, "mechanism"))
-                        .historyTable(QueuePlan.conventionField(block, "historyTable"))
-                        .legacyVersion(QueuePlan.conventionField(block, "legacyVersion"))
-                        .dumpPolicy(QueuePlan.conventionField(block, "dumpPolicy"))
-                        .groupId(item.getGroupId())
-                        .artifactId(item.getArtifactId())
-                        .build());
-            }
-        }
-        return specs;
-    }
-
     private static ManifestFile jarEntryOf(Item item) {
         for (ManifestFile file : item.getFiles()) {
             if ("jar".equals(file.getKind())) {
@@ -1269,7 +1139,7 @@ public class UpgradeOrchestrator {
             return;
         }
         try {
-            DbDumpExecutor.deleteRecursively(planSnapshot);
+            SnapshotFiles.deleteRecursively(planSnapshot);
         } catch (IOException e) {
             throw new UpgradeStateException("半快照清理失败: " + planSnapshot + " - " + e.getMessage(), e);
         }

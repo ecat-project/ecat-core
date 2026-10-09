@@ -4,10 +4,13 @@
 
 package com.ecat.core.Upgrade;
 
+import com.ecat.core.Integration.IntegrationBase;
+import com.ecat.core.Integration.IntegrationRegistry;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.yaml.snakeyaml.Yaml;
+import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -21,8 +24,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -30,13 +33,24 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
- * BackupService 快照/恢复单测(临时目录+user.home 重定向+受控时钟,零真实进程)。
+ * BackupService 快照/恢复/BackupHook 派发单测(临时目录+user.home 重定向+受控时钟,
+ * 零真实进程)。
  *
  * <p>锁定风险:快照-恢复对称(捕获了必还原,恢复面缺树还原即红)、篡改检出执法面
  * (拒绝用坏快照回滚,yml 未被坏快照覆盖)、硬链接+跨 FS 回退、步骤时间戳严格递增
- * (受控时钟,不赌墙钟精度)、保留清理(RUNNING 恒保/剪除入台账)、首装 absent 形态。</p>
+ * (受控时钟,不赌墙钟精度)、保留清理(RUNNING 恒保/剪除入台账)、首装 absent 形态;
+ * 派发面:BackupHook 参与者识别(instanceof)与非参与者缺席语义、backup 失败/超时
+ * 即窗口中止+账本 FAILED、restore 账本驱动只到 backup DONE 者(硬规则:盲广播=空槽
+ * 恢复事故)。超时用注入 1s 超时缝+闩锁阻塞钩子构造,确定性零 sleep。</p>
  *
  * @author coffee
  */
@@ -51,6 +65,7 @@ public class BackupServiceTest {
     private String originalUserHome;
     private TestClock clock;
     private InstallationLedgerStore ledgerStore;
+    private IntegrationRegistry registry;
 
     /** 注入失败形态的链接缝(false=回退拷贝路径) */
     private boolean failHardLink;
@@ -78,27 +93,22 @@ public class BackupServiceTest {
         clock = new TestClock(Instant.parse("2026-10-01T08:30:00Z"));
         ledgerStore = new InstallationLedgerStore(tempDir.resolve("installations"),
                 snapshotRoot, clock);
+        registry = new IntegrationRegistry();
     }
 
     @After
     public void tearDown() throws IOException {
         System.setProperty("user.home", originalUserHome);
-        DbDumpExecutor.deleteRecursively(tempDir);
+        SnapshotFiles.deleteRecursively(tempDir);
     }
 
     private BackupService service() {
-        DbDumpExecutor dumpExecutor = new DbDumpExecutor((command, pgEnv) -> {
-            // dump 桩:落非空产物即可(执行器只校验产物存在+非空)
-            for (String arg : command) {
-                if (arg.startsWith("--file=")) {
-                    Files.write(java.nio.file.Paths.get(arg.substring("--file=".length())),
-                            "PGDMP".getBytes(StandardCharsets.UTF_8));
-                }
-            }
-            return new DbDumpExecutor.ExecResult(0, "");
-        }, k -> "stub-pg-env", tempDir.resolve("storage"));
+        return service(BackupService.BACKUP_HOOK_TIMEOUT_SECONDS);
+    }
+
+    private BackupService service(int hookTimeoutSeconds) {
         return new BackupService(snapshotRoot, integrationsYml, configEntriesRoot,
-                integrationsItemDir, dumpExecutor, ledgerStore) {
+                integrationsItemDir, registry, ledgerStore, hookTimeoutSeconds) {
             @Override
             protected Path coreProgramLocation() {
                 return coreProgramFixture;
@@ -114,8 +124,35 @@ public class BackupServiceTest {
         };
     }
 
+    /** 注册一个实现 BackupHook 的参与者(mock IntegrationBase 挂 extraInterfaces) */
+    private IntegrationBase registerHook(String coordinate) {
+        IntegrationBase hook = mock(IntegrationBase.class,
+                Mockito.withSettings().extraInterfaces(BackupHook.class));
+        registry.register(coordinate, hook);
+        return hook;
+    }
+
+    private BackupHook asHook(IntegrationBase participant) {
+        return (BackupHook) participant;
+    }
+
     private InstallationLedgerStore.CoordinateTrack track(String coordinate) {
         return new InstallationLedgerStore.CoordinateTrack(coordinate, "1.0.0", "2.0.0");
+    }
+
+    private void createUpgradeLedger(String planId) {
+        ledgerStore.create(planId, InstallationLedgerStore.PlanType.UPGRADE,
+                snapshotRoot.resolve(planId).toString(), Collections.singletonList(track("com.ecat:app")),
+                null);
+    }
+
+    private InstallationLedgerStore.Step stepOf(String planId, String name) {
+        for (InstallationLedgerStore.Step step : ledgerStore.read(planId).get().getSteps()) {
+            if (step.getName().equals(name)) {
+                return step;
+            }
+        }
+        throw new AssertionError("步骤不存在: " + name);
     }
 
     // ==================== T2 升级快照全流程 ====================
@@ -123,55 +160,139 @@ public class BackupServiceTest {
     @Test
     public void t2_upgrade_snapshot_steps_have_timestamps_and_manifest_verifies() throws IOException {
         String planId = "plan-upg";
-        ledgerStore.create(planId, InstallationLedgerStore.PlanType.UPGRADE,
-                snapshotRoot.resolve(planId).toString(), Collections.singletonList(track("com.ecat:app")),
-                null);
-        List<DbDumpSpec> dbBlocks = Collections.singletonList(
-                DbDumpSpec.builder().domain("his").engine("pg").mechanism("flyway")
-                        .historyTable("flyway_schema_history").dumpPolicy("table-family:his_data")
-                        .groupId("com.ecat").artifactId("integration-his").build());
-        service().snapshotForUpgrade(planId, dbBlocks);
+        createUpgradeLedger(planId);
+        service().snapshotForUpgrade(planId);
 
         InstallationLedgerStore.Ledger ledger = ledgerStore.read(planId).get();
-        assertTrue("快照各阶段步骤在册", ledger.getSteps().size() >= 5);
+        assertTrue("快照各阶段步骤在册", ledger.getSteps().size() >= 4);
         for (InstallationLedgerStore.Step step : ledger.getSteps()) {
             assertNotNull("startedAt 非空: " + step.getName(), step.getStartedAt());
             assertNotNull("finishedAt 非空: " + step.getName(), step.getFinishedAt());
             assertTrue("startedAt<finishedAt(受控时钟严格判): " + step.getName(),
                     step.getStartedAt().isBefore(step.getFinishedAt()));
         }
-        // jar 面/配置面/程序面产物在位
+        // jar 面/配置面/程序面产物在位(无 db 相:db: 块退役后快照只有三件套)
         assertTrue(Files.isRegularFile(snapshotRoot.resolve(planId).resolve("jars")
                 .resolve("com/ecat/app/1.0.0/app-1.0.0.jar")));
         assertTrue(Files.isRegularFile(snapshotRoot.resolve(planId).resolve("core")
                 .resolve("ecat-core-fixture.jar")));
         assertTrue(Files.isRegularFile(snapshotRoot.resolve(planId).resolve("config")
                 .resolve("integrations.yml")));
-        assertTrue(Files.isRegularFile(snapshotRoot.resolve(planId).resolve("db")
-                .resolve("his").resolve("dump.pgdump")));
+        assertFalse("db 相已退役,无 db 目录", Files.exists(snapshotRoot.resolve(planId).resolve("db")));
         // manifest 逐条 sha256 对账过(restoreProgramFace 内部走同一对账,能还原=对账成立)
         service().restoreProgramFace(planId);
     }
 
-    @Test
-    public void dump_state_marker_records_domain_done() throws IOException {
-        String planId = "plan-dumpstate";
-        ledgerStore.create(planId, InstallationLedgerStore.PlanType.UPGRADE,
-                snapshotRoot.resolve(planId).toString(), null, null);
-        List<DbDumpSpec> dbBlocks = Arrays.asList(
-                DbDumpSpec.builder().domain("his").engine("pg").dumpPolicy("table-family:his_data")
-                        .groupId("com.ecat").artifactId("a").build(),
-                DbDumpSpec.builder().domain("adm").engine("pg").dumpPolicy("table-family:adm_data_sample")
-                        .groupId("com.ecat").artifactId("b").build());
-        service().snapshotForUpgrade(planId, dbBlocks);
+    // ==================== BackupHook 派发(两事件) ====================
 
-        Yaml yaml = new Yaml();
-        Map<String, Object> state = yaml.load(new String(Files.readAllBytes(
-                snapshotRoot.resolve(planId).resolve("db").resolve("dump-state.yml")),
-                StandardCharsets.UTF_8));
-        Map<String, Object> dump = (Map<String, Object>) state.get("dump");
-        assertEquals("DONE", dump.get("his"));
-        assertEquals("DONE", dump.get("adm"));
+    /** 派发识别面:BackupHook 参与者逐个广播,非实现者缺席语义合法(不回调) */
+    @Test
+    public void backup_dispatch_hits_only_hook_participants_ledger_records_all() throws IOException {
+        IntegrationBase hookA = registerHook("com.ecat:a");
+        IntegrationBase plain = mock(IntegrationBase.class);
+        registry.register("com.ecat:plain", plain);
+        IntegrationBase hookC = registerHook("com.ecat:c");
+        String planId = "plan-dispatch";
+        createUpgradeLedger(planId);
+
+        service().snapshotForUpgrade(planId);
+
+        verify(asHook(hookA), times(1)).backup();
+        verify(asHook(hookC), times(1)).backup();
+        verify(plain, never()).onPause();   // 非参与者零回调(缺席语义,探针=任一生命周期法)
+        assertEquals(InstallationLedgerStore.StepState.DONE, stepOf(planId, "backup:com.ecat:a").getState());
+        assertEquals(InstallationLedgerStore.StepState.DONE, stepOf(planId, "backup:com.ecat:c").getState());
+        assertFalse("无 restore 步(restore 只出现在回滚分支)",
+                ledgerStore.read(planId).get().getSteps().stream()
+                        .anyMatch(s -> s.getName().startsWith("restore:")));
+    }
+
+    /** 失败中止:任一参与者 backup 抛出=窗口中止,账本 FAILED,无半快照,后者不再派发 */
+    @Test
+    public void backup_hook_failure_aborts_window_ledger_failed_no_half_snapshot() throws IOException {
+        IntegrationBase failing = registerHook("com.ecat:a");
+        doThrow(new IllegalStateException("钩子备份失败")).when(asHook(failing)).backup();
+        IntegrationBase later = registerHook("com.ecat:z");
+        String planId = "plan-hookfail";
+        createUpgradeLedger(planId);
+
+        try {
+            service().snapshotForUpgrade(planId);
+            fail("backup 钩子失败必须中止窗口(异常上抛)");
+        } catch (IllegalStateException e) {
+            assertTrue("异常保留钩子原话(不失真): " + e.getMessage(), e.getMessage().contains("钩子备份失败"));
+        }
+        InstallationLedgerStore.Step step = stepOf(planId, "backup:com.ecat:a");
+        assertEquals(InstallationLedgerStore.StepState.FAILED, step.getState());
+        assertEquals("钩子备份失败", step.getError());
+        verify(asHook(later), never()).backup();   // fail-fast:失败者之后的参与者不派发
+        assertFalse("无半快照:失败目录已清理", Files.exists(snapshotRoot.resolve(planId)));
+    }
+
+    /** 超时传播:钩子阻塞超过注入超时→超时异常上抛+账本 FAILED(1s 超时缝,确定性) */
+    @Test
+    public void backup_hook_timeout_propagates_and_ledger_records_failed() throws IOException {
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        IntegrationBase hanging = registerHook("com.ecat:hang");
+        doAnswer(inv -> {
+            neverReleased.await();   // 模拟钩子卡死(网络卷挂死形态);超时中断后由此退出
+            return null;
+        }).when(asHook(hanging)).backup();
+        String planId = "plan-hooktimeout";
+        createUpgradeLedger(planId);
+
+        try {
+            service(1).snapshotForUpgrade(planId);
+            fail("backup 钩子超时必须上抛中止窗口");
+        } catch (IllegalStateException e) {
+            assertTrue("超时消息含超时秒数与中止语义: " + e.getMessage(),
+                    e.getMessage().contains("超时") && e.getMessage().contains("中止"));
+        } finally {
+            neverReleased.countDown();   // 释放钩子线程(cancel(true) 中断后闩锁可过)
+        }
+        assertEquals(InstallationLedgerStore.StepState.FAILED, stepOf(planId, "backup:com.ecat:hang").getState());
+        assertFalse("无半快照", Files.exists(snapshotRoot.resolve(planId)));
+    }
+
+    /** restore 账本驱动:只派发给 backup 步 DONE 的参与者(硬规则:盲广播=空槽恢复事故) */
+    @Test
+    public void restore_dispatches_only_to_backup_done_participants() throws IOException {
+        IntegrationBase done = registerHook("com.ecat:done");
+        IntegrationBase neverBacked = registerHook("com.ecat:neverbacked");
+        String planId = "plan-restore";
+        createUpgradeLedger(planId);
+        service().snapshotForUpgrade(planId);
+        assertEquals(InstallationLedgerStore.StepState.DONE, stepOf(planId, "backup:com.ecat:done").getState());
+
+        // 账本改写:neverbacked 的 backup 步翻 FAILED(=未成功备份者,restore 不得触达)
+        ledgerStore.recordStep(planId, "backup:com.ecat:neverbacked",
+                InstallationLedgerStore.StepState.FAILED, "测试注入:未成功备份形态");
+
+        service().restoreBackups(planId);
+
+        verify(asHook(done), times(1)).restore();
+        verify(asHook(neverBacked), never()).restore();
+        assertEquals(InstallationLedgerStore.StepState.DONE, stepOf(planId, "restore:com.ecat:done").getState());
+        assertFalse("未备份者无 restore 步", ledgerStore.read(planId).get().getSteps().stream()
+                .anyMatch(s -> s.getName().equals("restore:com.ecat:neverbacked")));
+    }
+
+    /** backup 成功者从注册表消失=恢复面缺参与者,显式拒绝不静默跳过(严格模式) */
+    @Test
+    public void restore_missing_done_participant_rejected_not_skipped() throws IOException {
+        registerHook("com.ecat:vanish");
+        String planId = "plan-vanish";
+        createUpgradeLedger(planId);
+        service().snapshotForUpgrade(planId);
+        registry.unregister("com.ecat:vanish");   // 窗口中参与者消失的异常形态
+
+        try {
+            service().restoreBackups(planId);
+            fail("backup DONE 参与者已不在注册表必须显形拒绝");
+        } catch (IllegalStateException e) {
+            assertTrue("消息指认坐标与不可恢复语义: " + e.getMessage(),
+                    e.getMessage().contains("com.ecat:vanish") && e.getMessage().contains("不可恢复"));
+        }
     }
 
     // ==================== T1b 快照-恢复对称 ====================
@@ -179,9 +300,8 @@ public class BackupServiceTest {
     @Test
     public void t1b_restored_config_tree_equals_snapshot_bytes_not_post_snapshot_drift() throws IOException {
         String planId = "plan-sym";
-        ledgerStore.create(planId, InstallationLedgerStore.PlanType.UPGRADE,
-                snapshotRoot.resolve(planId).toString(), null, null);
-        service().snapshotForUpgrade(planId, null);
+        createUpgradeLedger(planId);
+        service().snapshotForUpgrade(planId);
 
         // 升级窗写面模拟:T-2-2 entry 迁移持久化改写 config_entries + 集成单件 yml
         writeEntryFile(configEntriesRoot, "com.ecat", "app", "entry-1", "key: migrated\n");
@@ -207,9 +327,8 @@ public class BackupServiceTest {
     public void t5_same_fs_snapshot_jar_is_same_file_as_repo_jar() throws IOException {
         writeFixtureJar("com.ecat", "app", "1.0.0");
         String planId = "plan-link";
-        ledgerStore.create(planId, InstallationLedgerStore.PlanType.UPGRADE,
-                snapshotRoot.resolve(planId).toString(), null, null);
-        service().snapshotForUpgrade(planId, null);
+        createUpgradeLedger(planId);
+        service().snapshotForUpgrade(planId);
 
         Path snapshotJar = snapshotRoot.resolve(planId).resolve("jars")
                 .resolve("com/ecat/app/1.0.0/app-1.0.0.jar");
@@ -222,9 +341,8 @@ public class BackupServiceTest {
         writeFixtureJar("com.ecat", "app", "1.0.0");
         failHardLink = true;
         String planId = "plan-copy";
-        ledgerStore.create(planId, InstallationLedgerStore.PlanType.UPGRADE,
-                snapshotRoot.resolve(planId).toString(), null, null);
-        service().snapshotForUpgrade(planId, null);
+        createUpgradeLedger(planId);
+        service().snapshotForUpgrade(planId);
 
         Path snapshotJar = snapshotRoot.resolve(planId).resolve("jars")
                 .resolve("com/ecat/app/1.0.0/app-1.0.0.jar");
@@ -238,10 +356,9 @@ public class BackupServiceTest {
     public void jar_missing_fails_closed_with_clear_message() throws IOException {
         Files.delete(fixtureJar("com.ecat", "app", "1.0.0"));
         String planId = "plan-missing";
-        ledgerStore.create(planId, InstallationLedgerStore.PlanType.UPGRADE,
-                snapshotRoot.resolve(planId).toString(), null, null);
+        createUpgradeLedger(planId);
         try {
-            service().snapshotForUpgrade(planId, null);
+            service().snapshotForUpgrade(planId);
             fail("jar 缺失必须 fail-closed(快照必须完整)");
         } catch (IllegalStateException e) {
             assertTrue("消息含坐标与拒绝语义: " + e.getMessage(),
@@ -407,9 +524,9 @@ public class BackupServiceTest {
         InstallationLedgerStore.Ledger ledger = ledgerStore.read(planId).get();
         assertEquals("无重复行", 2, ledger.getSteps().size());
         assertTrue("commit 步时间戳严格递增(受控时钟)",
-                stepOfLedger(ledger, "commit").getStartedAt()
-                        .isBefore(stepOfLedger(ledger, "commit").getFinishedAt()));
-        assertNull("纯 PENDING 步骤无 finishedAt", stepOfLedger(ledger, "rollback").getFinishedAt());
+                stepOf(planId, "commit").getStartedAt()
+                        .isBefore(stepOf(planId, "commit").getFinishedAt()));
+        assertNull("纯 PENDING 步骤无 finishedAt", stepOf(planId, "rollback").getFinishedAt());
 
         ledgerStore.finish(planId, InstallationLedgerStore.PlanResult.SUCCESS);
         try {
@@ -431,15 +548,6 @@ public class BackupServiceTest {
         assertEquals(InstallationLedgerStore.PlanResult.CANCELLED, ledger.getResult());
         assertNotNull("终态时间戳", ledger.getFinishedAt());
         assertTrue("CANCELLED=终态", ledger.isTerminal());
-    }
-
-    private InstallationLedgerStore.Step stepOfLedger(InstallationLedgerStore.Ledger ledger, String name) {
-        for (InstallationLedgerStore.Step step : ledger.getSteps()) {
-            if (step.getName().equals(name)) {
-                return step;
-            }
-        }
-        throw new AssertionError("步骤不存在: " + name);
     }
 
     @Test

@@ -5,6 +5,7 @@
 package com.ecat.core.Upgrade;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.ecat.core.Upgrade.UpgradeManifestVerifier.VerifyResult;
 import com.ecat.core.Version.CoreVersionsTestAccess;
 
@@ -32,12 +33,13 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * 升级清单复验门单测:五门全量收集+负向自检(§7 用例面)。
+ * 升级清单复验门单测:四门全量收集+负向自检(§7 用例面)。
  *
  * <p>锁定风险:产源值域门(resolve/local 扩认,local-hack 拒)、缺一文件即拒
  * (FILE_MISSING,放回转绿=门有牙非恒红)、sha256 全链篡改即现形、requires_core
- * 有效负样本双例(^3.1.0×4.0.0 拒 / ×3.2.0 过)、db 约定块 canonical fixture
- * 负向变体消费、manifest JSON 往返零丢失(含 null installed_version/空 db_conventions)。</p>
+ * 有效负样本双例(^3.1.0×4.0.0 拒 / ×3.2.0 过)、manifest JSON 往返零丢失
+ * (含 null installed_version)、旧清单 db_conventions 遗留键容忍(解析不报错、
+ * 复验不拒绝——db: 块退役后过渡期旧清单仍在盘)。</p>
  *
  * <p>夹具:user.home 重定向临时目录(门2/门4 文件在位检查走临时 ~/.m2 布局);
  * 文件内容即普通字节(复验门只做存在性+哈希面,不开 jar);sha256 期望值=夹具
@@ -70,9 +72,9 @@ public class UpgradeManifestVerifierTest {
         CoreVersionsTestAccess.injectSource(originalVersionSource);
     }
 
-    // ==================== T1 manifest 往返零丢失 ====================
+    // ==================== T1 manifest 往返零丢失+遗留键容忍 ====================
 
-    /** build→JSON→parse→逐字段深等(含 null installed_version/空 db_conventions/蛇形键位) */
+    /** build→JSON→parse→逐字段深等(含 null installed_version/蛇形键位) */
     @Test
     public void manifestJsonRoundtripLossless() {
         UpgradeManifest manifest = greenManifest();
@@ -96,16 +98,75 @@ public class UpgradeManifestVerifierTest {
         assertEquals(source.getRequiresCore(), restored.getRequiresCore());
         assertEquals(source.getFiles().size(), restored.getFiles().size());
         assertEquals(source.getFiles().get(0).getSha256(), restored.getFiles().get(0).getSha256());
-        assertTrue(source.getDbConventions().isEmpty());
-        assertTrue(restored.getDbConventions().isEmpty());
         assertEquals(manifest.getResolutionMap().size(), parsed.getResolutionMap().size());
         assertEquals(manifest.getResolutionMap().get(0).getSource(),
                 parsed.getResolutionMap().get(0).getSource());
 
         // 蛇形键位锁:@JSONField 显式映射生效(wire 契约键名,非 camelCase 漂移)
         assertTrue("wire 键位须为 group_id", json.contains("\"group_id\""));
-        assertTrue("wire 键位须为 db_conventions", json.contains("\"db_conventions\""));
         assertTrue("wire 键位须为 resolution_map", json.contains("\"resolution_map\""));
+        assertFalse("db_conventions 已退役,新清单不再产出该键", json.contains("db_conventions"));
+    }
+
+    /**
+     * 旧清单容忍:残留 db_conventions 键(空数组/带块两形态)解析零报错、
+     * 复验绿——db: 块退役后过渡期旧清单仍在盘,禁因遗留键拒绝(禁报错)。
+     */
+    @Test
+    public void legacyDbConventionsKey_tolerated_parseAndVerifyGreen() throws IOException {
+        JSONObject item = baseItemJson();
+        item.put("db_conventions", new ArrayList<Map<String, Object>>());
+        assertLegacyKeyTolerated(item);
+
+        JSONObject block = new JSONObject();
+        block.put("domain", "adm");
+        block.put("engine", "pg");
+        block.put("mechanism", "flyway");
+        block.put("historyTable", "flyway_schema_history_adm");
+        block.put("dumpPolicy", "full");
+        List<Object> blocks = new ArrayList<>();
+        blocks.add(block);
+        JSONObject withBlocks = baseItemJson();
+        withBlocks.put("db_conventions", blocks);
+        assertLegacyKeyTolerated(withBlocks);
+    }
+
+    /** 单条目裸 JSON 清单(手动铸,与 greenManifest 解耦;文件经 fileEntry 落盘+实测哈希) */
+    private JSONObject baseItemJson() {
+        UpgradeManifest.FileEntry entry = fileEntry("com.ecat", "modbus", "2.0.0",
+                "modbus-2.0.0.jar", "modbus-jar-bytes".getBytes(StandardCharsets.UTF_8));
+        JSONObject item = new JSONObject();
+        item.put("group_id", entry.getGroupId());
+        item.put("artifact_id", entry.getArtifactId());
+        item.put("installed_version", "1.0.0");
+        item.put("target_version", entry.getVersion());
+        item.put("requires_core", ">=4.0.0");
+        JSONObject file = new JSONObject();
+        file.put("kind", entry.getKind());
+        file.put("group_id", entry.getGroupId());
+        file.put("artifact_id", entry.getArtifactId());
+        file.put("version", entry.getVersion());
+        file.put("filename", entry.getFilename());
+        file.put("sha256", entry.getSha256());
+        item.put("files", new ArrayList<>(Arrays.asList(file)));
+        return item;
+    }
+
+    /** 带 db_conventions 键的 item → 完整 manifest JSON → 解析+复验必须绿 */
+    private void assertLegacyKeyTolerated(JSONObject item) throws IOException {
+        JSONObject manifest = new JSONObject();
+        manifest.put("planId", "plan-legacy");
+        manifest.put("type", "UPGRADE");
+        manifest.put("createdAt", "2026-10-04T08:30:00Z");
+        manifest.put("coreVersion", ACTUAL_CORE);
+        manifest.put("source", UpgradeManifestVerifier.SOURCE_RESOLVE);
+        manifest.put("items", new ArrayList<>(Arrays.asList(item)));
+        manifest.put("resolution_map", new ArrayList<>(Arrays.asList(
+                resolutionEntry("com.ecat", "modbus", "2.0.0", "resolved"))));
+
+        UpgradeManifest parsed = JSON.parseObject(manifest.toJSONString(), UpgradeManifest.class);
+        VerifyResult result = verifier.verify(parsed);
+        assertTrue("遗留 db_conventions 键不得拒绝清单: " + result.getFailures(), result.isPassed());
     }
 
     // ==================== T2 清单缺一文件即拒(负向+自检) ====================
@@ -147,7 +208,7 @@ public class UpgradeManifestVerifierTest {
         List<VerifyFailure> mismatches = codesOf(result, "SHA256_MISMATCH");
         assertEquals(1, mismatches.size());
         String expected = manifest.getItems().get(0).getFiles().get(0).getSha256();
-        String actual = DbDumpExecutor.sha256Hex(jarPath);
+        String actual = SnapshotFiles.sha256Hex(jarPath);
         assertTrue("明细须含期望哈希: " + mismatches.get(0).getDetail(),
                 mismatches.get(0).getDetail().contains(expected));
         assertTrue("明细须含实际哈希: " + mismatches.get(0).getDetail(),
@@ -285,65 +346,6 @@ public class UpgradeManifestVerifierTest {
         assertTrue(incomplete.get(0).getDetail().contains("resolution_map"));
     }
 
-    // ==================== T6 DB 约定块复验(canonical fixture) ====================
-
-    /** fixture 非法变体(未知 mechanism/historyTable 派生不一致)各一→DB_CONVENTION_INVALID;合法三形全过 */
-    @Test
-    public void dbConventionFixtureVariants() throws IOException {
-        Path fixture = locateFixture();
-        Map<String, Object> root = JSON.parseObject(
-                new String(Files.readAllBytes(fixture), StandardCharsets.UTF_8),
-                new com.alibaba.fastjson2.TypeReference<Map<String, Object>>() {});
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> representative = (Map<String, Object>) root.get("representative_blocks");
-        List<Map<String, Object>> legalForms = ((List<?>) Arrays.asList(
-                representative.get("flyway-pg"), representative.get("legacy-pg"),
-                representative.get("legacy-sqlite"))).stream()
-                .map(block -> (Map<String, Object>) block)
-                .collect(Collectors.toList());
-        for (Map<String, Object> legal : legalForms) {
-            UpgradeManifest manifest = greenManifest();
-            manifest.getItems().get(0).getDbConventions().add(new LinkedHashMap<>(legal));
-            VerifyResult result = verifier.verify(manifest);
-            assertTrue("合法块须全过: " + legal + " -> " + result.getFailures(), result.isPassed());
-        }
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> negatives = (Map<String, Object>) root.get("negative_variants");
-        assertNegativeVariant(negatives, "unknown_mechanism", "mechanism");
-        assertNegativeVariant(negatives, "historytable_derivation_mismatch", "historyTable");
-    }
-
-    private void assertNegativeVariant(Map<String, Object> negatives, String key, String fieldName) {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> variant = (Map<String, Object>) negatives.get(key);
-        assertNotNull("fixture 缺变体: " + key, variant);
-        UpgradeManifest manifest = greenManifest();
-        manifest.getItems().get(0).getDbConventions().add(new LinkedHashMap<>(variant));
-        VerifyResult result = verifier.verify(manifest);
-        assertFalse("负向变体必须被拒: " + key, result.isPassed());
-        List<VerifyFailure> invalid = codesOf(result, "DB_CONVENTION_INVALID");
-        assertEquals(1, invalid.size());
-        assertTrue("detail 须含字段名 " + fieldName + ": " + invalid.get(0).getDetail(),
-                invalid.get(0).getDetail().contains(fieldName));
-    }
-
-    /** canonical fixture 定位:自工作目录向上找 ecat-cloud/backend/tests/fixtures(T-5-6 §7.1 共用) */
-    private Path locateFixture() {
-        Path dir = Paths.get("").toAbsolutePath();
-        for (Path candidate = dir; candidate != null; candidate = candidate.getParent()) {
-            Path fixture = candidate.resolve(Paths.get("ecat-cloud", "backend", "tests",
-                    "fixtures", "db_conventions_contract.json"));
-            if (Files.isRegularFile(fixture)) {
-                return fixture;
-            }
-        }
-        fail("canonical fixture 不可得(ecat-cloud/backend/tests/fixtures/"
-                + "db_conventions_contract.json)——T-5-6 共用夹具是本用例数据源,缺位即红");
-        return null;
-    }
-
     // ==================== type 硬门接缝(writer 侧单侧闭合) ====================
 
     /**
@@ -415,7 +417,7 @@ public class UpgradeManifestVerifierTest {
         entry.setArtifactId(artifactId);
         entry.setVersion(version);
         entry.setFilename(filename);
-        entry.setSha256(DbDumpExecutor.sha256Hex(
+        entry.setSha256(SnapshotFiles.sha256Hex(
                 m2Path(groupId, artifactId, version, filename)));
         return entry;
     }

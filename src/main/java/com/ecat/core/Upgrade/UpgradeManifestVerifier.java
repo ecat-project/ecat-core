@@ -16,16 +16,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 升级清单本地复验门:五门全量复验,产出失败清单(不首错即断,一次报全)。
+ * 升级清单本地复验门:四门全量复验,产出失败清单(不首错即断,一次报全)。
  *
  * <p>防御纵深定位:云端计划(或本地入队壳)在执行前于客户端复验——服务端缺陷
  * 不得变全舰队砖。boot 侧 B1(复验不过=PREREQ_FAILED)与在线侧入队前预验
- * 双消费方;纯读盘+纯计算,零写零网络。</p>
+ * 双消费方;纯读盘+纯计算,零写零网络。db 约定块复验门(T-5-6 规则 2~6)随
+ * db: 块退役而退役——旧清单残留的 db_conventions 键由反序列化自然忽略,不再校验。</p>
  *
  * <p>类不变量:把一切异常形态翻译为失败清单而非上抛——复验器的职责就是让
  * 坏 manifest 显形为可读失败。唯一例外:{@link CoreVersions#current()} 的
@@ -36,8 +36,7 @@ import java.util.regex.Pattern;
  * MANIFEST_MALFORMED(缺必填字段/产源值域外/sha256 词形非法)、
  * FILE_MISSING(文件不在本地仓预期路径)、SHA256_MISMATCH(在位但哈希不符)、
  * REQUIRES_CORE_UNSATISFIED(core 约束缺失/不可解析/不满足)、
- * DEPENDENCY_INCOMPLETE(依赖无 resolution_map 终态或终态 jar 不在位)、
- * DB_CONVENTION_INVALID(db 约定块违反 T-5-6 规则表)。</p>
+ * DEPENDENCY_INCOMPLETE(依赖无 resolution_map 终态或终态 jar 不在位)。</p>
  *
  * <p>产源值域 {"resolve","local"}(rev-T-1-7-T-1-6 lead 裁定):resolve=云端
  * resolve 产源;local=T-1-3 壳写侧本地产源(安装降级/本地升级入队)。local 是
@@ -56,13 +55,11 @@ public class UpgradeManifestVerifier {
 
     private static final Pattern SHA256_HEX = Pattern.compile("^[0-9a-f]{64}$");
 
-    private static final String MECHANISM_FLYWAY = "flyway";
-
     private static final Set<String> LEGAL_SOURCES =
             new HashSet<>(Arrays.asList(SOURCE_RESOLVE, SOURCE_LOCAL));
 
     /**
-     * 五门复验:门间不短路,门内全量收集;失败恒进清单不上抛
+     * 四门复验:门间不短路,门内全量收集;失败恒进清单不上抛
      * (除 core 版本不可得的装配缺陷,见类注释)。
      */
     public VerifyResult verify(UpgradeManifest manifest) {
@@ -73,7 +70,6 @@ public class UpgradeManifestVerifier {
                 verifyFiles(item, failures);
                 verifyRequiresCore(item, failures);
                 verifyDependencies(item, manifest, failures);
-                verifyDbConventions(item, failures);
             }
         }
         return new VerifyResult(failures.isEmpty(), failures);
@@ -151,7 +147,7 @@ public class UpgradeManifestVerifier {
             }
             String actual;
             try {
-                actual = DbDumpExecutor.sha256Hex(local);
+                actual = SnapshotFiles.sha256Hex(local);
             } catch (RuntimeException e) {
                 failures.add(new VerifyFailure("FILE_MISSING",
                         coordinate + " 落盘文件不可读: " + local + " - " + e.getMessage()));
@@ -258,88 +254,6 @@ public class UpgradeManifestVerifier {
             }
         }
         return null;
-    }
-
-    // ==================== 门5 DB 约定块 ====================
-
-    /**
-     * 逐 db_conventions 块按 T-5-6 规则表(规则 1~6):映射类型/键集合恰等按
-     * mechanism 分派/domain 词形/engine 枚举/historyTable 派生一致(legacy 形为
-     * legacyVersion 数字串)/dumpPolicy 四值语法——每条违规一个 failure,
-     * detail 含字段名+原因+规则号语义。[] 空数组=无块,直接过。
-     */
-    private void verifyDbConventions(UpgradeManifest.UpgradeItem item, List<VerifyFailure> failures) {
-        if (item.getDbConventions() == null) {
-            return;
-        }
-        String coordinate = coordinateOf(item);
-        for (Map<String, Object> block : item.getDbConventions()) {
-            String problem = validateDbBlock(block);
-            if (problem != null) {
-                failures.add(new VerifyFailure("DB_CONVENTION_INVALID",
-                        coordinate + " db 约定块非法: " + problem));
-            }
-        }
-    }
-
-    /**
-     * T-5-6 §6.2 规则 2~6(顺序执行,首错即返):键集合恰等按 mechanism 分派(规则2)→
-     * domain 词形(规则3)→engine 枚举(规则4)→historyTable 派生一致/legacyVersion
-     * 数字串(规则5)→dumpPolicy 四值语法(规则6)。null=全过。
-     */
-    private static String validateDbBlock(Map<String, Object> block) {
-        String mechanism = conventionField(block, "mechanism");
-        Set<String> expectedKeys;
-        if (MECHANISM_FLYWAY.equals(mechanism)) {
-            expectedKeys = new HashSet<>(Arrays.asList(
-                    "domain", "engine", "mechanism", "historyTable", "dumpPolicy"));
-        } else if ("legacy-schema".equals(mechanism)) {
-            expectedKeys = new HashSet<>(Arrays.asList(
-                    "domain", "engine", "mechanism", "legacyVersion", "dumpPolicy"));
-        } else {
-            return "mechanism 非法(" + mechanism + "),合法值域={flyway,legacy-schema}(规则2)";
-        }
-        if (!block.keySet().equals(expectedKeys)) {
-            return "键集合不恰等(现=" + block.keySet() + " 期望=" + expectedKeys + ")(规则2)";
-        }
-        String domain = conventionField(block, "domain");
-        if (domain == null || !domain.matches("^[a-z][a-z0-9-]*$")) {
-            return "domain 词形非法: " + domain + "(规则3)";
-        }
-        String engine = conventionField(block, "engine");
-        if (!"pg".equals(engine) && !"sqlite".equals(engine)) {
-            return "engine 非法(" + engine + "),合法值域={pg,sqlite}(规则4)";
-        }
-        if (MECHANISM_FLYWAY.equals(mechanism)) {
-            String historyTable = conventionField(block, "historyTable");
-            if (!("flyway_schema_history_" + domain).equals(historyTable)) {
-                return "historyTable 与 domain 派生不一致: " + historyTable + "(规则5)";
-            }
-        } else {
-            String legacyVersion = conventionField(block, "legacyVersion");
-            if (legacyVersion == null || !legacyVersion.matches("^[0-9]+$")) {
-                return "legacyVersion 词形非法: " + legacyVersion + "(规则5)";
-            }
-        }
-        String dumpPolicy = conventionField(block, "dumpPolicy");
-        if (dumpPolicy == null) {
-            return "dumpPolicy 缺失(规则6)";
-        }
-        if ("full".equals(dumpPolicy) || "schema".equals(dumpPolicy) || "file-copy".equals(dumpPolicy)) {
-            return null;
-        }
-        if (dumpPolicy.startsWith("table-family:")) {
-            String families = dumpPolicy.substring("table-family:".length());
-            return families.matches("[A-Za-z0-9_*.?]+(,[A-Za-z0-9_*.?]+)*")
-                    ? null : "dumpPolicy 清单词形非法: " + dumpPolicy + "(规则6)";
-        }
-        return "dumpPolicy 非法(" + dumpPolicy + "),合法=full|schema|file-copy|table-family:清单(规则6)";
-    }
-
-    /** db 块字段读取(fastjson2 反序列化产物=LinkedHashMap,值取 String 语义) */
-    private static String conventionField(Map<String, Object> block, String key) {
-        Object value = block.get(key);
-        return value == null ? null : String.valueOf(value);
     }
 
     // ==================== 公共件 ====================

@@ -245,7 +245,7 @@ public class InstallationLedgerStore {
         for (PlanIdAge candidate : aged.subList(retention, aged.size())) {
             Path snapshotDir = backupsRoot.resolve(candidate.getPlanId());
             try {
-                DbDumpExecutor.deleteRecursively(snapshotDir);
+                SnapshotFiles.deleteRecursively(snapshotDir);
             } catch (IOException e) {
                 throw new IllegalStateException("清理时目录删除失败: " + snapshotDir
                         + " - " + e.getMessage(), e);

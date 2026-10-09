@@ -21,8 +21,9 @@ import java.util.Map;
  *
  * <p>序列化契约:fastjson2 落盘/读回({@code JSON.toJSONString}/{@code JSON.parseObject}),
  * snake_case 键位经 {@code @JSONField} 逐字段显式映射(与 CloudRepositoryClient 内部
- * DTO 族同先例);db_conventions 保留原始键集映射——复验按 mechanism 分派做键集合
- * 恰等校验(T-5-6 规则 2),强类型会丢未知键(QueuePlan 同款裁定)。</p>
+ * DTO 族同先例)。db_conventions 字段已随 db: 块退役:本类不再声明该字段,旧清单里
+ * 残留的 db_conventions 键由 fastjson2 未知键忽略语义自然容忍(过渡期旧清单仍在盘,
+ * 解析与复验都不得因其报错)。</p>
  *
  * @author coffee
  */
@@ -83,10 +84,6 @@ public class UpgradeManifest {
 
         /** 发布产物文件清单,每条必带 sha256 */
         private List<FileEntry> files = new ArrayList<>();
-
-        /** DB 约定块透传原值(five-key map 形,mechanism 分派;[] =无 DB 约定,合法边界) */
-        @JSONField(name = "db_conventions")
-        private List<Map<String, Object>> dbConventions = new ArrayList<>();
 
         /** 目标构建直接依赖的终态解析(依赖齐全复验消费面) */
         @JSONField(name = "resolved_dependencies")

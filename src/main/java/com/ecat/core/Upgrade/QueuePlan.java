@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import lombok.Value;
 
@@ -33,10 +32,10 @@ import lombok.Value;
  * 走共用件 {@link YamlAtomicFileWriter}(tmp→dump→回读验证→原子 rename,与
  * T-2-3 契约同件同栈)。</p>
  *
- * <p>manifest 模型为 core 侧中性类型,不引 core-api wire 类(DbDumpSpec 同款跨 jar
- * 裁定);键位与队列写入器 wire 契约逐字段对齐(group_id/artifact_id 五件套、
- * db_conventions 六字段同名)。db_conventions 保留原始键集映射——B1 复验需按
- * mechanism 分派做「键集合恰等」校验(T-5-6 规则 2),强类型会丢未知键。</p>
+ * <p>manifest 模型为 core 侧中性类型,不引 core-api wire 类(跨 jar 裁定);
+ * 键位与队列写入器 wire 契约逐字段对齐(group_id/artifact_id 五件套)。
+ * db_conventions 键已随 db: 块退役:解析只取声明键,旧清单里残留的
+ * db_conventions 键自然忽略(过渡期旧清单仍在盘,禁因其报错)。</p>
  *
  * @author coffee
  */
@@ -80,8 +79,6 @@ public class QueuePlan {
         String targetVersion;
         String requiresCore;
         List<ManifestFile> files;
-        /** 原始键集映射(B1 键集合恰等校验+DbDumpSpec 映射双消费) */
-        List<Map<String, Object>> dbConventions;
 
         public String getCoordinate() {
             return groupId + ":" + artifactId;
@@ -182,15 +179,10 @@ public class QueuePlan {
                     requireString(f, "filename", manifestFile, filePrefix),
                     requireString(f, "sha256", manifestFile, filePrefix)));
         }
-        List<Map<String, Object>> dbConventions = new ArrayList<>();
-        JSONArray rawDb = raw.getJSONArray("db_conventions");
-        if (rawDb != null) {
-            for (int i = 0; i < rawDb.size(); i++) {
-                dbConventions.add(new LinkedHashMap<>(rawDb.getJSONObject(i)));
-            }
-        }
+        // db_conventions 键已退役:只取声明键=对旧清单残留键天然容忍(未知键忽略,禁报错)——
+        // 过渡期旧清单仍在盘,复验/装载都不得因其失败
         return new Item(groupId, artifactId, optionalString(raw, "installed_version"), targetVersion,
-                optionalString(raw, "requires_core"), files, dbConventions);
+                optionalString(raw, "requires_core"), files);
     }
 
     private static Map<String, Object> parseState(Path stateFile) {
@@ -267,7 +259,11 @@ public class QueuePlan {
         return (String) stateDoc.get("enqueuedAt");
     }
 
-    /** db.{domain} 子标记只读视图(B4b/判定/回滚消费);无标记=空表 */
+    /**
+     * db.{domain} 子标记只读视图(历史计划渲染容差):写入面已随 db: 块退役,
+     * 本读取只为过渡期在盘旧 state.yml(前代 core 写过域级子标记)的投影不撕裂,
+     * 新计划不再产生标记(无标记=空表)。
+     */
     public Map<String, String> getDbMarkers() {
         Map<String, Object> db = (Map<String, Object>) stateDoc.get("db");
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
@@ -308,18 +304,6 @@ public class QueuePlan {
     /** LOADING 重试计数(D24 重试可观察,无硬上限) */
     public void incrementAttempts() {
         stateDoc.put("attempts", getAttempts() + 1);
-        stateDoc.put("updatedAt", Instant.now().toString());
-        persistState();
-    }
-
-    /** db.{domain} 子标记写入(B4a=PENDING/B4b=DONE|FAILED;增量合并重写) */
-    public void markDbDomain(String domain, String marker) {
-        Map<String, Object> db = (Map<String, Object>) stateDoc.get("db");
-        if (db == null) {
-            db = new LinkedHashMap<>();
-            stateDoc.put("db", db);
-        }
-        db.put(domain, marker);
         stateDoc.put("updatedAt", Instant.now().toString());
         persistState();
     }
@@ -399,41 +383,9 @@ public class QueuePlan {
         return Files.isRegularFile(snapshotRoot.resolve(planId).resolve("manifest.json"));
     }
 
-    /** 快照 dump-state.yml 中子标记=DONE 的域(回滚步 2 恢复域集;无文件=零 dump 域) */
-    public List<String> dumpedDomains(Path snapshotRoot) {
-        Path markerFile = snapshotRoot.resolve(planId).resolve("db").resolve("dump-state.yml");
-        if (!Files.isRegularFile(markerFile)) {
-            return new ArrayList<>();
-        }
-        Map<String, Object> doc;
-        try (InputStream in = Files.newInputStream(markerFile)) {
-            doc = new Yaml().load(in);
-        } catch (IOException e) {
-            throw new UpgradeStateException("dump-state.yml 读取失败: " + markerFile + " - " + e.getMessage(), e);
-        }
-        if (doc == null) {
-            return new ArrayList<>();
-        }
-        @SuppressWarnings("unchecked")
-        Map<String, Object> dump = (Map<String, Object>) doc.get("dump");
-        if (dump == null) {
-            return new ArrayList<>();
-        }
-        return dump.entrySet().stream()
-                .filter(entry -> "DONE".equals(String.valueOf(entry.getValue())))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toList());
-    }
-
     /** manifest items 平面枚举(损坏修复形态下为空,调用方不得再消费 manifest) */
     public List<Item> itemsOrEmpty() {
         return manifest == null ? new ArrayList<>() : manifest.getItems();
-    }
-
-    /** manifest 指定域块的六字段映射(flyway 域宿主判定/DbDumpSpec 构造消费;块缺键=解析期已拦) */
-    public static String conventionField(Map<String, Object> block, String key) {
-        Object value = block.get(key);
-        return value == null ? null : String.valueOf(value);
     }
 
     @Override
