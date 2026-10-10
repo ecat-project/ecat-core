@@ -342,8 +342,9 @@ public class JarDependencyLoader {
         JarFile jarFileObj = null;
 
         try {
-            // URL jarUrl = jarFile.toURI().toURL();
-            URL url = new URL("jar:file:" + jarFile.getAbsolutePath() + "!/");
+            // jar URL 的 file 部分来自 File.toURI()（正斜杠 + percent-encode），禁止
+            // getAbsolutePath() 裸拼——Windows 会产出含反斜杠的非法 URL（同 LoadJarUtils 修法）
+            URL url = new URL("jar:" + jarFile.toURI() + "!/");
             URL[] urls = new URL[] { url };
 
             // 使用系统类加载器作为父类加载器，以便能够加载 IntegrationBase 等核心类

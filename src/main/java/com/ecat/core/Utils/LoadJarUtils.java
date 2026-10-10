@@ -98,8 +98,10 @@ public class LoadJarUtils {
 
             // 加载顺序为最后加载主 JAR 文件的 URL，兼容 ecat-core-ruoyi 和 ecat-adapter-ruoyi内的class加载顺序
             File mainJarFile = new File(jarPath);
-            URL url = mainJarFile.toURI().toURL();
-            url = new URL("jar:file:" + mainJarFile.getAbsolutePath() + "!/");
+            // 主 jar URL 的 file 部分必须来自 File.toURI()（正斜杠 + percent-encode，Windows 盘符为 /C:/），
+            // 与 Utils/loader（Spring 原文导入）家族形态一致；禁止 getAbsolutePath() 裸拼，
+            // Windows 下会产出 jar:file:C:\... 这类含反斜杠的非法 URL，破坏名册基名提取。
+            URL url = new URL("jar:" + mainJarFile.toURI() + "!/");
             urls.add(url);
             
 

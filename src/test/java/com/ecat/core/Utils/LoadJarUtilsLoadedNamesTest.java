@@ -25,6 +25,7 @@ import static org.junit.Assert.assertEquals;
  * LoadJarUtils.listLoadedJarFileNames 名册查询单测(T-1-6 §4.4,D39 批准的只读方法):
  * 全活 loader 并集(注册 loader 的 getURLs+parent 链)、嵌套 jar: URL 的最内层 .jar
  * 基名提取、共享集成同 loader 重复注册按实例身份去重、非 .jar URL 零贡献。
+ * 另锁主 jar URL 规范形态契约(file 部分来自 File.toURI(),空格路径可跨平台鉴别裸拼回归)。
  *
  * <p>夹具=JarOutputStream 现造小 jar,loader 拓扑按生产形态搭(parent→ecat 层→child),
  * 全同步零 sleep。</p>
@@ -40,7 +41,7 @@ public class LoadJarUtilsLoadedNamesTest {
         tempDir = Files.createTempDirectory("loadjar-names-test");
         // 构造器 core 参数未消费(仅 restartClassLoader 参与装配),测试传 null 合法
         parentLoader = new URLClassLoader(
-                new URL[] {fixtureJar("fixture-parent-2.0.jar").toUri().toURL()}, null);
+                new URL[] {fixtureJar(tempDir.resolve("fixture-parent-2.0.jar")).toUri().toURL()}, null);
         loadJarUtils = new LoadJarUtils(null, parentLoader);
     }
 
@@ -60,8 +61,8 @@ public class LoadJarUtilsLoadedNamesTest {
     public void enumeratesRegistryAndParentChainWithDedup() throws Exception {
         // 生产拓扑:child 挂 ecat 层之下;同一 child loader 注册两个 jar(共享集成复用形态)
         URLClassLoader child = new URLClassLoader(new URL[0], loadJarUtils.getEcatCoreClassLoader());
-        loadJarUtils.loadJar(fixtureJar("fixture-child-a-1.0.jar").toAbsolutePath().toString(), null, child, null);
-        loadJarUtils.loadJar(fixtureJar("fixture-child-b-1.0.jar").toAbsolutePath().toString(), null, child, null);
+        loadJarUtils.loadJar(fixtureJar(tempDir.resolve("fixture-child-a-1.0.jar")).toAbsolutePath().toString(), null, child, null);
+        loadJarUtils.loadJar(fixtureJar(tempDir.resolve("fixture-child-b-1.0.jar")).toAbsolutePath().toString(), null, child, null);
 
         Set<String> names = loadJarUtils.listLoadedJarFileNames();
 
@@ -80,8 +81,26 @@ public class LoadJarUtilsLoadedNamesTest {
         assertEquals(new HashSet<>(java.util.Collections.singletonList("fixture-parent-2.0")), names);
     }
 
-    private Path fixtureJar(String name) throws Exception {
-        Path jar = tempDir.resolve(name);
+    @Test
+    public void loadJarBuildsCanonicalMainJarUrl() throws Exception {
+        // URL 契约:主 jar 的 file 部分来自 File.toURI()(正斜杠+percent-encode)。
+        // 夹具路径带空格:getAbsolutePath() 裸拼会产出未编码空格的非法 URL(Windows 下
+        // 还会叠加反斜杠/盘符问题),toURI() 形态在任何平台都是唯一规范值。
+        Path dir = Files.createDirectories(tempDir.resolve("space dir"));
+        Path jar = fixtureJar(dir.resolve("fixture-canonical-1.0.jar"));
+        URLClassLoader child = new URLClassLoader(new URL[0], loadJarUtils.getEcatCoreClassLoader());
+        try {
+            loadJarUtils.loadJar(jar.toAbsolutePath().toString(), null, child, null);
+            // 夹具无嵌套 archive,loadJar 只入册主 jar URL,恰可精确断言其形态
+            URL[] urls = child.getURLs();
+            assertEquals("主 jar URL 必须为规范 jar URL", 1, urls.length);
+            assertEquals(new URL("jar:" + jar.toUri() + "!/"), urls[0]);
+        } finally {
+            child.close();
+        }
+    }
+
+    private Path fixtureJar(Path jar) throws Exception {
         try (JarOutputStream out = new JarOutputStream(new FileOutputStream(jar.toFile()))) {
             out.putNextEntry(new JarEntry("content.txt"));
             out.write(new byte[] {1});
