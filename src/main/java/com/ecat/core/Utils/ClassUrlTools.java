@@ -33,6 +33,8 @@ import lombok.extern.slf4j.Slf4j;
 public class ClassUrlTools {
     /**
      * 解码URL中的中文部分并返回新的URL对象
+     * <p>按 URL path 语义解码：字面 "+" 保持加号（path 中空格只编码为 %20），
+     * 与表单语义（"+"=空格）区分。</p>
      * @param url 需要解码的URL对象
      * @return 解码后的URL对象，如果解码失败则返回原始URL
      */
@@ -42,8 +44,9 @@ public class ClassUrlTools {
         }
 
         try {
-            // 解码URL字符串
-            String decodedUrlStr = URLDecoder.decode(url.toString(), StandardCharsets.UTF_8.name());
+            // 解码URL字符串。URLDecoder 是表单语义（"+"=空格），而 jar:/file: URL 的
+            // path 中 "+" 是字面加号——先转义为 %2B 再解码，%XX（中文/空格）行为不变。
+            String decodedUrlStr = URLDecoder.decode(url.toString().replace("+", "%2B"), StandardCharsets.UTF_8.name());
             // 用解码后的字符串重新构建URL对象
             return new URL(decodedUrlStr);
         } catch (MalformedURLException e) {
