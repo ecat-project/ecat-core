@@ -439,9 +439,15 @@ public abstract class DeviceBase implements DeviceControl, RemovalHost {
      * 移除动作 deque（RemovalHost 注册面，18 号设计 §3.3）：SDK 轮询句柄等销毁动作经
      * {@link #onRemove(Runnable)} 注册，{@link #cancelManagedTasks()} 时 <b>LIFO</b> 执行
      * （后注册的资源先拆卸——依赖反向于创建顺序，与 HA async_on_remove 同构）。
-     * 并发安全：注册（start/业务线程）与 sweep（生命周期线程）并发首达安全。
+     * 并发安全：注册（start/业务线程）的「check+add」与 sweep（生命周期线程）的
+     * 「置位+排空」经 {@link #removalLock} 互斥——并发首达只有两种合法结局
+     * （注册成功必然被执行 / REE 显式拒绝），禁止「注册成功却永不执行」的静默泄漏
+     * （bug-record-20261009-232607：泄漏的撤销动作使停机后轮询/延迟照常发射）。
      */
     private final ConcurrentLinkedDeque<Runnable> removalActions = new ConcurrentLinkedDeque<>();
+
+    /** 注册/sweep 互斥锁：仅覆盖两段纳秒级临界段（check+add、置位+drain），动作执行在锁外。 */
+    private final Object removalLock = new Object();
 
     /** 移除动作是否已随 cancelManagedTasks 关闭（关闭后注册=病态调用 reject，严格模式不静默收下）。 */
     private volatile boolean removalSwept;
@@ -469,7 +475,15 @@ public abstract class DeviceBase implements DeviceControl, RemovalHost {
             throw new RejectedExecutionException(
                 "设备已停止，拒绝注册移除动作——设备生命周期缺陷，请检查 stop 后误注册的调用方");
         }
-        removalActions.addLast(action);
+        synchronized (removalLock) {
+            // check+add 必须同临界段：否则注册可落在「检查通过」与「sweep 排空完成」之间，
+            // 动作 add 进已死的 deque——永不执行且无 REE（静默泄漏，并发契约测试锁定）
+            if (removalSwept) {
+                throw new RejectedExecutionException(
+                    "设备已停止，拒绝注册移除动作——设备生命周期缺陷，请检查 stop 后误注册的调用方");
+            }
+            removalActions.addLast(action);
+        }
     }
 
     /**
@@ -483,9 +497,21 @@ public abstract class DeviceBase implements DeviceControl, RemovalHost {
      * （先给集成优雅收尾窗口，sweep 兜住 SDK 轮询句柄等漏网资源；stop() 抛异常也经 try-finally 必达）。</p>
      */
     public final void cancelManagedTasks() {
-        removalSwept = true;
-        Runnable action;
-        while ((action = removalActions.pollLast()) != null) {
+        List<Runnable> drained;
+        synchronized (removalLock) {
+            if (removalSwept) {
+                return; // 幂等：二次 sweep 空转（锁内快路径返回，无动作可执行）
+            }
+            removalSwept = true;
+            drained = new ArrayList<>();
+            Runnable action;
+            while ((action = removalActions.pollLast()) != null) {
+                drained.add(action);
+            }
+        }
+        // 动作执行放锁外：非阻塞契约下 µs 级纯标记 cancel，但保守隔离——
+        // 动作内部任何再入（回调/日志锁）都不与注册/sweep 临界段形成锁序
+        for (Runnable action : drained) {
             try {
                 action.run();
             } catch (Throwable e) {
