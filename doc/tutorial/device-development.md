@@ -115,7 +115,18 @@ new ModbusScalableFloatSRAttribute(
    }
    ```
 
-2. **状态管理**: 使用`AttributeStatus`正确标识属性状态
+2. **状态管理**: 使用`AttributeStatus`正确标识属性状态。设备一帧内多个状态并存
+   （如质控态与告警同时活跃）时，用三参帧快照入口一次声明全量：
+   ```java
+   // mainStatus = 集成按自身优先级选出的主状态；frameStatuses = 本帧全部活跃状态
+   //（必须包含 mainStatus，集合即全量真相，每帧整组替换——无需差集维护，无残留）
+   attr.updateValue(value, mainStatus, EnumSet.of(instrumentStatus, AttributeStatus.ALARM));
+   ```
+   契约（违规即抛 IllegalArgumentException）：`frameStatuses` 必须包含 `mainStatus`；
+   主状态与集合元素均不允许 null/EMPTY。只改状态不改值用
+   `setStatus(newStatus, frameStatuses)`；单参 `setStatus(s)` 语义为"更新主状态并撤销
+   帧快照声明"（statuses 回 `{s}`）——调用方未声明全量时保留旧集合属猜测，禁用。
+   未使用帧快照入口的属性保持单状态语义（`statuses` 恒为 `{status}`），完全向后兼容。
 
 ---
 

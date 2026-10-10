@@ -20,6 +20,7 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -67,6 +68,8 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     @Getter
     protected AttributeClass attrClass; // 参数类型
     protected AttributeStatus status;
+    // 物理帧快照多状态：null=未用新方式（旧单状态语义）；非null=上一帧全部活跃状态的不可变快照。
+    private Set<AttributeStatus> frameStatuses;
     protected T value; // 参数值，原始信号值
     @Getter
     protected boolean valueChangeable;
@@ -227,7 +230,7 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     }
 
     /**
-     * 更新属性状态（不改值）。变更写入在途 midState，待 publicState 提交。
+     * 更新主状态并撤销帧快照声明（不改值）。变更写入在途 midState，待 publicState 提交。
      *
      * <p>⚠ <b>不推荐单独使用</b>：值与状态都需变更时应优先 {@link #updateValue(Object, AttributeStatus)}
      * 一次设值+状态。单独 setStatus 会单独重建一次 midState（含 getDisplayValue 单位换算+格式化），
@@ -237,15 +240,20 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
      * <p>状态变更即产新 state：device 已附着时无条件重建 midState（不依赖 lastState 是否已存在），
      * 使异常路径的纯状态变更（无 updateValue）也能经 getState 可见、经 publicState 上总线。
      *
-     * @param newStatus 新状态
+     * <p>本入口调用方未声明本帧全量活跃状态，因此同步把 frameStatuses 置为 null（statuses 回 {status}）。
+     * 若保留旧集合，等于在不知道当前活跃集合的情况下做猜测兜底；组合需求使用两参重载显式声明全量。
+     * 早退必须同时确认没有帧快照：否则传入“碰巧等于当前主状态”的状态会漏撤旧帧声明。
+     *
+     * @param newStatus 新主状态
      */
     @Override
     public boolean setStatus(AttributeStatus newStatus){
         synchronized (this) {
-            if (this.status == newStatus) {
+            if (this.status == newStatus && this.frameStatuses == null) {
                 return true; // 状态未变，避免无谓刷新与重复发布
             }
             this.status = newStatus;
+            this.frameStatuses = null;
             // 状态变更即产新 state：device 已附着时无条件重建在途 midState（不再依赖 lastState 已存在），
             // 使异常路径纯状态变更（无 updateValue）也能经 getState 可见、经 publicState 上总线。
             if (this.device != null && this.device.getId() != null) {
@@ -700,15 +708,99 @@ public abstract class AttributeBase<T> implements AttributeAbility<T>{
     }
 
     /**
+     * 原子写入设备帧的业务值、主状态与全量活跃状态快照。
+     *
+     * <p>物理设备解析通常每帧产出一组活跃状态：mainStatus 是集成按自身优先级选出的胜者；
+     * frameStatuses 是该帧完整声明，必须包含 mainStatus。三者与 midState 在同一临界区完成，
+     * publicState 只会摘取最后一次完整帧，避免值/主状态/状态集合撕裂。
+     *
+     * @param newValue       新业务值
+     * @param mainStatus     本帧主状态（不能为 null 或 EMPTY）
+     * @param frameStatuses  本帧全量活跃状态（保序拷贝为不可变快照）
+     * @return true
+     */
+    public boolean updateValue(T newValue, AttributeStatus mainStatus, Set<AttributeStatus> frameStatuses) {
+        validateFrameSnapshot(mainStatus, frameStatuses);
+        Set<AttributeStatus> frameSnapshot = Collections.unmodifiableSet(new LinkedHashSet<>(frameStatuses));
+        synchronized (this) {
+            T oldValue = this.value;
+            boolean changed = !Objects.equals(oldValue, newValue);
+            this.value = newValue;
+            this.status = mainStatus;
+            this.frameStatuses = frameSnapshot;
+            this.setValueUpdated();
+            if (changed) {
+                this.lastChanged = Instant.now();
+            }
+            if (this.eventContext == null) {
+                this.eventContext = EventContext.root(EventContext.Source.DEVICE_POLL, null);
+            }
+            if (this.device != null && this.device.getId() != null) {
+                this.midState = buildState();
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 只更新主状态，同时声明本帧全量活跃状态（不改值、不触发用户回调）。
+     *
+     * <p>与单参 setStatus 的关键差异：这里调用方显式给出当前帧完整集合，因此不撤销帧快照。
+     * 状态变更即产新 state：device 已附着时无条件重建在途 midState，使其可经 getState 读取、
+     * 经 publicState 提交；updateTime 刷新逻辑与单参 setStatus 保持一致。
+     *
+     * @param newStatus      本帧主状态（不能为 null 或 EMPTY）
+     * @param frameStatuses  本帧全量活跃状态（保序拷贝为不可变快照）
+     * @return true
+     */
+    public boolean setStatus(AttributeStatus newStatus, Set<AttributeStatus> frameStatuses) {
+        validateFrameSnapshot(newStatus, frameStatuses);
+        Set<AttributeStatus> frameSnapshot = Collections.unmodifiableSet(new LinkedHashSet<>(frameStatuses));
+        synchronized (this) {
+            this.status = newStatus;
+            this.frameStatuses = frameSnapshot;
+            if (this.device != null && this.device.getId() != null) {
+                if (this.eventContext == null) {
+                    this.eventContext = EventContext.root(EventContext.Source.DEVICE_POLL, null);
+                }
+                setValueUpdated(true);
+                this.midState = buildState();
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 校验帧快照入口契约：必须给出明确主状态，且全量声明完整、不含空态。
+     * 校验发生在锁外；任何非法输入都在写入前立即失败。
+     */
+    private void validateFrameSnapshot(AttributeStatus mainStatus, Set<AttributeStatus> frameStatuses) {
+        if (mainStatus == null || mainStatus == AttributeStatus.EMPTY) {
+            throw new IllegalArgumentException("mainStatus 不能为 null 或 EMPTY");
+        }
+        if (frameStatuses == null) {
+            throw new IllegalArgumentException("frameStatuses 不能为 null");
+        }
+        if (!frameStatuses.contains(mainStatus)) {
+            throw new IllegalArgumentException("frameStatuses 必须包含 mainStatus");
+        }
+        for (AttributeStatus item : frameStatuses) {
+            if (item == null || item == AttributeStatus.EMPTY) {
+                throw new IllegalArgumentException("frameStatuses 不能包含 null 或 EMPTY 元素");
+            }
+        }
+    }
+
+    /**
      * 计算本属性当前的"全量活跃状态集合"，供 buildState 塞进 AttrState.statuses 发布给总线消费方。
      *
-     * <p>这是 ecat-core 的通用多状态扩展点：默认实现（本类）返回单元素集合 {status}（单一状态语义）；
-     * 子类可覆写以组装多个并存状态（如物理硬件同一时刻可同时处于多个状态——设备自报质控态 + 告警态并存）。
-     * 覆写时返回的集合应包含当前胜出者 status（getStatus()），以保证 getStatus 与 statuses 自洽。
+     * <p>这是 ecat-core 的通用多状态扩展点：未使用帧快照入口时返回单元素集合 {status}（单一状态语义）；
+     * 最近一次帧快照入口已声明全量时，原样返回该不可变快照。子类仍可覆写以组装多个并存状态；
+     * 覆写返回的集合应包含当前胜出者 status（getStatus()），以保证 getStatus 与 statuses 自洽。
      */
     protected Set<AttributeStatus> computeStatuses() {
-        // 默认：只有它自己的单 status。Collections.singleton 返回不可变单元素 Set。
-        return Collections.singleton(status);
+        // 帧快照优先且已是不可变副本；旧路径保持单 status 集合。
+        return frameStatuses != null ? frameStatuses : Collections.singleton(status);
     }
 
     /**
