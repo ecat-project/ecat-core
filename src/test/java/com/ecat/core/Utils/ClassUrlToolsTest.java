@@ -24,8 +24,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * ClassUrlTools.decodeUrlPath 的 path 语义解码契约测试：
@@ -33,6 +35,7 @@ import static org.junit.Assert.assertTrue;
  * 表单语义的 "+"=空格 会把含加号目录的 jar 路径解错）。
  * 断言形态与两个调用方（ResourceLoader/IntegrationCoordinateHelper）一致：
  * getPath() → 剥 "file:" 前缀 → 作为磁盘路径使用。
+ * 另锁 canonicalJarUrl 的本地 jar URL 构造契约（file 部分来自 File.toURI()）。
  */
 public class ClassUrlToolsTest {
 
@@ -59,5 +62,28 @@ public class ClassUrlToolsTest {
     @Test
     public void nullPassthrough() {
         assertNull(ClassUrlTools.decodeUrlPath(null));
+    }
+
+    @Test
+    public void canonicalJarUrlEncodesPathByFileUri() throws Exception {
+        Path dir = Files.createTempDirectory("classurl-jar-test");
+        File jar = dir.resolve("space + dir").resolve("fixture.jar").toFile();
+        Files.createDirectories(jar.getParentFile().toPath());
+        Files.write(jar.toPath(), new byte[] {1});
+
+        URL url = ClassUrlTools.canonicalJarUrl(jar);
+
+        assertEquals(new URL("jar:" + jar.toURI() + "!/"), url);
+        assertFalse("URL 中不得出现未编码空格: " + url, url.toString().contains(" "));
+    }
+
+    @Test
+    public void canonicalJarUrlRejectsNullFile() throws Exception {
+        try {
+            ClassUrlTools.canonicalJarUrl(null);
+            fail("null jar 文件应显式拒绝");
+        } catch (NullPointerException expected) {
+            assertEquals("jarFile", expected.getMessage());
+        }
     }
 }

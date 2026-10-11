@@ -16,10 +16,12 @@
 
 package com.ecat.core.Utils;
 
+import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -31,6 +33,23 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class ClassUrlTools {
+
+    /**
+     * 构造本地 jar 的规范 URL：file 部分来自 {@link File#toURI()}。
+     *
+     * <p>{@link File#getAbsolutePath()} 裸拼在 Windows 会产出
+     * {@code jar:file:C:\...!/} 这类含盘符/反斜杠的非规范 URL。统一经
+     * {@link File#toURI()} 可得到正斜杠与 percent-encode 形态（Windows 盘符为 {@code /C:/}）。</p>
+     *
+     * @param jarFile 本地 jar 文件
+     * @return {@code jar:<file-uri>!/} 形态 URL
+     * @throws MalformedURLException URL 构造失败
+     */
+    public static URL canonicalJarUrl(File jarFile) throws MalformedURLException {
+        Objects.requireNonNull(jarFile, "jarFile");
+        return new URL("jar:" + jarFile.toURI() + "!/");
+    }
+
     /**
      * 解码URL中的中文部分并返回新的URL对象
      * <p>按 URL path 语义解码：字面 "+" 保持加号（path 中空格只编码为 %20），
