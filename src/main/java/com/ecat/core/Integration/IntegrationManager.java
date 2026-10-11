@@ -397,10 +397,10 @@ public class IntegrationManager {
     /**
      * 加载单个集成的完整生命周期：instantiateIntegration → onLoad → register → registerConfigFlow → onInit → onStart。
      *
-     * <p>启动期与运行时共用此方法，差异仅在 loadOrder 范围与计时：
-     * 启动期传入完整 loadOrder（含所有待加载集成，供 findParentClassloader 递归未注册的依赖链）
-     * 与非 null tracker（分集成耗时进启动健康报告）；运行时由 {@link #loadSingleIntegration(IntegrationInfo)}
-     * 传入仅含自身的列表与 null tracker（不计入启动报告）。
+     * <p>启动与 add 热加载传入 {@link #deriveLoadOrder(IntegrationInfo, StartupLoadTracker)}
+     * 的全图 loadOrder，供 findParentClassloader 递归未注册/未发布的依赖链；enable 的单参数
+     * 重载在其前置校验保证直接依赖可直达时才传自身。tracker 仅启动期非 null，用于分集成
+     * 健康报告；运行时传 null 不计入启动报告。
      *
      * <p>严格模式：任意环节失败即向上抛出，由调用方（enable/add）负责回滚 yml 状态，
      * 避免出现「yml 标 RUNNING 但无实例/无 flow」的僵尸态。
@@ -571,7 +571,15 @@ public class IntegrationManager {
         // TODO:注意这里只能串行执行无法并发，如果并发必须确保被依赖集成必须早于当前集成完成加载
 
         // 隔离包配置：如果集成声明了 isolated_packages，在选定 classloader 外包装隔离层
+        URLClassLoader rawSelectedLoader = classLoader;
         classLoader = createIsolatedClassLoader(classLoader, info);
+        // 类加载器选路审计（bug-20261010-172827 族谱断链案的常设 debug 痕迹）：
+        // 只记决策字段与加载器身份，禁 dump URL 全量（debug 开启时单行可达 KB 级）。
+        log.debug("classloader selected coordinate={} isDepended={} parentFound={} rawLoader={} finalLoader={} finalLoaderUrlCount={}",
+            info.getCoordinate(), info.isDepended(), childClassLoader != null,
+            rawSelectedLoader.getClass().getSimpleName() + "@" + Integer.toHexString(System.identityHashCode(rawSelectedLoader)),
+            classLoader.getClass().getSimpleName() + "@" + Integer.toHexString(System.identityHashCode(classLoader)),
+            classLoader.getURLs().length);
         return classLoader;
     }
 
@@ -976,25 +984,18 @@ public class IntegrationManager {
         startupTimedOutCoordinates.clear();
 
         Map<String, Map<String, Object>> integrationsConfig = loadIntegrationsConfig();
-        Map<String, Object> itgs = integrationsConfig.getOrDefault("integrations", new HashMap<>());
-
         // 清理 PENDING_REMITTED 集成（已标记为删除的集成）
         cleanupPendingRemovedIntegrations(integrationsConfig);
         
-        Map<String, List<String>> dependencyMap = new HashMap<>();
-        List<IntegrationInfo> integrationInfoList = new ArrayList<>();
-
-        // 启动期扫描区（jar 缺失/扫描失败/解析失败三分级点账隔离）抽取为独立方法：隔离分级必须可单测
-        collectIntegrationInfos(itgs, dependencyMap, integrationInfoList, tracker);
-
         List<IntegrationInfo> loadOrder;
         try {
-            LoadOrderResult orderResult = JarDependencyLoader.getLoadOrder(integrationInfoList, dependencyMap);
+            LoadOrderResult orderResult = deriveLoadOrder(null, tracker);
             // 分级④：依赖缺失/未启用的传递闭包隔离点账。blocked 坐标不入 loadOrder → 不进加载循环，
             // updateLoadedIntegrationsState 不触碰其 yml 态——「被依赖方禁用导致依赖方悬空」成为
             // 可见的合法运行态，启动报告为当次真相，yml state 保持上次已知值
             for (Map.Entry<String, String> blocked : orderResult.getBlockedCoordinates().entrySet()) {
-                tracker.recordFailure(blocked.getKey(), StartupLoadTracker.STAGE_DEP_MISSING);
+                tracker.recordFailure(blocked.getKey(), StartupLoadTracker.STAGE_DEP_MISSING,
+                        blocked.getValue());
                 log.error("集成 " + blocked.getKey() + " 本轮不加载: " + blocked.getValue());
             }
             loadOrder = orderResult.getLoadOrder();
@@ -1024,10 +1025,14 @@ public class IntegrationManager {
                     } catch (CoreVersionMismatchException e) {
                         // 版本门失败：单坐标隔离点账。message 三要素已自足，堆栈无诊断增量，
                         // 失败明细经 startup-report 行 failures 列表可见
-                        tracker.recordFailure(info.getCoordinate(), StartupLoadTracker.STAGE_REQUIRES_CORE);
+                        tracker.recordFailure(info.getCoordinate(), StartupLoadTracker.STAGE_REQUIRES_CORE,
+                                "requires_core=" + e.getRequiresCore()
+                                        + ", actual_core=" + e.getActualCoreVersion()
+                                        + ", reason=" + e.getMessage());
                         log.error("集成 " + info.getArtifactId() + " 加载失败(版本门): " + e.getMessage());
                     } catch (Exception e) {
-                        tracker.recordFailure(info.getCoordinate(), StartupLoadTracker.STAGE_LOAD);
+                        tracker.recordFailure(info.getCoordinate(), StartupLoadTracker.STAGE_LOAD,
+                                "exception=" + e.getClass().getName() + ", reason=" + e.getMessage());
                         log.error("集成 " + info.getArtifactId() + " 加载失败: " + e.getMessage(), e);
                     }
                 });
@@ -1051,6 +1056,11 @@ public class IntegrationManager {
             }
             // 重新创建线程池（后续操作可能需要）
             executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(1, new NamedThreadFactory("integration-manager")));
+
+            // 重启机会已给完：只有全部装载任务结束，才能基于本轮失败账迁移启动失败的 PENDING_ADDED。
+            if (allLoaded) {
+                migrateFailedPendingAddedIntegrations(tracker);
+            }
 
             // 更新所有成功加载的集成状态为 RUNNING（包括之前是 PENDING_ADDED 的）
             updateLoadedIntegrationsState();
@@ -1087,6 +1097,81 @@ public class IntegrationManager {
             log.error("等待集成加载完成被中断", e);
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * 统一推导集成装载序：真相源只有 integrations.yml 和各 jar 的 ecat-config.yml。
+     *
+     * <p>启动路径与运行时 add 热加载路径共用同一推导入口。已装载成员优先取 registry
+     * 中 {@link IntegrationLoadOption#getIntegrationInfo()} 的装载时快照；未装载成员由
+     * 启动扫描区按 yml + jar 现场读取；候选 info 在 add 写盘前由参数显式并入，因此
+     * “先装载成功、后提交 yml”的回滚语义不被破坏。{@link LoadOrderResult} 是一次性
+     * 派生结果，不在进程内保存全局排序副本。
+     *
+     * <p>运行时（tracker 为 null）沿用启动扫描的分级记账；若候选坐标因 jar 缺失、
+     * jar 元数据不可解析或依赖悬空而进入 blocked，立即以原因失败上抛，交由 add 的
+     * 既有回滚链处理。与候选无关的坏坐标仍按隔离结果返回，不扩大失败面。
+     *
+     * <p>已声明边界：同坐标同版本 jar 在进程内被磁盘替换且未触发重载时，registry
+     * 快照可能与磁盘内容不一致。正常升级必须更换版本路径；同版本进程内换装是病态
+     * 运维动作，这里不做猜测性合并。
+     *
+     * @param candidateInfo add 热加载尚未写入 yml 的候选集成；启动推导传 null
+     * @param tracker 启动健康报告追踪器；运行时推导传 null
+     * @return 本次推导专用的一体化装载序与隔离账
+     */
+    LoadOrderResult deriveLoadOrder(IntegrationInfo candidateInfo, StartupLoadTracker tracker) {
+        Map<String, Map<String, Object>> integrationsConfig = loadIntegrationsConfig();
+        Map<String, Object> itgs = integrationsConfig.getOrDefault("integrations", new HashMap<>());
+
+        Map<String, List<String>> dependencyMap = new HashMap<>();
+        List<IntegrationInfo> scannedInfos = new ArrayList<>();
+        StartupLoadTracker derivationTracker = tracker != null ? tracker : new StartupLoadTracker();
+        collectIntegrationInfos(itgs, dependencyMap, scannedInfos, derivationTracker);
+
+        // LinkedHashMap 保证“扫描成功序 + live 快照覆盖 + 候选最后并入”输入稳定，
+        // 使同一份 yml/jar 集合在启动与 add 两条路径得到同一拓扑结果。
+        Map<String, IntegrationInfo> graphInfos = new LinkedHashMap<>();
+        for (IntegrationInfo info : scannedInfos) {
+            graphInfos.put(info.getCoordinate(), info);
+        }
+
+        for (String coordinate : integrationRegistry.getAllCoordinates()) {
+            if (!graphInfos.containsKey(coordinate)) {
+                continue;
+            }
+            IntegrationBase integration = integrationRegistry.getIntegration(coordinate);
+            if (integration == null || integration.getLoadOption() == null
+                    || integration.getLoadOption().getIntegrationInfo() == null) {
+                throw new IllegalStateException(
+                    "已装载集成缺少 loadOption.integrationInfo，无法推导装载序: " + coordinate);
+            }
+            graphInfos.put(coordinate, integration.getLoadOption().getIntegrationInfo());
+        }
+
+        if (candidateInfo != null) {
+            String coordinate = candidateInfo.getCoordinate();
+            if (graphInfos.containsKey(coordinate)) {
+                throw new IllegalStateException(
+                    "候选集成已出现在 yml/registry 推导集中，add 输入态不合法: " + coordinate);
+            }
+            graphInfos.put(coordinate, candidateInfo);
+            dependencyMap.put(coordinate, dependencyCoordinatesOf(candidateInfo));
+        }
+
+        LoadOrderResult result = JarDependencyLoader.getLoadOrder(
+            new ArrayList<>(graphInfos.values()), dependencyMap);
+        if (candidateInfo != null && result.getBlockedCoordinates().containsKey(candidateInfo.getCoordinate())) {
+            throw new IllegalStateException("候选集成装载序推导失败: "
+                + result.getBlockedCoordinates().get(candidateInfo.getCoordinate()));
+        }
+        return result;
+    }
+
+    private List<String> dependencyCoordinatesOf(IntegrationInfo info) {
+        // 候选与未装载 yml 成员统一走 F4 缓存入口：同 stat 命中，文件替换按戳失效。
+        return readJarDependencyCoordinates(new File(getJarPath(
+            info.getGroupId(), info.getArtifactId(), info.getVersion())));
     }
 
     /**
@@ -1184,12 +1269,7 @@ public class IntegrationManager {
 
                     // 添加到依赖映射（使用 getCoordinate() 作为唯一键）
                     // 从 dependencyInfoList 提取 coordinate 列表
-                    List<String> depCoordinates = new ArrayList<>();
-                    if (info.getDependencyInfoList() != null) {
-                        for (com.ecat.core.Integration.DependencyInfo dep : info.getDependencyInfoList()) {
-                            depCoordinates.add(dep.getCoordinate());
-                        }
-                    }
+                    List<String> depCoordinates = readJarDependencyCoordinates(jarFile);
                     dependencyMap.put(info.getCoordinate(), depCoordinates);
                     integrationInfoList.add(info);
                 }
@@ -1308,6 +1388,7 @@ public class IntegrationManager {
         String version = (String) integrationConfig.get("version");
         String pendingVersion = (String) integrationConfig.get("pendingVersion");
         String updateStr = (String) integrationConfig.get("update");
+        String failureReason = (String) integrationConfig.get("failureReason");
 
         // 解析状态
         IntegrationState state;
@@ -1353,10 +1434,14 @@ public class IntegrationManager {
         boolean canRemove = !isLocked && !hasInitialDependents;
         boolean canEnable = !isLocked && state.isStopped();
         boolean canUpgrade = !isLocked;
+        String message = state.getDescription();
+        if (state == IntegrationState.STOPPED && failureReason != null) {
+            message = failureReason;
+        }
 
         return builder
             .state(state)
-            .message(state.getDescription())
+            .message(message)
             .dependencies(dependencies)
             .dependents(initialDependents)
             .version(version)
@@ -1566,7 +1651,10 @@ public class IntegrationManager {
                 // 与 enableIntegration 是同一缺陷）。
                 try {
                     IntegrationInfo info = buildIntegrationInfo(groupId, artifactId, version);
-                    loadSingleIntegration(info);
+                    // add 热加载与启动共用全图推导；候选尚未写 yml，只能经参数进入闭包。
+                    // 否则 BFS 会停在“中间依赖未发布 childClassLoader”的族谱断层上。
+                    LoadOrderResult orderResult = deriveLoadOrder(info, null);
+                    loadSingleIntegration(info, orderResult.getLoadOrder(), null);
                     loadExistingConfigEntriesForCoordinate(coordinate);
                     updateInitialDependencySnapshotForAdded(info);
                 } catch (Exception e) {
@@ -1787,7 +1875,9 @@ public class IntegrationManager {
                     String artifactId = (String) integrationConfig.get("artifactId");
                     String version = (String) integrationConfig.get("version");
                     IntegrationInfo info = buildIntegrationInfo(groupId, artifactId, version);
-                    loadSingleIntegration(info);
+                    // enable 与 add 同属运行时热加载：多跳依赖也需要全图 BFS 地图。
+                    LoadOrderResult orderResult = deriveLoadOrder(info, null);
+                    loadSingleIntegration(info, orderResult.getLoadOrder(), null);
                     // 实例已注册，加载其现有 ConfigEntries 并同步初始依赖快照
                     loadExistingConfigEntriesForCoordinate(coordinate);
                     updateInitialDependencySnapshotForAdded(info);
@@ -1965,6 +2055,7 @@ public class IntegrationManager {
                         // 检查集成是否真的已加载
                         if (integrationRegistry.getIntegration(coordinate) != null) {
                             integrationConfig.put("state", IntegrationState.RUNNING.name());
+                            integrationConfig.remove("failureReason");
                             integrationConfig.put("update", new Date().toString());
                             needsUpdate = true;
                             log.info("集成 {} 状态已更新为 RUNNING", coordinate);
@@ -1977,6 +2068,65 @@ public class IntegrationManager {
         if (needsUpdate) {
             updateIntegrationsConfig(config);
             log.info("已完成集成状态更新");
+        }
+    }
+
+    /**
+     * 启动装载失败对账：把已给过重启机会且本轮装载失败的 PENDING_ADDED 迁回可操作态。
+     *
+     * <p>迁移边界刻意收窄：enabled=true、state=PENDING_ADDED、失败账为
+     * dep-missing/requires-core/load，且 registry 中没有该坐标实例。后两类 PENDING 态
+     * （PENDING_UPGRADE/PENDING_REMOVED）重启失败语义不同，本方法不扩。已注册实例
+     * 说明失败发生在装载后的恢复段，不属「启动装载失败」，留给既有状态对账处理。
+     *
+     * <p>失败原因取 tracker 的结构化明细，不解析日志文本；yml 版本坐标保留，
+     * failureReason 采用 {@code type=<stage>; <原始明细>} 形态供 API message 展示。
+     */
+    void migrateFailedPendingAddedIntegrations(StartupLoadTracker tracker) {
+        Map<String, Map<String, Object>> config = loadIntegrationsConfig();
+        Map<String, Object> integrations = config.getOrDefault("integrations", new HashMap<>());
+        boolean needsUpdate = false;
+
+        for (Map.Entry<String, Object> entry : integrations.entrySet()) {
+            String coordinate = entry.getKey();
+            if (!(entry.getValue() instanceof Map)) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> integrationConfig = (Map<String, Object>) entry.getValue();
+            Boolean enabled = (Boolean) integrationConfig.get("enabled");
+            String currentState = (String) integrationConfig.get("state");
+            if (!Boolean.TRUE.equals(enabled)
+                    || !IntegrationState.PENDING_ADDED.name().equals(currentState)
+                    || integrationRegistry.getIntegration(coordinate) != null) {
+                continue;
+            }
+
+            String failureStage = tracker.getFailureStage(coordinate);
+            boolean isStartupLoadFailure = StartupLoadTracker.STAGE_DEP_MISSING.equals(failureStage)
+                    || StartupLoadTracker.STAGE_REQUIRES_CORE.equals(failureStage)
+                    || StartupLoadTracker.STAGE_LOAD.equals(failureStage);
+            if (!isStartupLoadFailure) {
+                continue;
+            }
+
+            String failureDetail = tracker.getFailureDetail(coordinate);
+            if (failureDetail == null || failureDetail.trim().isEmpty()) {
+                throw new IllegalStateException(
+                        "启动装载失败缺少结构化明细，拒绝猜测性迁移: " + coordinate + ":" + failureStage);
+            }
+
+            String failureReason = "type=" + failureStage + "; " + failureDetail;
+            integrationConfig.put("enabled", false);
+            integrationConfig.put("state", IntegrationState.STOPPED.name());
+            integrationConfig.put("failureReason", failureReason);
+            integrationConfig.put("update", new Date().toString());
+            needsUpdate = true;
+            log.error("集成 {} 启动装载失败，PENDING_ADDED 迁移 STOPPED: {}", coordinate, failureReason);
+        }
+
+        if (needsUpdate) {
+            updateIntegrationsConfig(config);
         }
     }
 

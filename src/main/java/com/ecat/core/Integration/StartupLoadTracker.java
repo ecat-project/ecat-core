@@ -63,6 +63,9 @@ class StartupLoadTracker {
     private final Map<String, long[]> perIntegrationNanos = new ConcurrentHashMap<>();
     private final AtomicInteger entriesRestored = new AtomicInteger();
     private final List<String> failures = new CopyOnWriteArrayList<>();
+    /** 失败分级与可程序化消费明细：迁移 PENDING_ADDED 时从结构化账取原因，不解析日志文本。 */
+    private final Map<String, List<String>> failureStages = new ConcurrentHashMap<>();
+    private final Map<String, List<String>> failureDetails = new ConcurrentHashMap<>();
     /** 看门狗超时清单（GuardedExecutor 执法）：与 failures 分列，报告里独立成节便于点名慢元凶 */
     private final List<String> timeouts = new CopyOnWriteArrayList<>();
 
@@ -83,7 +86,28 @@ class StartupLoadTracker {
 
     /** 记录一次启动期失败（stage：优先用上方分类词汇表常量；另有 entry:{entryId} / onAllExistEntriesLoaded / entry-restore:* 既有字面量） */
     void recordFailure(String coordinate, String stage) {
+        recordFailure(coordinate, stage, null);
+    }
+
+    /** 记录一次带结构化明细的启动期失败；明细是原始载荷（缺失依赖清单、版本门字段等），不是日志渲染串。 */
+    void recordFailure(String coordinate, String stage, String detail) {
         failures.add(coordinate + ":" + stage);
+        failureStages.computeIfAbsent(coordinate, key -> new CopyOnWriteArrayList<>()).add(stage);
+        if (detail != null) {
+            failureDetails.computeIfAbsent(coordinate, key -> new CopyOnWriteArrayList<>()).add(detail);
+        }
+    }
+
+    /** 指定坐标的首个失败分级；无失败返回 null。 */
+    String getFailureStage(String coordinate) {
+        List<String> stages = failureStages.get(coordinate);
+        return stages == null || stages.isEmpty() ? null : stages.get(0);
+    }
+
+    /** 指定坐标的结构化失败明细（多条以 “; ” 连接）；无明细返回 null。 */
+    String getFailureDetail(String coordinate) {
+        List<String> details = failureDetails.get(coordinate);
+        return details == null || details.isEmpty() ? null : String.join("; ", details);
     }
 
     /**

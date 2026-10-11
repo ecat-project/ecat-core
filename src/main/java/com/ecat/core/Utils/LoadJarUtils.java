@@ -18,7 +18,6 @@ package com.ecat.core.Utils;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
@@ -30,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Arrays;
 import com.ecat.core.EcatCore;
 import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Utils.loader.archive.Archive;
@@ -42,6 +42,8 @@ import com.ecat.core.Utils.loader.archive.JarFileArchive;
  */
 
 public class LoadJarUtils {
+    private static final Log log = LogFactory.getLogger(LoadJarUtils.class);
+
     // from https://www.panziye.com/back/3329.html
     // from https://blog.csdn.net/qq_39879126/article/details/138337059
     
@@ -205,18 +207,21 @@ public class LoadJarUtils {
             if (returnClassName == null) {
                 return null;
             }
+            log.debug("loadJar begin entryClass={} loader={}@{} urlCount={}",
+                returnClassName, myClassLoader.getClass().getSimpleName(),
+                Integer.toHexString(System.identityHashCode(myClassLoader)),
+                myClassLoader.getURLs().length);
             Class<?> clazz = myClassLoader.loadClass(returnClassName);
+            // actualLoader 与请求 loader 不同=走了委派，是排查类可见性问题的关键证据
+            log.debug("loadJar class resolved entryClass={} actualLoader={}",
+                returnClassName, clazz.getClassLoader());
             return new LoadJarResult((IntegrationBase)clazz.getDeclaredConstructor().newInstance(), myClassLoader);
 
 
-        } catch (MalformedURLException e) {
-            e.printStackTrace();
+        } catch (Throwable e) {
+            log.error("装载 JAR 失败: {}", jarPath, e);
+            throw new RuntimeException("装载 JAR 失败: " + jarPath, e);
         }
-        catch (Exception e) {
-            e.printStackTrace();
-        }
-        return null;
-
     }
 
     public URLClassLoader getEcatCoreClassLoader() {
