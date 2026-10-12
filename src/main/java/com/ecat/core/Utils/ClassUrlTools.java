@@ -17,10 +17,16 @@
 package com.ecat.core.Utils;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.JarURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.URLConnection;
 import java.net.URLDecoder;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Objects;
 
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +54,48 @@ public class ClassUrlTools {
     public static URL canonicalJarUrl(File jarFile) throws MalformedURLException {
         Objects.requireNonNull(jarFile, "jarFile");
         return new URL("jar:" + jarFile.toURI() + "!/");
+    }
+
+    /**
+     * 将类代码源 URL 转为本机物理路径。
+     *
+     * <p>支持两类生产形态：</p>
+     * <ul>
+     *   <li>{@code file:...}：IDE/classes 或本地文件；</li>
+     *   <li>{@code jar:file:...!/}：core 以本地 jar 装载集成类的生产形态。</li>
+     * </ul>
+     *
+     * <p>jar 形态必须经 {@link JarURLConnection#getJarFileURL()} 取官方内层 URL，
+     * 再由 {@link Paths#get(java.net.URI)} 完成 URI 到平台路径的转换。禁止调用方手剥
+     * {@code file:}/!{/} 字符串：Windows 规范 URL {@code jar:file:/C:/...!/} 被剥成
+     * {@code /C:/...} 后交给 NIO 会因盘符冒号抛 {@code InvalidPathException}。</p>
+     *
+     * @param location 类 ProtectionDomain CodeSource location
+     * @return 本机物理路径（文件或目录由调用方按需校验）
+     * @throws IOException jar 连接建立失败
+     * @throws URISyntaxException 内层 file URL 无法转 URI
+     */
+    public static Path physicalCodeSourcePath(URL location)
+            throws IOException, URISyntaxException {
+        Objects.requireNonNull(location, "location");
+
+        if ("file".equalsIgnoreCase(location.getProtocol())) {
+            return Paths.get(location.toURI());
+        }
+        if ("jar".equalsIgnoreCase(location.getProtocol())) {
+            URLConnection connection = location.openConnection();
+            if (!(connection instanceof JarURLConnection)) {
+                throw new IllegalArgumentException(
+                    "jar 代码源不是标准 JarURLConnection: " + location);
+            }
+            URL jarFileUrl = ((JarURLConnection) connection).getJarFileURL();
+            if (!"file".equalsIgnoreCase(jarFileUrl.getProtocol())) {
+                throw new IllegalArgumentException(
+                    "jar 代码源内层不是 file 协议: " + jarFileUrl);
+            }
+            return Paths.get(jarFileUrl.toURI());
+        }
+        throw new IllegalArgumentException("不支持的代码源协议: " + location.getProtocol());
     }
 
     /**

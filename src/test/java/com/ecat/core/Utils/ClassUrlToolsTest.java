@@ -19,9 +19,15 @@ package com.ecat.core.Utils;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.JarURLConnection;
+import java.net.URI;
 import java.net.URL;
+import java.net.URLConnection;
+import java.net.URLStreamHandler;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -84,6 +90,93 @@ public class ClassUrlToolsTest {
             fail("null jar 文件应显式拒绝");
         } catch (NullPointerException expected) {
             assertEquals("jarFile", expected.getMessage());
+        }
+    }
+
+    @Test
+    public void physicalCodeSourcePathResolvesFileUrl() throws Exception {
+        Path dir = Files.createTempDirectory("classurl-file-source");
+
+        Path resolved = ClassUrlTools.physicalCodeSourcePath(dir.toUri().toURL());
+
+        assertEquals(dir.toAbsolutePath(), resolved.toAbsolutePath());
+    }
+
+    @Test
+    public void physicalCodeSourcePathResolvesCanonicalJarUrl() throws Exception {
+        Path dir = Files.createTempDirectory("classurl-jar-source");
+        File jar = dir.resolve("中文 + 目录").resolve("fixture.jar").toFile();
+        Files.createDirectories(jar.getParentFile().toPath());
+        Files.write(jar.toPath(), new byte[] {1});
+
+        URL codeSource = ClassUrlTools.canonicalJarUrl(jar);
+        Path resolved = ClassUrlTools.physicalCodeSourcePath(codeSource);
+
+        assertEquals(jar.toPath().toAbsolutePath(), resolved.toAbsolutePath());
+    }
+
+    @Test
+    public void windowsDriveJarUrlFollowsPlatformUriConversion() throws Exception {
+        URL codeSource = new URL("jar:file:/C:/Users/ecat/library.jar!/");
+
+        Path resolved = ClassUrlTools.physicalCodeSourcePath(codeSource);
+
+        assertEquals(Paths.get(new URI("file:/C:/Users/ecat/library.jar")), resolved);
+    }
+
+    @Test
+    public void jarConnectionInnerUrlWinsOverExternalString() throws Exception {
+        Path dir = Files.createTempDirectory("classurl-inner-url");
+        File jar = dir.resolve("real-bridge.jar").toFile();
+        Files.write(jar.toPath(), new byte[] {1});
+        final URL innerFileUrl = jar.toURI().toURL();
+
+        URL externalLie = new URL(null, "jar:file:/C:/Users/ecat/library.jar!/",
+            new URLStreamHandler() {
+                @Override
+                protected URLConnection openConnection(URL url) throws IOException {
+                    return new JarURLConnection(url) {
+                        @Override
+                        public URL getJarFileURL() {
+                            return innerFileUrl;
+                        }
+
+                        @Override
+                        public void connect() {
+                            // openConnection 只建连接对象；本用例不触发 jar I/O。
+                        }
+
+                        @Override
+                        public java.util.jar.JarFile getJarFile() {
+                            throw new UnsupportedOperationException("测试连接不打开 jar 文件");
+                        }
+                    };
+                }
+            });
+
+        Path resolved = ClassUrlTools.physicalCodeSourcePath(externalLie);
+
+        assertEquals(jar.toPath().toAbsolutePath(), resolved.toAbsolutePath());
+    }
+
+    @Test
+    public void physicalCodeSourcePathRejectsNull() throws Exception {
+        try {
+            ClassUrlTools.physicalCodeSourcePath(null);
+            fail("null 代码源应显式拒绝");
+        } catch (NullPointerException expected) {
+            assertEquals("location", expected.getMessage());
+        }
+    }
+
+    @Test
+    public void physicalCodeSourcePathRejectsUnsupportedProtocol() throws Exception {
+        URL location = new URL("https://example.com/ecat.jar");
+        try {
+            ClassUrlTools.physicalCodeSourcePath(location);
+            fail("非 file/jar 代码源应显式拒绝");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("不支持的代码源协议"));
         }
     }
 }
