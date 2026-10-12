@@ -100,6 +100,24 @@ mvn clean package
 java -jar target/ecat-core-1.0.0.jar
 ```
 
+### Direct IDE debugging
+
+The production version source is the fat-jar manifest entry
+`Implementation-Version`. A normal IDE `Application` configuration loads
+`ecat-core/target/classes`, which has no manifest, so startup fails fast when
+the version is unavailable.
+
+To keep this debugging mode, add the following to **Program arguments** in the
+IDE run configuration:
+
+```text
+-dev
+```
+
+`-dev` only accepts the `target/classes` loading shape, reads the version from
+the same module's `pom.xml`, and keeps enforcing the `requires_core` version
+gate. Production jar startup must not use this mode.
+
 ### Maven Dependency
 
 Add ECAT Core dependency to your plugin project:

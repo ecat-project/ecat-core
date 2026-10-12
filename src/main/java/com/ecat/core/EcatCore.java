@@ -16,6 +16,7 @@
 
 package com.ecat.core;
 
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.ecat.core.Bus.BusRegistry;
@@ -174,9 +175,9 @@ public class EcatCore {
         // boot 作用域（arch-review 25 号杠杆④）：main 线程 MDC 设 boot ULID，
         // 整段启动序列（init + loadIntegrations 的 entry 恢复）共用一个 id，可按代际 grep 分段。
         BootTraceContext.beginBoot();
-        // 版本真源=fat jar manifest 的 Implementation-Version,先于一切集成加载打出;
-        // 无 manifest(打包异常/非 assembly 产物)此处即 fail-fast,boot 死于集成加载之前
-        log.info("core 版本: {}(来源=jar manifest)", CoreVersions.current());
+        // 版本默认真源=fat jar manifest;-dev 且 target/classes 时来自受控开发版本源。
+        // 无版本(打包异常/非 assembly 产物/非法 -dev 环境)此处即 fail-fast,boot 死于集成加载之前
+        log.info("core 版本: {}", CoreVersions.current());
         platformInfo = PlatformInfo.getInstance();
         i18nProxy = new I18nProxy(Const.CORE_COORDINATE, EcatCore.class, EcatCore.class.getClassLoader());
         integrationRegistry = new IntegrationRegistry();
@@ -227,7 +228,34 @@ public class EcatCore {
             CoreShutdown.forRegistries(taskManager, stateManager, integrationRegistry).run());
     }
 
+    /** 解析启动参数：当前仅支持显式 {@code -dev}；未知/重复参数明确拒绝，禁静默忽略。 */
+    static boolean parseDevelopmentMode(String[] args) {
+        Objects.requireNonNull(args, "args");
+        int devCount = 0;
+        for (String arg : args) {
+            if ("-dev".equals(arg)) {
+                devCount++;
+            } else {
+                throw new IllegalArgumentException("不支持的 EcatCore 启动参数: " + arg
+                        + "（当前仅支持 -dev）");
+            }
+        }
+        if (devCount > 1) {
+            throw new IllegalArgumentException("-dev 只能出现一次");
+        }
+        return devCount == 1;
+    }
+
+    /** main 专用装配缝：按启动参数切换受控开发版本源，便于单测锁定参数到版本源的接线。 */
+    static void configureDevelopmentVersionSource(String[] args) {
+        if (parseDevelopmentMode(args)) {
+            CoreVersions.enableDevelopmentVersionSource();
+        }
+    }
+
     public static void main(String[] args) {
+        configureDevelopmentVersionSource(args);
+
         // 这里可以添加一些初始化逻辑
         EcatCore core = new EcatCore();
         

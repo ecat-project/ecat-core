@@ -100,6 +100,21 @@ mvn clean package
 java -jar target/ecat-core-1.0.0.jar
 ```
 
+### IDE 直启调试
+
+生产版本真源是 fat jar manifest 的 `Implementation-Version`。IDE 的普通
+`Application` 配置从 `ecat-core/target/classes` 加载，没有 manifest，会在启动期
+因版本不可得 fail-fast。
+
+需要保留这种调试方式时，在 IDE 运行配置的 **Program arguments** 中加入：
+
+```text
+-dev
+```
+
+`-dev` 仅接受 `target/classes` 加载形态，版本动态读取同模块 `pom.xml`，并保留
+`requires_core` 版本门执法；生产 jar 启动禁用该形态。
+
 ### Maven 依赖
 
 在你的插件项目中添加 ECAT Core 依赖：

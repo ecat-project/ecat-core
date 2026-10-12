@@ -28,7 +28,9 @@ import com.ecat.core.Integration.IntegrationSubInfo.WebPlatformSupport;
 import com.ecat.core.Observability.StartupReportHolder;
 import com.ecat.core.State.StateManager;
 import com.ecat.core.Version.CoreVersionMismatchException;
+import com.ecat.core.Version.CoreVersions;
 import com.ecat.core.Version.CoreVersionsTestAccess;
+import com.ecat.core.Version.Version;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.core.read.ListAppender;
@@ -123,6 +125,16 @@ public class CoreRequiresCoreGateTest {
         assertEquals("3.9.0", ex.getActualCoreVersion());
         assertTrue("message 应含不满足语义与修复指引: " + ex.getMessage(),
             ex.getMessage().contains("不满足") && ex.getMessage().contains("升级 core"));
+    }
+
+    /** -dev 的 pom 版本源同样喂给 requires_core 门：开发模式不是兼容豁免。 */
+    @Test
+    public void developmentPomVersionStillFeedsRequiresCoreGate() {
+        CoreVersions.enableDevelopmentVersionSource();
+        String actual = CoreVersions.current();
+        String compatibleConstraint = "^" + Version.parse(actual).getMajor() + ".0.0";
+
+        IntegrationManager.enforceRequiresCore(info("com.ecat:dev-gate", compatibleConstraint), actual);
     }
 
     // ==================== T2 boot 隔离：单坐标拒载不陪葬 ====================
