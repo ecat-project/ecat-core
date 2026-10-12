@@ -92,8 +92,8 @@ public class ConfigFlowServiceDuplicatePersistTest {
         core.init();
         EcatCore.setInstance(core);
         service = new ConfigFlowService(core);
-        // createEntry 盖戳契约要求 coordinate 的集成已加载（取其 entryFormatVersion() 声明）：
-        // 注册最小 stub 集成（默认声明 "4.0"），createEntry 回调走 UnsupportedOperationException 警告路径即可
+        // createEntry 通知契约要求 coordinate 的集成已加载：
+        // 注册最小 stub 集成，createEntry 回调走 UnsupportedOperationException 警告路径即可
         core.getIntegrationRegistry().register(COORDINATE, new StubIntegration());
     }
 

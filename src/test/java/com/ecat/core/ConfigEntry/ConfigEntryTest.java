@@ -16,7 +16,6 @@
 
 package com.ecat.core.ConfigEntry;
 
-import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.Utils.DateTimeUtils;
 import org.junit.Test;
 
@@ -52,7 +51,7 @@ public class ConfigEntryTest {
         assertTrue("默认应该启用", entry.isEnabled());
         assertNotNull("data 不应为 null", entry.getData());
         assertTrue("data 应该为空", entry.getData().isEmpty());
-        assertNull("Builder 默认不设格式版本（null=「未带版本」，由 Registry 盖戳）", entry.getVersion());
+        assertEquals("Builder 默认版本应为 1", 1, entry.getVersion());
     }
 
     @Test
@@ -68,7 +67,7 @@ public class ConfigEntryTest {
                 .title("Test Entry")
                 .data(data)
                 .enabled(false)
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(2)
                 .build();
 
         assertNotNull("data 不应为 null", entry.getData());
@@ -76,7 +75,7 @@ public class ConfigEntryTest {
         assertEquals("value1", entry.getData().get("key1"));
         assertEquals(123, entry.getData().get("key2"));
         assertFalse("应该被禁用", entry.isEnabled());
-        assertEquals("显式设置的格式版本应保持", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, entry.getVersion());
+        assertEquals("显式设置的版本应保持", 2, entry.getVersion());
     }
 
     @Test
@@ -124,7 +123,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(1)
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -141,8 +140,8 @@ public class ConfigEntryTest {
         // 验证可变字段更新
         assertEquals("title 应该更新", "Updated Title", updated.getTitle());
 
-        // 验证格式版本保持（不再自增）
-        assertEquals("格式版本应保持不变", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, updated.getVersion());
+        // 验证修改计数递增
+        assertEquals("用户更新后版本应为 2", 2, updated.getVersion());
 
         // 验证时间戳
         assertNotNull("updateTime 不应为 null", updated.getUpdateTime());
@@ -159,7 +158,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .data(originalData)
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(2)
                 .build();
 
         Map<String, Object> newData = new HashMap<>();
@@ -183,7 +182,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .enabled(true)
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(2)
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -202,7 +201,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(2)
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -224,7 +223,7 @@ public class ConfigEntryTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .data(originalData)
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(2)
                 .build();
 
         // 创建新的 empty map 而不是 null
@@ -243,16 +242,15 @@ public class ConfigEntryTest {
     }
 
     /**
-     * 格式版本不随修改自增：withUpdate 前后 version 相等，连续两次更新仍相等。
-     * 版本语义=配置数据格式版本，变更唯二入口是创建盖戳与迁移函数推进。
+     * version 是修改计数：withUpdate 每次自增 1。
      */
     @Test
-    public void testWithUpdate_VersionUnchanged() {
+    public void testWithUpdate_VersionIncrements() {
         ConfigEntry original = new ConfigEntry.Builder()
                 .entryId("test-id")
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(1)
                 .build();
 
         ConfigEntry newData = new ConfigEntry.Builder()
@@ -261,11 +259,11 @@ public class ConfigEntryTest {
 
         ConfigEntry updated = original.withUpdate(newData);
 
-        assertEquals("withUpdate 后格式版本应保持不变", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, updated.getVersion());
+        assertEquals("withUpdate 后版本应为 2", 2, updated.getVersion());
 
-        // 再次更新仍保持
+        // 再次更新继续递增
         ConfigEntry thirdUpdate = updated.withUpdate(newData);
-        assertEquals("连续两次更新格式版本仍应不变", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, thirdUpdate.getVersion());
+        assertEquals("连续两次更新版本应为 3", 3, thirdUpdate.getVersion());
     }
 
     // ==================== Lombok @Data 测试 ====================

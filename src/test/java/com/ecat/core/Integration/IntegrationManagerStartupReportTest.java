@@ -209,7 +209,7 @@ public class IntegrationManagerStartupReportTest {
                 .enabled(true)
                 .createTime(ZonedDateTime.now())
                 .updateTime(ZonedDateTime.now())
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(1)
                 .build();
     }
 }

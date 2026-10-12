@@ -16,7 +16,6 @@
 
 package com.ecat.core.ConfigEntry;
 
-import com.ecat.core.Integration.IntegrationBase;
 import com.ecat.core.ConfigFormatException;
 import com.ecat.core.Utils.DateTimeUtils;
 import org.junit.After;
@@ -98,7 +97,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         persistence.save(entry);
@@ -129,7 +128,7 @@ public class YmlConfigEntryPersistenceTest {
                 .title("Test Entry")
                 .data(data)
                 .enabled(false)
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         persistence.save(entry);
@@ -156,7 +155,7 @@ public class YmlConfigEntryPersistenceTest {
                 .title("Test Entry")
                 .createTime(now)
                 .updateTime(now)
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         persistence.save(entry);
@@ -181,7 +180,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         persistence.save(entry);
@@ -202,7 +201,7 @@ public class YmlConfigEntryPersistenceTest {
         assertEquals("coordinate 应该匹配", "com.ecat.integration:demo", loaded.getCoordinate());
         assertEquals("uniqueId 应该匹配", "demo_123", loaded.getUniqueId());
         assertEquals("title 应该匹配", "Test Entry", loaded.getTitle());
-        assertEquals("格式版本应为 String round-trip 保持", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, loaded.getVersion());
+        assertEquals("int 版本应 round-trip 保持", 17, loaded.getVersion());
 
         // 清理
         File dir = new File(".ecat-data/core/config_entries/com.ecat.integration/demo");
@@ -223,18 +222,18 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Original Title")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         persistence.save(entry);
 
-        // 更新 entry（格式版本是文件级契约：update 重写文件后须 round-trip 保持）
+        // 更新 entry（修改计数由调用方给定：update 重写文件后须 round-trip 保持）
         ConfigEntry updated = new ConfigEntry.Builder()
                 .entryId("test-id-update")
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Updated Title")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(18)
                 .build();
 
         persistence.update(updated);
@@ -248,7 +247,7 @@ public class YmlConfigEntryPersistenceTest {
 
         assertNotNull("应该找到 entry", loaded);
         assertEquals("title 应该更新", "Updated Title", loaded.getTitle());
-        assertEquals("格式版本应 round-trip 保持", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, loaded.getVersion());
+        assertEquals("int 版本应 round-trip 保持", 18, loaded.getVersion());
 
         // 清理
         File dir = new File(".ecat-data/core/config_entries/com.ecat.integration/demo");
@@ -269,7 +268,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         persistence.save(entry);
@@ -316,7 +315,7 @@ public class YmlConfigEntryPersistenceTest {
                 .enabled(true)
                 .createTime(createTime)
                 .updateTime(createTime)
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         // 保存
@@ -335,8 +334,8 @@ public class YmlConfigEntryPersistenceTest {
         assertEquals("uniqueId 应该匹配", original.getUniqueId(), loaded.getUniqueId());
         assertEquals("title 应该匹配", original.getTitle(), loaded.getTitle());
         assertEquals("enabled 应该匹配", original.isEnabled(), loaded.isEnabled());
-        assertEquals("格式版本应该匹配", IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION, loaded.getVersion());
-        assertTrue("加载后的格式版本应为 String 类型", loaded.getVersion() instanceof String);
+        assertEquals("int 版本应该匹配", 17, loaded.getVersion());
+        assertTrue("加载后的 version 必须是 Integer", loaded.getVersion() == 17);
 
         // 验证 data (注意 YAML 可能会改变数字类型)
         assertNotNull("data 不应为 null", loaded.getData());
@@ -365,7 +364,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_123")
                 .title("Test Entry")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         persistence.save(original);
@@ -396,7 +395,7 @@ public class YmlConfigEntryPersistenceTest {
                 .coordinate("com.ecat.integration:demo")
                 .uniqueId("demo_import")
                 .title("Imported")
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .source(SourceType.IMPORT_FLOW)
                 .build();
 
@@ -431,7 +430,7 @@ public class YmlConfigEntryPersistenceTest {
                 .uniqueId(null)  // null uniqueId
                 .title(null)     // null title
                 .data(new HashMap<>())  // empty data
-                .version(IntegrationBase.DEFAULT_ENTRY_FORMAT_VERSION)
+                .version(17)
                 .build();
 
         persistence.save(entry);
@@ -455,7 +454,7 @@ public class YmlConfigEntryPersistenceTest {
         }
     }
 
-    // ==================== 格式版本 fail-closed 测试 ====================
+    // ==================== version int 契约测试 ====================
 
     /** 落一个原始 yml entry 文件（不做任何转义加工），body 为文件全部内容。 */
     private File writeRawEntryFile(String artifactId, String entryId, String ymlBody) throws IOException {
@@ -483,44 +482,71 @@ public class YmlConfigEntryPersistenceTest {
                 + "source: USER\n";
     }
 
-    /** 旧计数器 int（yaml 裸 `version: 1`→Integer）必须 fail-closed 聚合抛出，不静默跳过。 */
+    /** 旧计数器 int（yaml 裸 `version: 1`/`version: 17`→Integer）必须能聚合加载。 */
     @Test
-    public void loadAll_legacyIntVersionFailsClosed() throws IOException {
+    public void loadAll_acceptsLegacyIntVersions() throws IOException {
         persistence = new YmlConfigEntryPersistence();
-        File offender = writeRawEntryFile("fc1", "fc-entry-1",
+        writeRawEntryFile("legacy-a", "fc-entry-1",
                 entryYmlBody("fc-entry-1", "version: 1"));
+        writeRawEntryFile("legacy-b", "fc-entry-17",
+                entryYmlBody("fc-entry-17", "version: 17"));
 
-        try {
-            persistence.loadAll();
-            fail("旧计数器 int 版本应聚合 fail-closed 抛出，而非静默跳过");
-        } catch (ConfigFormatException e) {
-            String message = e.getMessage();
-            assertTrue("消息应含 offender 文件绝对路径", message.contains(offender.getAbsolutePath()));
-            assertTrue("消息应含 coordinate 定位", message.contains("com.ecat.it:failclosed"));
-            assertTrue("消息应含 entryId", message.contains("fc-entry-1"));
-            assertTrue("actual 应携带类型:值（Integer:1）", e.getActual().contains("Integer:1"));
-        }
+        List<ConfigEntry> entries = persistence.loadAll();
+
+        assertEquals("两个旧 int 版本 entry 都应加载", 2, entries.stream()
+                .filter(entry -> entry.getEntryId().startsWith("fc-entry-"))
+                .count());
+        ConfigEntry versionOne = entries.stream()
+                .filter(entry -> "fc-entry-1".equals(entry.getEntryId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("version: 1 entry 应加载"));
+        ConfigEntry versionSeventeen = entries.stream()
+                .filter(entry -> "fc-entry-17".equals(entry.getEntryId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("version: 17 entry 应加载"));
+        assertEquals(1, versionOne.getVersion());
+        assertEquals(17, versionSeventeen.getVersion());
     }
 
-    /** 聚合性：两个 offender 文件须在一条异常消息里同时点名（不给「修一个跑一次」的循环）。 */
+    /** save 后落盘必须是裸 int，不能变成带引号字符串或浮点。 */
     @Test
-    public void loadAll_aggregatesAllVersionOffendersInOneThrow() throws IOException {
+    public void save_persistsVersionAsInt() throws Exception {
         persistence = new YmlConfigEntryPersistence();
-        File offenderA = writeRawEntryFile("fc2", "fc-entry-a",
-                entryYmlBody("fc-entry-a", "version: 1"));
-        File offenderB = writeRawEntryFile("fc2b", "fc-entry-b",
-                entryYmlBody("fc-entry-b", "version: 7"));
+        ConfigEntry entry = new ConfigEntry.Builder()
+                .entryId("save-int-version")
+                .coordinate("com.ecat.it:failclosed")
+                .uniqueId("fc_save_int")
+                .title("save int")
+                .data(new HashMap<>())
+                .enabled(true)
+                .version(17)
+                .build();
+        persistence.save(entry);
+
+        File file = new File(".ecat-data/core/config_entries/com.ecat.it/failclosed/save-int-version.yml");
+        String yml = new String(Files.readAllBytes(file.toPath()), "UTF-8");
+        assertTrue("落盘 yml 的 version 应为裸 int 17，实际:\n" + yml,
+                yml.matches("(?s).*version:\\s*17\\b.*"));
+        ConfigEntry loaded = persistence.loadAll().stream()
+                .filter(candidate -> "save-int-version".equals(candidate.getEntryId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("save 后应能加载"));
+        assertEquals(17, loaded.getVersion());
+    }
+
+    /** 字符串版本（旧 4.0 形态）回滚后必须 fail-closed，actual 标明 String 类型。 */
+    @Test
+    public void loadAll_stringVersionFailsClosed() throws IOException {
+        persistence = new YmlConfigEntryPersistence();
+        writeRawEntryFile("string-version", "fc-entry-string",
+                entryYmlBody("fc-entry-string", "version: \"4.0\""));
 
         try {
             persistence.loadAll();
-            fail("两个 offender 应聚合为一次抛出");
+            fail("String 版本应聚合 fail-closed 抛出，而非静默跳过");
         } catch (ConfigFormatException e) {
-            String message = e.getMessage();
-            assertTrue("消息应同时点名第一个 offender 文件",
-                    message.contains(offenderA.getAbsolutePath()));
-            assertTrue("消息应同时点名第二个 offender 文件",
-                    message.contains(offenderB.getAbsolutePath()));
-            assertTrue("聚合清单应含 2 个文件计数", e.getActual().contains("共 2 个"));
+            assertTrue("actual 应含 String 类型:值（String:4.0）",
+                    e.getActual().contains("String:4.0"));
         }
     }
 
@@ -528,7 +554,7 @@ public class YmlConfigEntryPersistenceTest {
     @Test
     public void loadAll_unquotedDecimalVersionFails() throws IOException {
         persistence = new YmlConfigEntryPersistence();
-        writeRawEntryFile("fc3", "fc-entry-decimal",
+        writeRawEntryFile("decimal-version", "fc-entry-decimal",
                 entryYmlBody("fc-entry-decimal", "version: 4.0"));
 
         try {

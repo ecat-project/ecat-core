@@ -48,11 +48,11 @@
 
 | 签名 | 返回类型 | 说明 |
 |------|----------|------|
-| `createEntry(ConfigEntry entry)` | `ConfigEntry` | uniqueId 去重 → 自动生成 entryId → 设置时间 → version=0 时设为 1 → 持久化 → 缓存 → 通知集成 |
+| `createEntry(ConfigEntry entry)` | `ConfigEntry` | uniqueId 去重 → 自动生成 entryId → 设置时间 → 使用 Builder 默认 version=1（显式非正数拒绝） → 持久化 → 缓存 → 通知集成 |
 | `updateEntry(String entryId, ConfigEntry newEntryData)` | `ConfigEntry` | 查找 → `withUpdate()` → 持久化 → 缓存 |
 | `reconfigureEntry(String entryId, ConfigEntry newEntryData)` | `ConfigEntry` | 查找 → `withReconfigure()` → 持久化 → 缓存 → 通知集成 |
 | `removeEntry(String entryId)` | `void` | **先通知集成** → 删除缓存 → 删除持久化 |
-| `setEnabled(String entryId, boolean enabled)` | `ConfigEntry` | 版本+1 → 持久化 → 缓存 → 通知集成（值未变时跳过） |
+| `setEnabled(String entryId, boolean enabled)` | `ConfigEntry` | 版本不变 → 持久化 → 缓存 → 通知集成（值未变时跳过） |
 
 #### 查询方法
 

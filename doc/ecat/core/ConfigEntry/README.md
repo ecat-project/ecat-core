@@ -63,7 +63,7 @@
 | `enabled` | `boolean` | 启用状态 |
 | `createTime` | `ZonedDateTime` | 创建时间（时区感知） |
 | `updateTime` | `ZonedDateTime` | 更新时间（时区感知） |
-| `version` | `int` | 版本号（部分操作自增） |
+| `version` | `int` | 修改计数（API 配置修改 +1；创建、重配置、启用/禁用不变） |
 
 #### 不可变更新模式
 
@@ -85,7 +85,7 @@ ConfigEntry reconfigured = entry.withReconfigure(newEntryData);
 
 | 方法 | 版本变化 | uniqueId 行为 | 使用场景 |
 |------|----------|---------------|----------|
-| `withUpdate()` | +1 | 保持不变 | API 配置修改、enable/disable |
+| `withUpdate()` | +1 | 保持不变 | API 配置修改 |
 | `withReconfigure()` | 不变 | 可从 newData 更新 | UI 重配置流程 |
 
 #### uniqueId 业务唯一性约束
@@ -221,7 +221,7 @@ AbstractConfigFlow flow = registry.createFlow(coordinate);
 | `updateEntry(entryId, newData)` | `ConfigEntry` | 查找 → withUpdate()（版本+1） → 持久化 → 缓存 |
 | `reconfigureEntry(entryId, newData)` | `ConfigEntry` | 查找 → withReconfigure()（版本不变） → 持久化 → 缓存 → **通知集成** |
 | `removeEntry(entryId)` | `void` | **先通知集成清理** → 删除缓存 → 删除持久化 |
-| `setEnabled(entryId, enabled)` | `ConfigEntry` | 值未变时跳过 → 构建 enabled 条目 → 版本+1 → **通知集成** → 持久化 → 缓存 |
+| `setEnabled(entryId, enabled)` | `ConfigEntry` | 值未变时跳过 → 构建 enabled 条目 → 版本不变 → **通知集成** → 持久化 → 缓存 |
 
 #### 通知顺序
 
@@ -537,11 +537,11 @@ new SchemaConfigItem("serial", true, SerialCommConfigSchema.class).extend()
 | 创建新条目 | `createEntry()` | 设为 1 |
 | UI 重配置 | `reconfigureEntry()` → `withReconfigure()` | **不变** |
 | API 配置修改 | `updateEntry()` → `withUpdate()` | +1 |
-| 启用/禁用 | `setEnabled()` → `withUpdate()` | +1 |
+| 启用/禁用 | `setEnabled()` | 不变 |
 
 **mergeEntries() 预留**：
 
-`IntegrationBase.mergeEntries(List<ConfigEntry>)` 在服务重启加载条目后调用，用于版本升级迁移：
+`IntegrationBase.mergeEntries(List<ConfigEntry>)` 在服务重启加载条目后调用，是 integration 自拥的可选批量转换钩子；core 不做格式版本门控：
 
 ```java
 @Override
@@ -562,7 +562,7 @@ public List<ConfigEntry> mergeEntries(List<ConfigEntry> entries) {
 2. **Flow 子类必须有无参构造函数** — `ConfigFlowRegistry.createFlow()` 使用 `getDeclaredConstructor().newInstance()`
 3. **uniqueId 由集成生成并保证唯一** — Registry 仅做去重校验
 4. **removeEntry 通知顺序：先集成后持久化** — 确保设备先停止清理，再删除配置文件
-5. **enable/disable 使用 withUpdate()（版本+1）** — 重配置使用 withReconfigure()（版本不变）
+5. **enable/disable 保持修改计数不变** — 重配置使用 withReconfigure()（版本不变）
 6. **入口步骤 vs 普通步骤 handler 签名不同** — 入口：`BiFunction<Map, FlowContext, Result>`；普通：`Function<Map, Result>`
 7. **DynamicEnumConfigItem 不走 i18n 回退链** — 选项标签直接使用 `Supplier` 返回值
 8. **ConfigFlowResult.CREATE_ENTRY 用于 create 和 update** — 需通过 `flow.getSourceType()` 区分

@@ -26,9 +26,8 @@ package com.ecat.core;
  *   <li><b>≠ core 软件版本</b>：core 版本真源是 jar manifest 的 Implementation-Version；</li>
  *   <li><b>≠ 集成软件版本</b>：integrations.yml 各条目内的 {@code version} 键是集成自身
  *       版本（安装链写入，用于拼 jar 路径），与 root {@code version} 层级不同、语义不同；</li>
- *   <li><b>≠ entry 条目数据格式版本</b>：config_entries/*.yml 的条目格式版本由
- *       {@link FormatVersion}（"major.minor" 词汇）与
- *       {@code IntegrationBase#entryFormatVersion()} 表达，走迁移阶梯；本文件戳无迁移通道，
+ *   <li><b>≠ entry 修改计数</b>：config_entries/*.yml 的 {@code version} 是条目修改计数
+ *       （int，更新自增）；本文件戳无迁移通道，
  *       只认当前值（fail-closed，见 {@link #requireSupported(Object)}）。</li>
  * </ul>
  *

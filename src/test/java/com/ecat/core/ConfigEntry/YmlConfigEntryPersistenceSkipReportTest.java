@@ -102,7 +102,7 @@ public class YmlConfigEntryPersistenceSkipReportTest {
             + "uniqueId: skip-report-good\n"
             + "title: SkipReportGood\n"
             + "enabled: true\n"
-            + "version: \"4.0\"\n");
+            + "version: 1\n");
 
         List<ConfigEntry> entries = persistence.loadAll();
 

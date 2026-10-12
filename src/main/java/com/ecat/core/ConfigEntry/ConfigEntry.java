@@ -81,12 +81,9 @@ public class ConfigEntry {
     private ZonedDateTime updateTime;
 
     /**
-     * 配置数据格式版本 ("major.minor"，如 "4.0")，表达 data 配置工程值结构的版本，非修改计数。
-     * <p>
-     * 变更唯二入口：创建时由 Registry 盖集成声明格式版本；格式迁移函数推进。
-     * withUpdate/withReconfigure/setEnabled 一律保持不变。
+     * 版本号 (修改时自动+1)
      */
-    private String version;
+    private int version = 1;
 
     /**
      * 来源类型（记录 entry 的创建来源：USER/IMPORT_FLOW/MQTT/ZEROCONF/IGNORE）。
@@ -109,8 +106,7 @@ public class ConfigEntry {
         private boolean enabled = true;
         private ZonedDateTime createTime;
         private ZonedDateTime updateTime;
-        // 默认 null =「未带版本」，由 Registry.createEntry 盖集成声明的格式版本
-        private String version;
+        private int version = 1;
 
         private SourceType source = SourceType.USER;
 
@@ -159,7 +155,7 @@ public class ConfigEntry {
             return this;
         }
 
-        public Builder version(String version) {
+        public Builder version(int version) {
             this.version = version;
             return this;
         }
@@ -191,8 +187,6 @@ public class ConfigEntry {
     /**
      * 更新数据 (保留 entryId, coordinate, uniqueId)
      * <p>
-     * 格式版本保持不变——版本不再随修改自增，仅由创建盖戳与迁移函数推进。
-     *
      * @param newData 新的配置数据
      * @return 更新后的 ConfigEntry
      */
@@ -207,15 +201,15 @@ public class ConfigEntry {
                 .enabled(newData.enabled)
                 .createTime(this.createTime)
                 .updateTime(DateTimeUtils.now())
-                .version(this.version)
+                .version(this.version + 1)
                 .source(this.source)
                 .build();
     }
 
     /**
-     * 重新配置 (保持格式版本不变)
+     * 重新配置 (不增加版本号)
      * <p>
-     * 用于 reconfigure flow，只更新数据和配置，不改变格式版本。
+     * 用于 reconfigure flow，只更新数据和配置，不改变修改计数。
      *
      * @param newData 新的配置数据
      * @return 更新后的 ConfigEntry
@@ -231,7 +225,7 @@ public class ConfigEntry {
                 .enabled(newData.enabled)
                 .createTime(this.createTime)
                 .updateTime(DateTimeUtils.now())
-                .version(this.version)  // 保持格式版本不变
+                .version(this.version)
                 .source(this.source)
                 .build();
     }
