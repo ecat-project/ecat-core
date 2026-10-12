@@ -71,7 +71,7 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
         File baseDir = new File(BASE_DIR);
 
         if (!baseDir.exists()) {
-            log.debug("Config entries directory does not exist: {}", BASE_DIR);
+            log.debug("Config entries directory does not exist: {}", baseDir.getAbsolutePath());
             return allEntries;
         }
 
@@ -89,7 +89,7 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
             throw buildVersionOffenceException(versionOffences);
         }
 
-        log.info("Loaded {} config entries from {}", allEntries.size(), BASE_DIR);
+        log.info("Loaded {} config entries from directory {}", allEntries.size(), baseDir.getAbsolutePath());
         if (!skipped.isEmpty()) {
             // 静默丢弃改显式（操作员可见）：entry 文件损坏被跳过 = 配置条目凭空缺额（设备不加载、
             // 数量对不上文件数），必须有一行 ERROR 汇总点名，不能只在「Loaded N」计数里隐没。
@@ -123,7 +123,8 @@ public class YmlConfigEntryPersistence implements ConfigEntryPersistence {
                     .append(" → 位置=").append(offence.cause.getLocation())
                     .append(",实际=").append(offence.cause.getActual()).append('\n');
         }
-        return new ConfigFormatException(BASE_DIR, "正整数(如 1)", actual.toString().trim());
+        return new ConfigFormatException(new File(BASE_DIR).getAbsolutePath(), "正整数(如 1)",
+            actual.toString().trim());
     }
 
     /**

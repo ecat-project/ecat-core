@@ -48,6 +48,21 @@ public class ConfigVersionTest {
     }
 
     @Test
+    public void unstamped3xIntegrationsShapeIsLoadable() {
+        ConfigVersion.requireLoadable3x(null, new java.util.HashMap<String, Object>());
+    }
+
+    @Test
+    public void unstampedFileWithoutIntegrationsRootIsStillRejected() {
+        try {
+            ConfigVersion.requireLoadable3x(null, null);
+            fail("无 integrations 根的无戳文件不是 3.3 结构，必须拒绝");
+        } catch (ConfigFormatException e) {
+            assertEquals("缺失", e.getActual());
+        }
+    }
+
+    @Test
     public void everyOtherShapeIsRejected() {
         for (Object input : REJECTED_INPUTS) {
             try {
@@ -66,7 +81,7 @@ public class ConfigVersionTest {
             fail("无戳必须拒（旧宽门已废止）");
         } catch (ConfigFormatException e) {
             assertEquals("缺失", e.getActual());
-            assertTrue("应明示旧宽门废止", e.getMessage().contains("无戳不视为兼容"));
+            assertTrue("应明示非 3.3 无戳结构不兼容", e.getMessage().contains("无 integrations 根的无戳文件不兼容"));
         }
     }
 

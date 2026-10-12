@@ -79,11 +79,11 @@ public class YmlDevicePersistence implements DevicePersistence {
         List<DeviceRecord> all = new ArrayList<>();
         File dir = new File(baseDir);
         if (!dir.exists()) {
-            log.debug("Devices directory does not exist: {}", baseDir);
+            log.debug("Devices directory does not exist: {}", dir.getAbsolutePath());
             return all;
         }
         loadFromDirectory(dir, all);
-        log.info("Loaded {} device records from {}", all.size(), baseDir);
+        log.info("Loaded {} device records from directory {}", all.size(), dir.getAbsolutePath());
         return all;
     }
 

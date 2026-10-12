@@ -390,8 +390,9 @@ public class IntegrationManagerTest {
     }
 
     @Test
-    public void missingStampRejected() throws Exception {
-        // 现网存量形态：root 无 version 键。旧宽门（无戳视为兼容）已废止。
+    public void unstamped3xIntegrationsShapeLoadsDirectly() throws Exception {
+        // 3.3 存量形态：root 无 version，但保留 integrations 根。读期直接兼容；
+        // 写侧已有独立用例锁定下一次落盘补当前戳。
         Map<String, Object> entry = new HashMap<>();
         entry.put("enabled", true);
         Map<String, Object> integrations = new HashMap<>();
@@ -400,9 +401,19 @@ public class IntegrationManagerTest {
         root.put("integrations", integrations);
         writeIntegrationsYml(root);
 
+        Map<String, Map<String, Object>> loaded = integrationManager.loadIntegrationsConfig();
+        assertTrue("3.3 无戳 integrations.yml 必须直接加载",
+            loaded.get("integrations").containsKey("test:missing"));
+    }
+
+    @Test
+    public void missingStampWithoutIntegrationsRootRejected() throws Exception {
+        Map<String, Object> root = new HashMap<>();
+        writeIntegrationsYml(root);
+
         try {
             integrationManager.loadIntegrationsConfig();
-            fail("无戳必须 fail-closed 拒绝（旧宽门已废止）");
+            fail("无 integrations 根的无戳文件不是 3.3 结构，必须拒绝");
         } catch (ConfigFormatException e) {
             assertTrue("无戳异常应明示缺失", e.getActual().contains("缺失"));
         }
