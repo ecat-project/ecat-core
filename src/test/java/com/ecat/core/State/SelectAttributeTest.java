@@ -16,6 +16,7 @@ import com.ecat.core.I18n.I18nKeyPath;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static org.junit.Assert.*;
@@ -121,6 +122,7 @@ public class SelectAttributeTest {
         TestTools.setPrivateField(attr, "device", mockDevice);
         when(mockDevice.getCore()).thenReturn(mockEcatCore);
         when(mockDevice.isReady()).thenReturn(true);   // 硬门禁：READY 才允许 publish
+        when(mockDevice.getId()).thenReturn("select-device"); // state 构建必需稳定 deviceId
         when(mockEcatCore.getBusRegistry()).thenReturn(mockBusRegistry);
         doNothing().when(mockBusRegistry).publish(any(BusEvent.class));
     }
@@ -217,11 +219,33 @@ public class SelectAttributeTest {
 
     @Test
     public void testSelectOption_SameValue() throws Exception {
-        // 测试selectOption方法，选项与当前值相同
+        // 孤儿 live value 不能代表已提交状态；显式同值选择必须物化 state。
         attr.value = "medium";
+        assertNull(attr.getState());
+        when(mockCallback.apply(any())).thenReturn(CompletableFuture.completedFuture(true));
         CompletableFuture<Boolean> future = attr.selectOption("medium");
         assertTrue(future.get());
-        assertTrue(attr.getDisplayValue().equals("medium"));
+        AttrState<String> state = attr.getState();
+        assertNotNull("孤儿 live value 上的同值选择必须物化 state", state);
+        assertEquals("medium", state.getValue());
+    }
+
+    @Test
+    public void testSelectOption_CommittedSameValueIsIdempotentNoWrite() throws Exception {
+        // 已提交 state 同值才允许 no-op；用计数确认不会再走下游写回调。
+        AtomicInteger writeCount = new AtomicInteger();
+        when(mockCallback.apply(any())).thenAnswer(invocation -> {
+            writeCount.incrementAndGet();
+            return CompletableFuture.completedFuture(true);
+        });
+        assertTrue(attr.selectOption("medium").get());
+        assertNotNull(attr.getState());
+        assertEquals("medium", attr.getState().getValue());
+
+        int writesAfterFirstSelect = writeCount.get();
+        assertTrue(attr.selectOption("medium").get());
+        assertEquals("已提交同值选择不得触发第二次写回调",
+            writesAfterFirstSelect, writeCount.get());
     }
 
     @Test

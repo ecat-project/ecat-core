@@ -218,6 +218,7 @@ public class StringSelectAttributeTest {
     @Test
     public void testSelectOption_SameValue() throws Exception {
         attr.value = "medium";
+        when(mockCallback.apply(any())).thenReturn(CompletableFuture.completedFuture(true));
         CompletableFuture<Boolean> future = attr.selectOption("medium");
         assertTrue(future.get());
         assertEquals("medium", attr.getI18nValue(null));

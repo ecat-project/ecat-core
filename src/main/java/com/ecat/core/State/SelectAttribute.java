@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -219,7 +220,11 @@ public abstract class SelectAttribute<T> extends AttributeBase<T> {
         if (!valueChangeable) {
             return CompletableFuture.completedFuture(false);
         }
-        if (option.equals(value)) {
+
+        // 只有已提交/可见 state 的同值才等价于真正幂等；孤儿 live value 是 init 遗留，
+        // 必须继续走完整写入链，让用户显式选择能物化 AttrState 并发布。
+        AttrState<T> currentState = getState();
+        if (currentState != null && Objects.equals(currentState.getValue(), option)) {
             return CompletableFuture.completedFuture(true);
         }
 
