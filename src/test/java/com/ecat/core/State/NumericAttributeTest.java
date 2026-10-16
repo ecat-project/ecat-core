@@ -51,7 +51,7 @@ public class NumericAttributeTest {
             TestUnit t = (TestUnit) toUnit;
             // 如果单位名不同，视为跨class，抛异常
             if (!t.name.equals(this.name)) throw new RuntimeException("Invalid unit conversion");
-            return t.ratio / this.ratio;
+            return this.ratio / t.ratio;
         }
     }
 
@@ -105,8 +105,8 @@ public class NumericAttributeTest {
         attr.onChangedCallback = mockCallback;
         CompletableFuture<Boolean> future = attr.setDisplayValueImp(10.0, attr.getDisplayUnit());
         assertTrue(future.get());
-        // 10.0 * displayUnit.convertUnit(nativeUnit) = 10.0 * (1.0/2.0) = 5.0
-        assertEquals(Double.valueOf(5.0), attr.getValue());
+        // 10.0 * displayUnit.convertUnit(nativeUnit) = 10.0 * (2.0/1.0) = 20.0
+        assertEquals(Double.valueOf(20.0), attr.getValue());
     }
 
     @Test
@@ -127,8 +127,8 @@ public class NumericAttributeTest {
     public void testGetDisplayValue_SameClass() {
         attr.value = 20.0;
         String displayValue = attr.getDisplayValue(displayUnit);
-        // 20.0 * nativeUnit.convertUnit(displayUnit) = 20.0 * (2.0/1.0) = 40.0
-        assertEquals("40.00", displayValue);
+        // 20.0 * nativeUnit.convertUnit(displayUnit) = 20.0 * (1.0/2.0) = 10.0
+        assertEquals("10.00", displayValue);
     }
 
     @Test
@@ -150,8 +150,8 @@ public class NumericAttributeTest {
     public void testConvertFromUnitImp_SameClass() {
         TestUnit displayUnit2 = new TestUnit("V", 2.0);
         Double result = attr.convertFromUnitImp(10.0, displayUnit2);
-        // 10.0 * displayUnit2.convertUnit(nativeUnit) = 10.0 * (1.0/2.0) = 5.0
-        assertEquals(Double.valueOf(5.0), result);
+        // 10.0 * displayUnit2.convertUnit(nativeUnit) = 10.0 * (2.0/1.0) = 20.0
+        assertEquals(Double.valueOf(20.0), result);
     }
 
     @Test

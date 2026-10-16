@@ -24,8 +24,8 @@ package com.ecat.core.State.Unit;
 public enum AirVolumeUnit implements InternationalizedUnit {
     PPB("ppb", 1000.0), // 十亿分之一
     PPM("ppm", 1000.0 * 1000.0), // 百万分之一
-    UMOL_PER_MOL("μmol/mol", 1000.0), // 微摩尔每摩尔
-    NMOL_PER_MOL("nmol/mol", 1000.0 * 1000.0); // 纳摩尔每摩尔
+    UMOL_PER_MOL("μmol/mol", 1000.0 * 1000.0), // 微摩尔每摩尔，等价 ppm
+    NMOL_PER_MOL("nmol/mol", 1000.0); // 纳摩尔每摩尔，等价 ppb
 
     private final String name;
     private final Double ratio;

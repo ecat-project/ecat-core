@@ -18,7 +18,7 @@ package com.ecat.core.State.Unit;
 
 public enum DistanceUnit implements InternationalizedUnit {
     MM("mm", 1.0), // 毫米
-    CM("cm", 100.0), // 厘米
+    CM("cm", 10.0), // 厘米
     M("m", 1000.0), // 米
     KM("km", 1000000.0); // 千米
 

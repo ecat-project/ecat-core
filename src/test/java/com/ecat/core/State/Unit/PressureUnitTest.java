@@ -51,8 +51,8 @@ public class PressureUnitTest {
 
     @Test
     public void testMmhgRatio() {
-        // 1 mmHg = 133.3223684 Pa (standard torr definition)
-        assertEquals(Double.valueOf(133.3223684), PressureUnit.MMHG.getRatio(), 1e-6);
+        // 1 conventional mmHg = 133.322387415 Pa
+        assertEquals(Double.valueOf(133.322387415), PressureUnit.MMHG.getRatio(), 1e-9);
     }
 
     @Test
@@ -91,8 +91,8 @@ public class PressureUnitTest {
     public void testConvertUnit_MmhgToKpa() {
         // 760 mmHg → kPa (standard atmospheric pressure)
         Double factor = PressureUnit.MMHG.convertUnit(PressureUnit.KPA);
-        assertEquals(0.1333223684, factor, 1e-6);
-        // 760 mmHg = 101.325 kPa
+        assertEquals(0.133322387415, factor, 1e-9);
+        // 760 mmHg = 101.325014435 kPa；与 1 atm 仅差 conventional mmHg/Torr 定义差
         double result = 760.0 * factor;
         assertEquals(101.325, result, 0.001);
     }
@@ -101,7 +101,7 @@ public class PressureUnitTest {
     public void testConvertUnit_KpaToMmhg() {
         // 101.325 kPa → mmHg
         Double factor = PressureUnit.KPA.convertUnit(PressureUnit.MMHG);
-        // 1000 / 133.3223684 ≈ 7.500617
+        // 1000 / 133.322387415 ≈ 7.500616
         double result = 101.325 * factor;
         assertEquals(760.0, result, 0.01);
     }
@@ -111,7 +111,7 @@ public class PressureUnitTest {
         // 760 mmHg → Pa
         Double factor = PressureUnit.MMHG.convertUnit(PressureUnit.PA);
         double result = 760.0 * factor;
-        assertEquals(101325.0, result, 0.01);
+        assertEquals(101325.0, result, 0.02);
     }
 
     @Test
@@ -155,7 +155,7 @@ public class PressureUnitTest {
 
     @Test
     public void testConvertUnit_InhgToMmhg() {
-        // 1 inHg = 25.4 mmHg (exact: 3386.389 / 133.3223684)
+        // 1 inHg = 25.4 mmHg（3386.389 / 133.322387415）
         Double factor = PressureUnit.INHG.convertUnit(PressureUnit.MMHG);
         assertEquals(25.4, factor, 0.01);
         // 29.92 inHg ≈ 760 mmHg (standard atmosphere)
@@ -216,7 +216,7 @@ public class PressureUnitTest {
         double factor = PressureUnit.MMHG.convertUnit(PressureUnit.KPA);
         double displayValue = physicalValue * factor;
         // 760 mmHg ≈ 101.325 kPa (标准大气压)
-        assertEquals(101.325, displayValue, 0.01);
+        assertEquals(101.325, displayValue, 0.02);
     }
 
     @Test

@@ -67,15 +67,15 @@ public class SameUnitClassConverterTest {
      */
     @Test
     public void testDifferentVolumeUnits() {
-        // ppm → μmol/mol (ppm ratio=1000000.0, μmol/mol ratio=1000.0)
+        // ppm → μmol/mol (两者都是 10^-6 摩尔分数)
         SameUnitClassConverter ppmToMol = new SameUnitClassConverter(AirVolumeUnit.PPM, AirVolumeUnit.UMOL_PER_MOL);
         double result = ppmToMol.convert(1.0);
-        assertEquals(1000.0, result, DELTA); // 1 ppm = 1000 μmol/mol
+        assertEquals(1.0, result, DELTA); // 1 ppm = 1 μmol/mol
 
-        // ppb → nmol/mol (ppb ratio=1000.0, nmol/mol ratio=1000000.0)
+        // ppb → nmol/mol (两者都是 10^-9 摩尔分数)
         SameUnitClassConverter ppbToNm = new SameUnitClassConverter(AirVolumeUnit.PPB, AirVolumeUnit.NMOL_PER_MOL);
         double result2 = ppbToNm.convert(1000.0);
-        assertEquals(1.0, result2, DELTA); // 1000 ppb = 1 nmol/mol
+        assertEquals(1000.0, result2, DELTA); // 1000 ppb = 1000 nmol/mol
     }
 
     /**

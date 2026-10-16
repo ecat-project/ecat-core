@@ -66,8 +66,8 @@ public class SameUnitClassConverter implements UnitConversion {
                              targetUnit.getClass().getSimpleName()));
         }
 
-        // 相同单位类转换：使用比例换算
-        return value * sourceUnit.getRatio() / targetUnit.getRatio();
+        // 相同单位类转换：走 UnitInfo 的比例换算；NoConversionUnit 可借此拒绝不同动态单位
+        return value * sourceUnit.convertUnit(targetUnit);
     }
 
     /**

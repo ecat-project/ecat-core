@@ -71,4 +71,16 @@ public class InternationalizedUnitTest {
         // Test a few key categories exist
         assertTrue("Should contain airmass category", expectedCategories.length > 0);
     }
+
+    @Test
+    public void testApparentPowerUnitI18n() {
+        assertEquals("apparent_power", ApparentPowerUnit.VOLT_AMPERE.getUnitCategory());
+        assertEquals("volt_ampere", ApparentPowerUnit.VOLT_AMPERE.getEnumName());
+    }
+
+    @Test
+    public void testReactivePowerUnitI18n() {
+        assertEquals("reactive_power", ReactivePowerUnit.VAR.getUnitCategory());
+        assertEquals("var", ReactivePowerUnit.VAR.getEnumName());
+    }
 }

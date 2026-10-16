@@ -23,7 +23,7 @@ package com.ecat.core.State.Unit;
  */
 public enum RatioUnit implements InternationalizedUnit {
     PERCENT("%", 1.0),         // 百分比
-    PER_MILLE("‰", 10.0);      // 千分比
+    PER_MILLE("‰", 0.1);      // 千分比，1‰ = 0.1%
 
     private final String name;
     private final double ratio;

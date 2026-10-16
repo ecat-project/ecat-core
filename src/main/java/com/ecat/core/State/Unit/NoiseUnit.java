@@ -17,7 +17,7 @@
 package com.ecat.core.State.Unit;
 
 /**
- * 速度单位类
+ * 噪声单位类
  *
  * @author coffee
  */

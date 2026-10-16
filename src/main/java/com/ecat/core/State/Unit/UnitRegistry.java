@@ -65,6 +65,8 @@ public final class UnitRegistry {
             LiterFlowUnit.class,
             NoiseUnit.class,
             PowerUnit.class,
+            ApparentPowerUnit.class,
+            ReactivePowerUnit.class,
             PressureUnit.class,
             RatioUnit.class,
             RotationSpeedUnit.class,

@@ -23,7 +23,16 @@ public class RatioUnitTest {
     @Test
     public void testUnitRatios() {
         assertEquals(Double.valueOf(1.0), RatioUnit.PERCENT.getRatio());
-        assertEquals(Double.valueOf(10.0), RatioUnit.PER_MILLE.getRatio());
+        assertEquals(Double.valueOf(0.1), RatioUnit.PER_MILLE.getRatio());
+    }
+
+    @Test
+    public void testConvertUnit() {
+        assertEquals(Double.valueOf(10.0), RatioUnit.PERCENT.convertUnit(RatioUnit.PER_MILLE));
+        assertEquals(Double.valueOf(0.1), RatioUnit.PER_MILLE.convertUnit(RatioUnit.PERCENT));
+
+        // 12.3% = 123‰
+        assertEquals(123.0, 12.3 * RatioUnit.PERCENT.convertUnit(RatioUnit.PER_MILLE), 0.0001);
     }
 
     @Test

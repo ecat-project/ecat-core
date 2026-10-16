@@ -23,8 +23,7 @@ package com.ecat.core.State.Unit;
  */
 public enum VoltageUnit implements InternationalizedUnit {
     MILLIVOLT("mV", 1.0), // 毫伏
-    VOLT("V", 1.0 * 1000), // 伏特
-    HERTZ("Hz", 1.0); // 赫兹
+    VOLT("V", 1.0 * 1000); // 伏特
 
     private final String name;
     private final Double ratio;

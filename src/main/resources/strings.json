@@ -148,16 +148,20 @@
       },
       "voltage": {
         "millivolt": "mV",
-        "volt": "V",
-        "hertz": "Hz"
+        "volt": "V"
       },
       "power": {
         "milliwatt": "mW",
         "watt": "W",
         "kilowatt": "kW",
         "megawatt": "MW",
-        "gigawatt": "GW",
+        "gigawatt": "GW"
+      },
+      "apparent_power": {
         "volt_ampere": "VA"
+      },
+      "reactive_power": {
+        "var": "var"
       },
       "frequency": {
         "hertz": "Hz",

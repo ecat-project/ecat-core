@@ -10,7 +10,7 @@ import java.util.Set;
 import static org.junit.Assert.*;
 
 /**
- * {@link UnitRegistry} 单元测试:验证登记的 17 个单位类均为 enum 且实现
+ * {@link UnitRegistry} 单元测试:验证登记的 20 个单位类均为 enum 且实现
  * {@link com.ecat.core.State.Unit.InternationalizedUnit}、扁平化常量正确、
  * 排除 NoConversionUnit、返回不可变。
  */
@@ -20,12 +20,14 @@ public class UnitRegistryTest {
     public void allUnitClasses_containsKnownClassesAndIsImmutable() {
         List<Class<? extends UnitInfo>> classes = UnitRegistry.allUnitClasses();
 
-        // 已核实的 18 个 InternationalizedUnit enum 类
-        assertEquals(18, classes.size());
+        // 已核实的 20 个 InternationalizedUnit enum 类
+        assertEquals(20, classes.size());
         assertTrue(classes.contains(VoltageUnit.class));
         assertTrue(classes.contains(AirMassUnit.class));
         assertTrue(classes.contains(AirVolumeUnit.class));
         assertTrue(classes.contains(WeightUnit.class));
+        assertTrue(classes.contains(ApparentPowerUnit.class));
+        assertTrue(classes.contains(ReactivePowerUnit.class));
 
         // 每个登记类都是 enum 且实现 InternationalizedUnit
         for (Class<?> cls : classes) {

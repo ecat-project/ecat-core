@@ -58,6 +58,17 @@ public class NoConversionUnit implements UnitInfo {
     }
 
     @Override
+    public Double convertUnit(UnitInfo desUnitInfo) {
+        if (desUnitInfo == null || !this.equals(desUnitInfo)) {
+            throw new IllegalArgumentException(
+                    "Cannot convert between different no-conversion units: "
+                            + getFullUnitString() + " and "
+                            + (desUnitInfo == null ? "null" : desUnitInfo.getFullUnitString()));
+        }
+        return 1.0;
+    }
+
+    @Override
     public String toString(){
         return getName();
     }

@@ -26,8 +26,7 @@ public enum PowerUnit implements InternationalizedUnit {
     WATT("W", 1.0), // 瓦
     KILOWATT("kW", 1000.0), // 千瓦
     MEGAWATT("MW", 1000000.0), // 兆瓦
-    GIGAWATT("GW", 1000000000.0), // 吉瓦
-    VOLT_AMPERE("VA", 1.0); // 伏特安
+    GIGAWATT("GW", 1000000000.0); // 吉瓦
 
     private final String name;
     private final double ratio;
