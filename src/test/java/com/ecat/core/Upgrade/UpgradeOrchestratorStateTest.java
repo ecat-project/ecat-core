@@ -506,9 +506,9 @@ public class UpgradeOrchestratorStateTest {
         }
     }
 
-    /** 双执行体互斥红测:同一实例双受理→恢复面恰执行一次(单锁串行+执行体重验并发拒绝) */
+    /** 双执行体互斥红测:受理/执行交错不保证第二次仍 ACCEPTED，但恢复面必须恰执行一次 */
     @Test
-    public void dualAcceptance_rollbackFaceExecutedExactlyOnce() throws Exception {
+    public void concurrentAcceptance_rollbackFaceExecutedExactlyOnce() throws Exception {
         enqueuePlan("plan-a", "2026-10-01T08:30:00Z", validUpgradeItem());
         UpgradeOrchestrator orchestrator = rebuildOrchestrator();
         orchestrator.runPreLoadPhase();                   // → LOADING(registry 空)
@@ -516,11 +516,20 @@ public class UpgradeOrchestratorStateTest {
 
         assertEquals(UpgradeOrchestrator.ReceiptState.ACCEPTED,
                 orchestrator.manualRollbackPlan("plan-a").getState());
-        assertEquals("双受理(第二受理在第一执行起跑前到达,受理态校验放行)",
-                UpgradeOrchestrator.ReceiptState.ACCEPTED,
-                orchestrator.manualRollbackPlan("plan-a").getState());
+        try {
+            UpgradeOrchestrator.ReceiptState second =
+                    orchestrator.manualRollbackPlan("plan-a").getState();
+            assertEquals("第二受理若赶在后台执行前，应为 ACCEPTED",
+                    UpgradeOrchestrator.ReceiptState.ACCEPTED, second);
+        } catch (IllegalArgumentException expected) {
+            // 异步受理后的合法交错：后台线程可先置 ROLLING_BACK，甚至已完成终态。
+            // 除这两种显式拒绝外，任何其它异常都表示并发语义漂移，必须红。
+            assertTrue("第二受理只允许状态机显式拒绝，实际=" + expected.getMessage(),
+                    expected.getMessage().contains("回滚进行中,拒绝并发回滚")
+                            || expected.getMessage().contains("终态 plan 不可回滚"));
+        }
 
-        awaitPlanState("plan-a", PlanState.ROLLED_BACK, "双受理收敛终态");
+        awaitPlanState("plan-a", PlanState.ROLLED_BACK, "受理/执行交错收敛终态");
         verify(backupService, times(1)).restoreProgramFace("plan-a");
         assertEquals(InstallationLedgerStore.PlanResult.ROLLED_BACK,
                 ledgerStore.read("plan-a").get().getResult());
