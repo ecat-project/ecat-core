@@ -861,6 +861,14 @@ public class IntegrationManager {
         Map<String, Map<String, Object>> integrationsConfig = loadIntegrationsConfig();
         // 清理 PENDING_REMITTED 集成（已标记为删除的集成）
         cleanupPendingRemovedIntegrations(integrationsConfig);
+
+        // 空启用集（零集成声明或全部清理后为空）= 正常启动形态：纯 core 域最小面
+        // （headless 压测裁剪即此形态）。一行说明防止「看起来没干活」的误判，
+        // 不做任何额外动作——下方加载循环天然空转。
+        Map<String, Object> enabledFace = integrationsConfig.getOrDefault("integrations", new HashMap<>());
+        if (enabledFace.isEmpty()) {
+            log.info("零集成启用（空启用集）——纯 core 域最小面启动，无集成加载");
+        }
         
         List<IntegrationInfo> loadOrder;
         try {
@@ -2366,6 +2374,15 @@ public class IntegrationManager {
                     // 任何读者都不基于不认识的格式行动，更不会把未来格式读-改-写回。唯一读期兼容
                     // 边界是 3.3 存量形态：无戳但必须有 integrations 根；空文件仍无豁免。
                     ConfigVersion.requireLoadable3x(result.get("version"), result.get("integrations"));
+                    // 裸 `integrations:` 键（键在值 null，SnakeYAML 对裸键的产物）归一为空 map：
+                    // 「带当前戳 + 零集成启用」是已证合法边界（手写最小面/峰值压测裁剪，
+                    // bug-record-20261029-091900），而 getOrDefault 对键在值 null 返回存储的
+                    // null 而非默认值，16 处调用点直接 entrySet 即 NPE。键缺席形态本就落
+                    // getOrDefault 默认空 map——两形态在此对齐为同一「零集成声明」语义；
+                    // 归一在版本门之后：3.3 无戳 + 空 root 的 fail-closed 拒绝不受影响。
+                    if (result.get("integrations") == null) {
+                        result.put("integrations", new HashMap<>());
+                    }
                     // 解析前后 stat 一致 → 解析内容确属该戳，可入缓存；不一致说明解析期间文件被原子替换
                     // （读到的是旧或新的完整版本，仍正确），放弃缓存让下一次读重解析，杜绝「戳与内容错配」。
                     FileStatStamp after = stampOf(configFile);
