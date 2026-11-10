@@ -43,6 +43,7 @@ import com.ecat.core.Utils.LoadJarResult;
 import com.ecat.core.Utils.LoadOrderResult;
 import com.ecat.core.Utils.LogFactory;
 import com.ecat.core.Utils.Log;
+import com.ecat.core.Utils.Mdc.LogScope;
 import com.ecat.core.Utils.YamlAtomicFileWriter;
 import com.ecat.core.Utils.Mdc.MdcExecutorService;
 import com.ecat.core.ConfigEntry.ConfigEntry;
@@ -783,23 +784,29 @@ public class IntegrationManager {
                 if (!entry.isEnabled()) {
                     continue;
                 }
-                try {
-                    long entryStartNanos = System.nanoTime();
-                    integration.createEntry(entry);
-                    warnIfCreateEntryBlocking(entry.getEntryId(), coordinate,
-                            System.nanoTime() - entryStartNanos);
-                    log.info("Loaded entry: {} for {}", entry.getEntryId(), coordinate);
-                    if (tracker != null) {
-                        tracker.recordEntryRestored();
-                    }
-                } catch (UnsupportedOperationException e) {
-                    // Integration doesn't support ConfigEntry, skip this integration
-                    log.debug("Integration {} doesn't support ConfigEntry", coordinate);
-                    break;
-                } catch (Exception e) {
-                    log.error("Failed to load entry {}: {}", entry.getEntryId(), e.getMessage());
-                    if (tracker != null) {
-                        tracker.recordFailure(coordinate, "entry:" + entry.getEntryId());
+                // 逐 entry 身份 scope（223801 E3 修复）：循环体（含失败日志）期间 entry.id 入 MDC，
+                // 错误限频签名按受害 entry 分窗——同错误点死的多个 entry 各自首条明细放行、汇总行可
+                // 说出是谁的。本点位是 core logger，ClassLoaderCoordinateFilter 不写 coordinate，
+                // 受害者身份只能来自这里；scope 同时让集成侧回调日志与 CommTrace 白赚 entry.id 归属。
+                try (LogScope entryScope = LogScope.entry(entry.getEntryId())) {
+                    try {
+                        long entryStartNanos = System.nanoTime();
+                        integration.createEntry(entry);
+                        warnIfCreateEntryBlocking(entry.getEntryId(), coordinate,
+                                System.nanoTime() - entryStartNanos);
+                        log.info("Loaded entry: {} for {}", entry.getEntryId(), coordinate);
+                        if (tracker != null) {
+                            tracker.recordEntryRestored();
+                        }
+                    } catch (UnsupportedOperationException e) {
+                        // Integration doesn't support ConfigEntry, skip this integration
+                        log.debug("Integration {} doesn't support ConfigEntry", coordinate);
+                        break;
+                    } catch (Exception e) {
+                        log.error("Failed to load entry {}: {}", entry.getEntryId(), e.getMessage());
+                        if (tracker != null) {
+                            tracker.recordFailure(coordinate, "entry:" + entry.getEntryId());
+                        }
                     }
                 }
             }

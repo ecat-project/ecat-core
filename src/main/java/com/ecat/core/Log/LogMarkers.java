@@ -25,7 +25,8 @@ import org.slf4j.MarkerFactory;
  * <p>历史注记：本类曾预置 LIFECYCLE / COMM 两个通道 marker（lifecycle.log / comm-health.log
  * 按 marker 路由，发射方规划属「后续执行模型阶段」）。该执行模型随传输自持执行终态
  * （19 号 v2）的 W7 引擎整删一并退役——通道、marker 与路由过滤器于 2026-08-28 删除，
- * 断连可见性由各传输 SDK 的断连状态转移行承载。现存的唯一 marker 服务于错误限频汇总行。
+ * 断连可见性由各传输 SDK 的断连状态转移行承载。
+ *
  */
 public final class LogMarkers {
 

@@ -16,12 +16,15 @@
 
 package com.ecat.core.Log;
 
+import com.ecat.core.Utils.Mdc.MdcContext;
+
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.turbo.TurboFilter;
 import ch.qos.logback.core.spi.FilterReply;
 import org.slf4j.Marker;
+import org.slf4j.MDC;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -34,13 +37,16 @@ import java.util.Map;
  * WARN/ERROR 错误限频 TurboFilter（日志预算策略：错误通道预算 ~5MB/日）。
  *
  * <p>同一 logger + 异常签名（throwable 类名 + 顶层栈帧；无异常时消息模板首行 hash）
- * 在 {@value #DEFAULT_WINDOW_MILLIS}ms 窗口内：首次放行（保留全栈），后续在 turbo 层拒绝
- * （格式化之前，零字符串成本）并计数；窗口被下一次同签名事件关闭时补一行汇总
- * 「相同错误再出现 N 次」。实测对照：env-data-handle 同句 WARN 毫秒级三连发无去重，
- * 该模式直接消解。
+ * + <b>身份向量</b>（在场 MDC 身份键按 {@link #IDENTITY_KEYS} 固定序拼接）在
+ * {@value #DEFAULT_WINDOW_MILLIS}ms 窗口内：首次放行（保留全栈），后续在 turbo 层拒绝
+ * （格式化之前，零字符串成本）并计数；每窗至多放行 1 条（窗口过期后的同签名再犯作为新窗
+ * 首条放行）。过期窗口的挂账计数随<b>任意</b> WARN/ERROR 活动搭车清算补一行汇总
+ * 「相同错误再出现 N 次」（TurboFilter 无定时器，搭车是低频重复/静默签名场景下
+ * 「明细与计数不丢」的确定性兜底），槽满淘汰时同样先补汇总再淘汰。汇总行 description
+ * 同带身份向量——「相同错误再出现 N 次」必须能说出是谁的。
  *
- * <p>汇总行自带 {@link LogMarkers#RATE_LIMIT_SUMMARY} marker，本过滤器对它无条件放行：
- * 既防止限频器处理自己发射的事件（递归），也保证汇总自身不受限频。
+ * <p>豁免面（无条件放行，不进窗口）：汇总行自带 {@link LogMarkers#RATE_LIMIT_SUMMARY}
+ * marker——防限频器处理自己发射的事件（递归）。
  *
  * <p>线程安全与内存有界：窗口表由单锁保护（WARN/ERROR 经级别过滤后流量低，竞争可忽略）；
  * 签名槽上限 {@value #DEFAULT_MAX_SIGNATURES}，超限按插入序淘汰最旧签名，被淘汰签名
@@ -56,6 +62,19 @@ public class ErrorRateLimitFilter extends TurboFilter {
 
     /** throwable 栈帧为空时的显式占位（JVM 优化后 getStackTrace 可能为空数组，属合法边界） */
     private static final String NO_FRAME_PLACEHOLDER = "no-frame";
+
+    /**
+     * 签名身份键（固定序，由集成到设备递细化）：同一错误点打在不同受害者身上=不同签名，
+     * 各受害者首条明细都放行（跨集成/跨 entry 同模板互吞的机制级修复）。缺席键跳过，
+     * 全缺=模板级回退（日志点不在任何身份 scope 内的既有行为）。
+     * <b>traceId 永不入签名</b>：它是操作级键（每次请求/重试一新），入签名=每次重试都成
+     * 新签名，限频完全失效——身份键必须是受害者级稳定键。
+     */
+    private static final String[] IDENTITY_KEYS = {
+            MdcContext.INTEGRATION_COORDINATE_KEY,
+            MdcContext.ENTRY_ID_KEY,
+            MdcContext.DEVICE_ID_KEY,
+    };
 
     /** 汇总行签名描述截断长度：保一行可读，防超长消息模板把汇总行放大 */
     private static final int DESCRIPTION_MAX_LENGTH = 160;
@@ -123,22 +142,42 @@ public class ErrorRateLimitFilter extends TurboFilter {
         List<Flush> flushes = new ArrayList<>(1);
         long now = clock.millis();
         synchronized (lock) {
+            // 搭车清算（汇总饥饿兜底）：随任一 WARN/ERROR 活动摘除已过期窗口并补发其挂账计数——
+            // TurboFilter 无定时器，静默签名的「最后一次抑制计数」原本只能等同签名再犯或槽满淘汰，
+            // 低频重复（错误只发生 1-2 次）时明细连带计数一起丢失（223801 E3 形态）。
+            // 过期窗口摘除后，同签名再犯走新窗口首条放行——与既有「过期后重开」语义一致。
+            flushExpiredWindows(flushes, now);
             SignatureWindow window = windows.get(signature.key);
             if (window == null) {
                 evictIfNeeded(flushes);
                 windows.put(signature.key, new SignatureWindow(now, signature.description));
                 pass = true;
-            } else if (now - window.firstMillis < windowMillis) {
+            } else {
+                // 窗口未过期（过期窗已被搭车清算摘除）：预算内抑制计数
                 window.suppressedCount++;
                 pass = false;
-            } else {
-                closeWindow(signature.key, window, flushes);
-                windows.put(signature.key, new SignatureWindow(now, signature.description));
-                pass = true;
             }
         }
         emitFlushes(flushes);
         return pass ? FilterReply.NEUTRAL : FilterReply.DENY;
+    }
+
+    /**
+     * 摘除过期窗口（{@code now - lastPassMillis >= windowMillis}）并补发其待汇报计数。
+     * 每窗生命周期 = 「首条放行 → 窗口内抑制计数 → 过期时（同签名再犯或任意活动搭车）补汇总」，
+     * 每 {@code windowMillis} 至少 1 条实况可见。
+     */
+    private void flushExpiredWindows(List<Flush> flushes, long now) {
+        Iterator<Map.Entry<String, SignatureWindow>> iterator = windows.entrySet().iterator();
+        while (iterator.hasNext()) {
+            SignatureWindow window = iterator.next().getValue();
+            if (now - window.lastPassMillis >= windowMillis) {
+                iterator.remove();
+                if (window.suppressedCount > 0) {
+                    flushes.add(new Flush(window.description, window.suppressedCount));
+                }
+            }
+        }
     }
 
     /** 签名槽满时按插入序淘汰最旧签名；有待汇报计数则先记入 flushes（不静默丢失） */
@@ -153,13 +192,6 @@ public class ErrorRateLimitFilter extends TurboFilter {
         }
     }
 
-    private void closeWindow(String key, SignatureWindow window, List<Flush> flushes) {
-        windows.remove(key);
-        if (window.suppressedCount > 0) {
-            flushes.add(new Flush(window.description, window.suppressedCount));
-        }
-    }
-
     /** 汇总行在锁外发射（logback 调用本身线程安全；避免持锁做 IO） */
     private void emitFlushes(List<Flush> flushes) {
         for (Flush flush : flushes) {
@@ -169,22 +201,50 @@ public class ErrorRateLimitFilter extends TurboFilter {
     }
 
     /**
-     * 签名 = logger 名 + 异常指纹（throwable 类名 + 顶层栈帧；无异常时消息模板首行 hash）。
-     * 用消息模板而非格式化结果：参数（设备 id 等）变化不产生新签名，同一错误点的重复才被合并。
+     * 签名 = logger 名 + 异常指纹（throwable 类名 + 顶层栈帧；无异常时消息模板首行 hash）
+     * + 身份向量（见 {@link #IDENTITY_KEYS}）。
+     * 用消息模板而非格式化结果：参数（设备 id 等）变化不产生新签名——受害者区分交给身份键，
+     * 同一错误点同一受害者的重复才被合并。
      */
     private Signature signatureOf(String loggerName, String format, Throwable t) {
+        Identity identity = identityVector();
         if (t != null) {
             StackTraceElement[] frames = t.getStackTrace();
             String topFrame = frames.length == 0 ? NO_FRAME_PLACEHOLDER
                     : frames[0].getClassName() + ":" + frames[0].getLineNumber();
             return new Signature(
-                    loggerName + "|throwable|" + t.getClass().getName() + "|" + topFrame,
-                    t.getClass().getName() + " @ " + topFrame + " (" + loggerName + ")");
+                    loggerName + "|throwable|" + t.getClass().getName() + "|" + topFrame + identity.keyPart,
+                    identity.readable + t.getClass().getName() + " @ " + topFrame + " (" + loggerName + ")");
         }
         String firstLine = firstLineOf(format);
         return new Signature(
-                loggerName + "|message|" + Integer.toHexString(firstLine.hashCode()),
-                (firstLine.isEmpty() ? "(空消息)" : firstLine) + " (" + loggerName + ")");
+                loggerName + "|message|" + Integer.toHexString(firstLine.hashCode()) + identity.keyPart,
+                identity.readable + (firstLine.isEmpty() ? "(空消息)" : firstLine) + " (" + loggerName + ")");
+    }
+
+    /**
+     * 身份向量：按 {@link #IDENTITY_KEYS} 固定序读在场 MDC 身份键。keyPart（含键名）入签名键，
+     * readable 入汇总行 description。缺席键跳过——身份层级不齐是常态（entry 通知点无 device 键）；
+     * 全缺=两者皆空串，签名退回模板级。readable 前置于 description：截断时身份优先保全，
+     * 「是谁的」不可截掉。
+     */
+    private static Identity identityVector() {
+        StringBuilder keyPart = new StringBuilder();
+        StringBuilder readable = new StringBuilder();
+        for (String identityKey : IDENTITY_KEYS) {
+            String value = MDC.get(identityKey);
+            if (value == null) {
+                continue;
+            }
+            keyPart.append('|').append(identityKey).append('=').append(value);
+            if (readable.length() > 0) {
+                readable.append(", ");
+            }
+            readable.append(identityKey).append('=').append(value);
+        }
+        return new Identity(
+                keyPart.toString(),
+                readable.length() == 0 ? "" : "[" + readable + "] ");
     }
 
     private String firstLineOf(String format) {
@@ -195,14 +255,16 @@ public class ErrorRateLimitFilter extends TurboFilter {
         return newline >= 0 ? format.substring(0, newline) : format;
     }
 
-    /** 限频窗口：首次时间戳 + 待汇报的抑制计数 + 汇总行用的签名描述 */
+    /** 限频窗口：最近一次放行时间戳 + 待汇报的抑制计数 + 汇总行用的签名描述。
+     *  窗口判定锚定 lastPassMillis（每窗放行 1 条后窗口语义刷新），过期窗由
+     *  {@link #flushExpiredWindows} 随任一活动搭车摘除。 */
     private static final class SignatureWindow {
-        private final long firstMillis;
+        private final long lastPassMillis;
         private final String description;
         private int suppressedCount;
 
-        private SignatureWindow(long firstMillis, String description) {
-            this.firstMillis = firstMillis;
+        private SignatureWindow(long lastPassMillis, String description) {
+            this.lastPassMillis = lastPassMillis;
             this.description = description;
         }
     }
@@ -215,6 +277,17 @@ public class ErrorRateLimitFilter extends TurboFilter {
         private Flush(String description, int suppressedCount) {
             this.description = description;
             this.suppressedCount = suppressedCount;
+        }
+    }
+
+    /** 签名身份向量：keyPart（入签名键）+ readable（入汇总行 description 前缀）；全缺时均空串 */
+    private static final class Identity {
+        private final String keyPart;
+        private final String readable;
+
+        private Identity(String keyPart, String readable) {
+            this.keyPart = keyPart;
+            this.readable = readable;
         }
     }
 

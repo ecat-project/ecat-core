@@ -26,6 +26,7 @@ import com.ecat.core.Bus.event.EventContext;
 import com.ecat.core.Utils.DateTimeUtils;
 import com.ecat.core.Utils.Log;
 import com.ecat.core.Utils.LogFactory;
+import com.ecat.core.Utils.Mdc.LogScope;
 
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -452,11 +453,65 @@ public class ConfigEntryRegistry {
     // ==================== Integration 通知方法 ====================
 
     /**
+     * 按坐标取目标集成；core / IntegrationRegistry 未就绪或坐标未注册时返回 null
+     * （前两者是启动期时序常态静默跳过，后者记 debug——调用方按「无接收方」处理）。
+     */
+    private IntegrationBase integrationOf(String coordinate) {
+        if (core == null) {
+            return null;
+        }
+        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
+        if (integrationRegistry == null) {
+            return null;
+        }
+        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        if (integration == null) {
+            log.debug("Integration not found for coordinate: {}", coordinate);
+        }
+        return integration;
+    }
+
+    /**
+     * 集成通知单一通道：entry.id 经 {@link LogScope} 入 MDC（错误限频签名按受害 entry 分窗，
+     * 汇总行能说出是谁的；CommTrace 帧归属同享该键）+ 统一异常分诊：
+     * <ul>
+     *   <li>{@link EntryInUseException}：集成否决删除的控制流信号（如通讯模块仍被具象设备引用），
+     *       原样上抛不包装——中断 removeEntry 后续步骤（缓存移除 + 持久化删除），否则被引用的
+     *       entry 会删成孤儿；</li>
+     *   <li>{@link UnsupportedOperationException}：集成不支持 ConfigEntry，warn 降级；</li>
+     *   <li>其余 {@link Exception}：error 落证据；abortOnFailure=true（create/reconfigure——状态
+     *       已变更须让调用方感知失败）转 {@link EntryNotificationException} 上抛，
+     *       false（remove/disable/enable）按「清理尽力」语义吞掉；</li>
+     *   <li>{@link Throwable}（Error）：原会穿透 HTTP handler（只 catch Exception）→ 请求挂死、
+     *       日志只剩空消息。留全栈证据并转 EntryNotificationException 上抛：流程中止，不再无声假挂。</li>
+     * </ul>
+     */
+    private void notifyWithScope(ConfigEntry entry, String op, boolean abortOnFailure, Runnable action) {
+        String coordinate = entry.getCoordinate();
+        try (LogScope scope = LogScope.entry(entry.getEntryId())) {
+            action.run();
+            log.debug("Notified integration {} to {} entry {}", coordinate, op, entry.getEntryId());
+        } catch (EntryInUseException e) {
+            throw e;
+        } catch (UnsupportedOperationException e) {
+            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Failed to notify integration {} to {} entry {}: {}",
+                    coordinate, op, entry.getEntryId(), e.getMessage(), e);
+            if (abortOnFailure) {
+                throw new EntryNotificationException(entry, coordinate, op, e);
+            }
+        } catch (Throwable t) {
+            log.error("Integration {} {} entry callback threw Error, aborting entry {}",
+                    coordinate, op, entry.getEntryId(), t);
+            throw new EntryNotificationException(entry, coordinate, op, t);
+        }
+    }
+
+    /**
      * 通知 integration 创建 entry
      */
     private void notifyIntegrationCreate(ConfigEntry entry) {
-        if (core == null) return;
-
         // 控制源 entry（IGNORE/UNIGNORE）不触发设备加载——它们是 core 管理的抑制/召回标记，无对应设备
         if (entry.getSource() == SourceType.IGNORE || entry.getSource() == SourceType.UNIGNORE) {
             log.debug("Skip device-load notify for control-source entry: source={}, uniqueId={}",
@@ -464,145 +519,56 @@ public class ConfigEntryRegistry {
             return;
         }
 
-        String coordinate = entry.getCoordinate();
-        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
-        if (integrationRegistry == null) return;
-
-        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        IntegrationBase integration = integrationOf(entry.getCoordinate());
         if (integration == null) {
-            log.debug("Integration not found for coordinate: {}", coordinate);
             return;
         }
-
-        try {
-            integration.createEntry(entry);
-            log.debug("Notified integration {} to create entry {}", coordinate, entry.getEntryId());
-        } catch (UnsupportedOperationException e) {
-            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Failed to notify integration {} to create entry {}: {}",
-                    coordinate, entry.getEntryId(), e.getMessage(), e);
-            throw new EntryNotificationException(entry, coordinate, "create", e);
-        }
+        notifyWithScope(entry, "create", true, () -> integration.createEntry(entry));
     }
 
     /**
      * 通知 integration 重新配置 entry
      */
     private void notifyIntegrationReconfigure(ConfigEntry entry) {
-        if (core == null) return;
-
-        String coordinate = entry.getCoordinate();
-        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
-        if (integrationRegistry == null) return;
-
-        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        IntegrationBase integration = integrationOf(entry.getCoordinate());
         if (integration == null) {
-            log.debug("Integration not found for coordinate: {}", coordinate);
             return;
         }
-
-        try {
-            integration.reconfigureEntry(entry.getEntryId(), entry);
-            log.debug("Notified integration {} to reconfigure entry {}", coordinate, entry.getEntryId());
-        } catch (UnsupportedOperationException e) {
-            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Failed to notify integration {} to reconfigure entry {}: {}",
-                    coordinate, entry.getEntryId(), e.getMessage(), e);
-            throw new EntryNotificationException(entry, coordinate, "reconfigure", e);
-        }
+        notifyWithScope(entry, "reconfigure", true,
+                () -> integration.reconfigureEntry(entry.getEntryId(), entry));
     }
 
     /**
      * 通知 integration 删除 entry
      */
     private void notifyIntegrationRemove(ConfigEntry entry) {
-        if (core == null) return;
-
-        String coordinate = entry.getCoordinate();
-        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
-        if (integrationRegistry == null) return;
-
-        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        IntegrationBase integration = integrationOf(entry.getCoordinate());
         if (integration == null) {
-            log.debug("Integration not found for coordinate: {}", coordinate);
             return;
         }
-
-        try {
-            integration.removeEntry(entry.getEntryId());
-            log.debug("Notified integration {} to remove entry {}", coordinate, entry.getEntryId());
-        } catch (EntryInUseException e) {
-            // 集成否决删除(如通讯模块仍被具象设备引用)——必须向上抛出,中断 removeEntry 后续步骤
-            // (缓存移除 + 持久化删除),否则被引用的 entry 会删成孤儿。其它异常仍按"清理尽力"语义吞掉。
-            throw e;
-        } catch (UnsupportedOperationException e) {
-            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Failed to notify integration {} to remove entry {}: {}",
-                    coordinate, entry.getEntryId(), e.getMessage());
-        } catch (Throwable t) {
-            // Error（SOE/OOM 等）原会穿透 HTTP handler（只 catch Exception）→ 请求挂死、日志只剩空消息。
-            // 留全栈证据并转 EntryNotificationException 上抛：删除中止（entry 保留），不再无声假挂。
-            log.error("Integration {} removeEntry callback threw Error, aborting entry removal {}",
-                    coordinate, entry.getEntryId(), t);
-            throw new EntryNotificationException(entry, coordinate, "remove", t);
-        }
+        notifyWithScope(entry, "remove", false, () -> integration.removeEntry(entry.getEntryId()));
     }
 
     /**
      * 通知 integration 禁用 entry
      */
     private void notifyIntegrationDisable(ConfigEntry entry) {
-        if (core == null) return;
-
-        String coordinate = entry.getCoordinate();
-        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
-        if (integrationRegistry == null) return;
-
-        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        IntegrationBase integration = integrationOf(entry.getCoordinate());
         if (integration == null) {
-            log.debug("Integration not found for coordinate: {}", coordinate);
             return;
         }
-
-        try {
-            integration.disableEntry(entry.getEntryId());
-            log.debug("Notified integration {} to disable entry {}", coordinate, entry.getEntryId());
-        } catch (UnsupportedOperationException e) {
-            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Failed to notify integration {} to disable entry {}: {}",
-                    coordinate, entry.getEntryId(), e.getMessage());
-        }
+        notifyWithScope(entry, "disable", false, () -> integration.disableEntry(entry.getEntryId()));
     }
 
     /**
      * 通知 integration 启用 entry
      */
     private void notifyIntegrationEnable(ConfigEntry entry) {
-        if (core == null) return;
-
-        String coordinate = entry.getCoordinate();
-        IntegrationRegistry integrationRegistry = core.getIntegrationRegistry();
-        if (integrationRegistry == null) return;
-
-        IntegrationBase integration = (IntegrationBase) integrationRegistry.getIntegration(coordinate);
+        IntegrationBase integration = integrationOf(entry.getCoordinate());
         if (integration == null) {
-            log.debug("Integration not found for coordinate: {}", coordinate);
             return;
         }
-
-        try {
-            integration.enableEntry(entry);
-            log.debug("Notified integration {} to enable entry {}", coordinate, entry.getEntryId());
-        } catch (UnsupportedOperationException e) {
-            log.warn("Integration {} doesn't support ConfigEntry: {}", coordinate, e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Failed to notify integration {} to enable entry {}: {}",
-                    coordinate, entry.getEntryId(), e.getMessage());
-        }
+        notifyWithScope(entry, "enable", false, () -> integration.enableEntry(entry));
     }
 
     // ==================== ConfigEntry 生命周期事件发布 ====================
